@@ -235,7 +235,9 @@ export function AppSidebar() {
           />
           <div className="grid flex-1 text-left leading-tight">
             <span className="font-bold text-sm truncate">FBTax Cloud</span>
-            <span className="text-[10px] text-muted-foreground truncate">Tax Reform System</span>
+            <span className="text-[10px] text-muted-foreground truncate">
+              {APP_MODULE === 'apuracao' ? 'Apuração Assistida' : 'Simulador RT'}
+            </span>
           </div>
         </div>
       </SidebarHeader>
