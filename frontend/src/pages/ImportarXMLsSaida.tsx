@@ -1,0 +1,351 @@
+import { useState, useRef, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Upload, FolderOpen, FileText, CheckCircle, AlertCircle, SkipForward } from 'lucide-react';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+interface UploadError {
+  arquivo: string;
+  erro: string;
+}
+
+interface UploadResult {
+  importados: number;
+  ignorados: number;
+  erros: UploadError[];
+}
+
+interface NfeSaidaRow {
+  id: string;
+  chave_nfe: string;
+  modelo: number;
+  serie: string;
+  numero_nfe: string;
+  data_emissao: string;
+  mes_ano: string;
+  nat_op: string;
+  emit_cnpj: string;
+  emit_nome: string;
+  emit_uf: string;
+  dest_cnpj_cpf: string;
+  dest_nome: string;
+  dest_uf: string;
+  dest_c_mun: string;
+  v_prod: number;
+  v_desc: number;
+  v_nf: number;
+  v_bc: number;
+  v_icms: number;
+  v_pis: number;
+  v_cofins: number;
+  v_bc_ibs_cbs: number | null;
+  v_ibs: number | null;
+  v_cbs: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function fmtBRL(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function fmtCNPJ(v: string): string {
+  if (!v || v.length !== 14) return v || '—';
+  return `${v.slice(0,2)}.${v.slice(2,5)}.${v.slice(5,8)}/${v.slice(8,12)}-${v.slice(12)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+export default function ImportarXMLsSaida() {
+  const { token, companyId } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [xmlFiles, setXmlFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const [nfeList, setNfeList] = useState<NfeSaidaRow[]>([]);
+  const [loadingList, setLoadingList] = useState(false);
+  const [filterMes, setFilterMes] = useState('');
+
+  const authHeaders = {
+    Authorization: `Bearer ${token}`,
+    'X-Company-ID': companyId || '',
+  };
+
+  // ── Seleção de pasta / arquivos ──────────────────────────────────────────
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).filter(f =>
+      f.name.toLowerCase().endsWith('.xml')
+    );
+    setXmlFiles(files);
+    setResult(null);
+  }, []);
+
+  // ── Upload ───────────────────────────────────────────────────────────────
+  const handleUpload = async () => {
+    if (xmlFiles.length === 0) {
+      toast.error('Selecione uma pasta com arquivos XML antes de importar.');
+      return;
+    }
+
+    setUploading(true);
+    setResult(null);
+
+    try {
+      const formData = new FormData();
+      xmlFiles.forEach(f => formData.append('xmls', f));
+
+      const res = await fetch('/api/nfe-saidas/upload', {
+        method: 'POST',
+        headers: authHeaders,
+        body: formData,
+      });
+
+      const data: UploadResult = await res.json();
+
+      if (!res.ok) {
+        toast.error('Erro no upload: ' + ((data as unknown as { error: string }).error || res.statusText));
+        return;
+      }
+
+      setResult(data);
+
+      if (data.importados > 0) {
+        toast.success(`${data.importados} NF-e(s) importada(s) com sucesso.`);
+        fetchList();
+      } else if (data.ignorados > 0 && data.importados === 0) {
+        toast.info('Todas as NF-es já estavam importadas (duplicatas ignoradas).');
+      }
+
+      if (data.erros && data.erros.length > 0) {
+        toast.warning(`${data.erros.length} arquivo(s) com erro — veja detalhes abaixo.`);
+      }
+    } catch (err: unknown) {
+      toast.error('Erro inesperado: ' + String(err));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // ── Buscar lista ─────────────────────────────────────────────────────────
+  const fetchList = async (mes?: string) => {
+    setLoadingList(true);
+    try {
+      const params = new URLSearchParams();
+      const mesFilter = mes ?? filterMes;
+      if (mesFilter) params.set('mes_ano', mesFilter);
+
+      const res = await fetch(`/api/nfe-saidas?${params}`, { headers: authHeaders });
+      if (!res.ok) throw new Error(res.statusText);
+      const data = await res.json();
+      setNfeList(data.items || []);
+    } catch (err: unknown) {
+      toast.error('Erro ao carregar lista: ' + String(err));
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  const handleFilterMes = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFilterMes(e.target.value);
+  };
+
+  const handleFilterSearch = () => fetchList(filterMes);
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Importar XMLs de Saída</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Importe NF-e (mod. 55) e NFC-e (mod. 65) de saída a partir de arquivos XML.
+          Selecione a pasta e clique em Importar.
+        </p>
+      </div>
+
+      {/* ── Card de upload ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FolderOpen className="h-4 w-4" />
+            Selecionar pasta de XMLs
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Input oculto com suporte a pasta */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            // @ts-expect-error webkitdirectory não está no tipo padrão
+            webkitdirectory=""
+            multiple
+            accept=".xml"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+
+          <div className="flex items-center gap-3 flex-wrap">
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+            >
+              <FolderOpen className="h-4 w-4 mr-2" />
+              Selecionar Pasta
+            </Button>
+
+            {xmlFiles.length > 0 && (
+              <span className="text-sm text-muted-foreground">
+                <FileText className="h-4 w-4 inline mr-1" />
+                {xmlFiles.length} arquivo(s) .xml encontrado(s)
+              </span>
+            )}
+
+            <Button
+              onClick={handleUpload}
+              disabled={uploading || xmlFiles.length === 0}
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              {uploading ? 'Importando...' : 'Importar'}
+            </Button>
+          </div>
+
+          {/* ── Resultado do upload ── */}
+          {result && (
+            <div className="rounded-lg border p-4 space-y-3">
+              <div className="flex gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  <span className="text-sm font-medium">Importados:</span>
+                  <Badge variant="default" className="bg-green-600">{result.importados}</Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <SkipForward className="h-4 w-4 text-yellow-600" />
+                  <span className="text-sm font-medium">Ignorados (duplicatas):</span>
+                  <Badge variant="secondary">{result.ignorados}</Badge>
+                </div>
+                {result.erros.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 text-red-600" />
+                    <span className="text-sm font-medium">Erros:</span>
+                    <Badge variant="destructive">{result.erros.length}</Badge>
+                  </div>
+                )}
+              </div>
+
+              {result.erros.length > 0 && (
+                <div className="text-xs space-y-1 max-h-40 overflow-auto">
+                  {result.erros.map((e, i) => (
+                    <div key={i} className="text-red-600">
+                      <span className="font-medium">{e.arquivo}:</span> {e.erro}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Card de listagem ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <CardTitle className="text-base">NF-e Saídas Importadas</CardTitle>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                placeholder="MM/YYYY"
+                value={filterMes}
+                onChange={handleFilterMes}
+                className="h-8 w-28 rounded-md border border-input bg-background px-3 py-1 text-sm"
+              />
+              <Button size="sm" variant="outline" onClick={handleFilterSearch} disabled={loadingList}>
+                {loadingList ? 'Buscando...' : 'Buscar'}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {nfeList.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">
+              {loadingList
+                ? 'Carregando...'
+                : 'Nenhuma NF-e importada. Faça uma importação ou filtre por Mês/Ano.'}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Mod</TableHead>
+                    <TableHead>Série/Nº</TableHead>
+                    <TableHead>Data</TableHead>
+                    <TableHead>Emitente</TableHead>
+                    <TableHead>UF</TableHead>
+                    <TableHead>Destinatário</TableHead>
+                    <TableHead>Mun. IBGE</TableHead>
+                    <TableHead className="text-right">vProd</TableHead>
+                    <TableHead className="text-right">vNF</TableHead>
+                    <TableHead className="text-right">vBC / vICMS</TableHead>
+                    <TableHead className="text-right">vBCIBSCBS</TableHead>
+                    <TableHead className="text-right">vIBS</TableHead>
+                    <TableHead className="text-right">vCBS</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {nfeList.map(row => (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        <Badge variant="outline">{row.modelo}</Badge>
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {row.serie}/{row.numero_nfe}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">{row.data_emissao}</TableCell>
+                      <TableCell>
+                        <div className="font-medium text-xs">{row.emit_nome}</div>
+                        <div className="text-muted-foreground text-xs">{fmtCNPJ(row.emit_cnpj)}</div>
+                      </TableCell>
+                      <TableCell>{row.emit_uf}</TableCell>
+                      <TableCell>
+                        <div className="text-xs">{row.dest_nome}</div>
+                        <div className="text-muted-foreground text-xs">{fmtCNPJ(row.dest_cnpj_cpf)}</div>
+                      </TableCell>
+                      <TableCell className="text-xs">{row.dest_c_mun || '—'}</TableCell>
+                      <TableCell className="text-right text-xs">{fmtBRL(row.v_prod)}</TableCell>
+                      <TableCell className="text-right text-xs font-medium">{fmtBRL(row.v_nf)}</TableCell>
+                      <TableCell className="text-right text-xs">
+                        <div>{fmtBRL(row.v_bc)}</div>
+                        <div className="text-muted-foreground">{fmtBRL(row.v_icms)}</div>
+                      </TableCell>
+                      <TableCell className="text-right text-xs">{fmtBRL(row.v_bc_ibs_cbs)}</TableCell>
+                      <TableCell className="text-right text-xs">{fmtBRL(row.v_ibs)}</TableCell>
+                      <TableCell className="text-right text-xs">{fmtBRL(row.v_cbs)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -1,0 +1,242 @@
+version: '3.8'
+
+services:
+  # Backend (Go) - Production
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: production
+    container_name: fb_apu01-api-prod
+    restart: always
+    ports:
+      - "8081:8081"
+    expose:
+      - "8081"
+    environment:
+      - PORT=8081
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?sslmode=require
+      - REDIS_ADDR=redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM=${SMTP_FROM}
+      - APP_URL=${APP_URL:-https://fbtax.cloud}
+      - BACKUP_ENABLED=true
+      - BACKUP_SCHEDULE=0 2 * * *
+      - BACKUP_RETENTION_DAYS=30
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - api_uploads:/root/uploads
+      - backup_storage:/opt/fb_apu01/backups
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - fb_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Frontend (React) - Production
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: fb_apu01-web-prod
+    restart: always
+    expose:
+      - "80"
+    environment:
+      - VITE_API_URL=https://api.fbtax.cloud
+      - VITE_APP_VERSION=production
+    depends_on:
+      - api
+    networks:
+      - fb_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.web.rule=Host(`www.fbtax.cloud`, `fbtax.cloud`)"
+      - "traefik.http.routers.web.entrypoints=websecure"
+      - "traefik.http.routers.web.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.web.middlewares=compress"
+      - "traefik.http.middlewares.compress.compress=true"
+      - "traefik.http.services.web.loadbalancer.server.port=80"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+  # Banco de Dados - Production
+  db:
+    image: postgres:15-alpine
+    container_name: fb_apu01-db-prod
+    restart: always
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - backup_storage:/opt/fb_apu01/backups
+    networks:
+      - fb_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+
+  # Redis - Production
+  redis:
+    image: redis:7-alpine
+    container_name: fb_apu01-redis-prod
+    restart: always
+    sysctls:
+      - net.core.somaxconn=1024
+    volumes:
+      - redis_data:/data
+    networks:
+      - fb_net
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+  # Monitoring - Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: fb_apu01-prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - fb_net
+
+  # Monitoring - Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: fb_apu01-grafana
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - fb_net
+
+  # Backup Automation
+  backup:
+    image: postgres:15-alpine
+    container_name: fb_apu01-backup
+    restart: "no"
+    environment:
+      - PGPASSWORD=${DB_PASSWORD}
+    volumes:
+      - backup_storage:/opt/fb_apu01/backups
+      - ./scripts/backup_production.sh:/scripts/backup.sh
+    networks:
+      - fb_net
+    command: >
+      sh -c "
+        echo '0 2 * * * cd /scripts && ./backup.sh' > /etc/crontabs/root
+        crond -f
+      "
+    depends_on:
+      - db
+
+networks:
+  fb_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data_prod:
+    driver: local
+  redis_data:
+    driver: local
+  api_uploads:
+    driver: local
+  backup_storage:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

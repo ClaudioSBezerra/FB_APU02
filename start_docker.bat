@@ -1,0 +1,13 @@
+@echo off
+echo Parando containers antigos...
+docker compose --env-file .env.FB_APU01 down --remove-orphans
+
+echo Removendo imagens antigas para forcar rebuild...
+docker rmi fb_apu01-api fb_apu01-web
+
+echo Construindo e iniciando containers (Force Rebuild)...
+docker compose --env-file .env.FB_APU01 up -d --build --force-recreate
+
+echo.
+echo Containers started. Attaching to backend logs (Service: api)...
+docker compose --env-file .env.FB_APU01 logs -f api

@@ -1,0 +1,46 @@
+node_modules/
+dist/
+backend/server
+.env
+.DS_Store
+# Uploads
+backend/uploads/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node
+node_modules/
+dist/
+build/
+
+# Go
+backend/server
+*.exe
+*.test
+
+# Env
+.env
+.env.local
+backend/.env
+docker-compose.override.yml
+docker-compose.override.yml
+
+# Backups
+backups/
+*.dump
+*.bak
+
+# Temporary
+temp_lovable_analysis/

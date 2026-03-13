@@ -1,0 +1,81 @@
+# Coolify Production Environment Variables Template
+# FB_APU01 - Sistema de Reforma Tributária
+# VERSÃO: 5.5.0
+
+# ========================================
+# APPLICATION SETTINGS
+# ========================================
+PORT=8081
+ENVIRONMENT=production
+LOG_LEVEL=info
+JWT_SECRET=change-me-super-secure-jwt-secret-2026
+
+# ========================================
+# DATABASE (Hostinger PostgreSQL)
+# ========================================
+DB_HOST=your-hostinger-postgres-host
+DB_PORT=5432
+DB_USER=your_db_user
+DB_PASSWORD=your_secure_db_password
+DB_NAME=fiscal_db_prod
+DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=require
+
+# ========================================
+# REDIS (If using external Redis)
+# ========================================
+REDIS_HOST=your-redis-host
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+REDIS_ADDR=${REDIS_HOST}:${REDIS_PORT}
+
+# ========================================
+# SMTP - EMAIL (Hostinger)
+# ========================================
+SMTP_HOST=smtp.hostinger.com
+SMTP_PORT=465
+SMTP_USER=contato@fortesbezerra.com.br
+SMTP_PASSWORD=your_smtp_password_here
+SMTP_FROM=FBTax Cloud <contato@fortesbezerra.com.br>
+APP_URL=https://fbtax.cloud
+
+# ========================================
+# Z.AI GLM API - Relatorios Executivos com IA
+# ========================================
+ZAI_API_KEY=your_zai_api_key_here
+
+# ========================================
+# RECEITA FEDERAL - API CBS/IBS
+# ========================================
+RFB_API_URL=https://api.receitafederal.gov.br
+RFB_TOKEN_URL=https://api.receitafederal.gov.br/token
+RFB_WEBHOOK_URL=https://fbtax.cloud/api/rfb/webhook
+
+# ========================================
+# SECURITY
+# ========================================
+CORS_ORIGINS=https://fbtax.cloud,https://www.fbtax.cloud
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW=1m
+SESSION_TIMEOUT=24h
+AUDIT_LOGS=true
+
+# ========================================
+# COOLIFY INTEGRATION
+# ========================================
+HEALTH_CHECK_INTERVAL=30s
+METRICS_ENABLED=true
+
+# ========================================
+# HOSTINGER SPECIFIC
+# ========================================
+STATIC_FILES_PATH=/app/static
+UPLOAD_PATH=/app/uploads
+BACKUP_ENABLED=true
+BACKUP_RETENTION_DAYS=30
+
+# ========================================
+# DEVELOPMENT (COMMENT OUT IN PRODUCTION)
+# ========================================
+# DEBUG=false
+# VERBOSE_LOGS=false

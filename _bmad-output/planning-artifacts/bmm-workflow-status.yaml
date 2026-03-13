@@ -1,0 +1,113 @@
+# Workflow Status Template
+
+# This tracks progress through BMM methodology Analysis, Planning, and Solutioning phases.
+# Implementation phase is tracked separately in sprint-status.yaml
+
+# STATUS DEFINITIONS:
+# ==================
+# Initial Status (before completion):
+#   - required: Must be completed to progress
+#   - optional: Can be completed but not required
+#   - recommended: Strongly suggested but not required
+#   - conditional: Required only if certain conditions met (e.g., if_has_ui)
+#
+# Completion Status:
+#   - {file-path}: File created/found (e.g., "docs/product-brief.md")
+#   - skipped: Optional/conditional workflow that was skipped
+
+generated: "2026-02-10"
+updated: "2026-02-12"
+project: "FB_APU01"
+project_type: "SaaS multi-tenant para apuração de IBS/CBS - FASE 2 do fbtax.cloud"
+selected_track: "enterprise"
+field_type: "brownfield"
+workflow_path: "/home/claudiobezerra/projetos/FB_APU01/_bmad/bmm/workflows/workflow-status/paths/enterprise-brownfield.yaml"
+workflow_status:
+  # PHASE 0: Documentation (Conditional - brownfield)
+  - phase: "0"
+    name: "Documentation"
+    id: "document-project"
+    status: "docs/FASE_01_DOCUMENTACAO_COMPLETA.md"
+    note: "FASE 1 documentation complete. FASE 2 docs in progress."
+    agent: "analyst"
+    command: "/bmad:bmm:workflows:document-project"
+
+  # PHASE 1: Analysis (Optional - Discovery)
+  - phase: "1"
+    name: "Analysis (Optional)"
+    workflows:
+      - id: "brainstorm-project"
+        status: "_bmad-output/analysis/brainstorming-session-2026-02-10.md"
+        note: "Question Storming: 1.200+ perguntas sobre NF-e, NFC-e, NFS-e, CT-e"
+        agent: "analyst"
+        command: "/bmad:cis:workflows:brainstorming"
+      - id: "research"
+        status: "required"
+        note: "Research on NT 2025.002, RFB norms, ERP integration strategies"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:research"
+
+  # PHASE 2: Planning (Required)
+  - phase: "2"
+    name: "Planning"
+    workflows:
+      - id: "prd-multi-tenancy"
+        status: "_bmad-output/planning-artifacts/prd-multi-tenancy.md"
+        note: "PRD Multi-Tenancy: 5 FRs + 4 NFRs - Status: Proposed"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:prd"
+      - id: "prd-motor-apuracao"
+        status: "required"
+        note: "PRD Motor de Apuração IBS/CBS - Pending"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:prd"
+      - id: "create-ux-design"
+        status: "conditional"
+        note: "if_has_ui - Determine after PRDs complete"
+        agent: "ux-designer"
+        command: "/bmad:bmm:workflows:create-ux-design"
+
+  # PHASE 3: Solutioning (Required)
+  - phase: "3"
+    name: "Solutioning"
+    workflows:
+      - id: "architecture-multi-tenancy"
+        status: "_bmad-output/planning-artifacts/architecture-multi-tenancy.md"
+        note: "11 ADRs: RLS, JWT, desnormalizacao, planos, audit - Status: Proposed"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:create-architecture"
+      - id: "architecture-motor-apuracao"
+        status: "required"
+        note: "Architecture for Rule Engine, Captura, Conciliação - Pending"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:create-architecture"
+      - id: "epics-multi-tenancy"
+        status: "_bmad-output/planning-artifacts/epics-multi-tenancy.md"
+        note: "5 epics, 20 stories with BDD acceptance criteria - Status: Proposed"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:create-epics-and-stories"
+      - id: "epics-motor-apuracao"
+        status: "required"
+        note: "Epics for captura, conciliação, validação - Pending"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:create-epics-and-stories"
+      - id: "test-design"
+        status: "recommended"
+        note: "System-level testability review for multi-tenancy + motor"
+        agent: "tea"
+        command: "/bmad:bmm:workflows:testarch-test-design"
+      - id: "implementation-readiness"
+        status: "required"
+        note: "Validates all PRDs + Architecture + Epics before implementation"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:check-implementation-readiness"
+
+  # PHASE 4: Implementation (Required)
+  - phase: "4"
+    name: "Implementation"
+    workflows:
+      - id: "sprint-planning"
+        status: "pending"
+        note: "Creates sprint plan - subsequent work tracked there"
+        agent: "sm"
+        command: "/bmad:bmm:workflows:sprint-planning"

@@ -1,0 +1,66 @@
+# FB_APU02 - DOCKERFILE PARA PRODUÇÃO (COOLIFY)
+# Módulo: Apuração Assistida + Receita Federal
+# Fluxo: GitHub → Coolify → Hostinger
+
+# Build stage
+FROM node:18-alpine AS frontend-builder
+WORKDIR /app/frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+ARG VITE_APP_MODULE=apuracao
+ENV VITE_APP_MODULE=$VITE_APP_MODULE
+RUN npm run build
+
+# Backend stage
+FROM golang:1.22-alpine AS backend-builder
+WORKDIR /app/backend
+
+RUN apk add --no-cache git
+
+COPY backend/ ./
+COPY backend/go.mod backend/go.sum ./
+
+RUN go mod download
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -a -installsuffix cgo \
+    -o fb_apu01-api main.go
+
+# Production stage
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates curl tzdata postgresql-client
+
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
+RUN ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime
+
+WORKDIR /app
+
+COPY --from=backend-builder /app/backend/fb_apu01-api .
+COPY --from=frontend-builder /app/frontend/dist ./static
+COPY backend/migrations ./migrations
+
+RUN mkdir -p /app/uploads /app/logs /app/backups && \
+    chown -R appuser:appgroup /app
+
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8081/api/health || exit 1
+
+EXPOSE 8081
+
+ENV APP_MODULE=apuracao
+
+CMD ["./fb_apu01-api"]
+
+LABEL maintainer="FB_APU01 Team"
+LABEL version="5.9.11"
+LABEL description="Sistema de Apuração Assistida + Receita Federal"
+LABEL com.coolify.image=true

@@ -1,0 +1,22 @@
+server:
+  port: 8080
+  mode: "development"
+
+database:
+  driver: "postgres"
+  max_connections: 20
+  idle_connections: 5
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+
+import_rules:
+  batch_size: 100
+  allowed_extensions: [".txt", ".xml"]
+  max_file_size_mb: 500
+
+features:
+  async_processing: true
+  audit_logs: true
