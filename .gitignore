@@ -44,3 +44,5 @@ backups/
 
 # Temporary
 temp_lovable_analysis/
+# Claude Code local state
+.claude/
