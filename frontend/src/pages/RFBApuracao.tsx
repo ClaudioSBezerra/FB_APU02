@@ -184,7 +184,7 @@ export default function RFBApuracao() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
   }
@@ -249,7 +249,7 @@ export default function RFBApuracao() {
                   <div key={req.id} className="rounded-lg border overflow-hidden">
                     <div className="flex items-center justify-between p-4">
                       <div className="flex items-center gap-3">
-                        {isPending && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 shrink-0" />}
+                        {isPending && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary shrink-0" />}
                         {req.status === 'completed' && <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />}
                         {req.status === 'error' && <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />}
                         <div>

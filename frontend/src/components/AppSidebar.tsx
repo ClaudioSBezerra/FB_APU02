@@ -2,15 +2,11 @@ import {
   Table,
   Users,
   Building,
-  FileSpreadsheet,
-  ShoppingCart,
-  LayoutDashboard,
   FileText,
   Upload,
   Download,
   LogOut,
   Store,
-  Sparkles,
   CreditCard,
   Wallet,
   Truck,
@@ -18,10 +14,8 @@ import {
   BarChart3,
   Tag,
   ShieldAlert,
-  Search,
   ChevronDown,
   Settings,
-  TrendingUp,
   FolderInput,
   Calculator,
   Landmark,
@@ -74,7 +68,6 @@ interface NavSection {
   title: string;
   sectionIcon: React.ElementType;
   adminOnly?: boolean;
-  appModule?: 'simulador' | 'apuracao';
   items: NavItem[];
 }
 
@@ -98,48 +91,32 @@ const sections: NavSection[] = [
     ],
   },
   {
-    id: "simulador",
-    title: "Simulador da Reforma Tributária",
-    sectionIcon: TrendingUp,
-    appModule: 'simulador',
-    items: [
-      { title: "Importar SPEDs",              url: "/importar-efd",                    icon: FileSpreadsheet },
-      { title: "Operações Comerciais",         url: "/mercadorias",                     icon: ShoppingCart },
-      { title: "Operações Simples Nacional",   url: "/operacoes/simples",               icon: Store },
-      { title: "Dashboard Reforma",            url: "/dashboards",                      icon: LayoutDashboard },
-      { title: "Resumo Executivo IA",          url: "/relatorios/resumo-executivo",     icon: Sparkles },
-      { title: "Consulta Inteligente",         url: "/relatorios/consulta-inteligente", icon: Search },
-    ],
-  },
-  {
     id: "importar",
-    title: "Apuração Assistida — Importar",
+    title: "Importar XMLs",
     sectionIcon: FolderInput,
     adminOnly: true,
-    appModule: 'apuracao',
     items: [
-      { title: "Entradas Mod. 55",        url: "/apuracao/entrada",  icon: Upload },
-      { title: "Saídas Mod. 55/65",       url: "/apuracao/saida",    icon: Upload },
-      { title: "Serviços — Entradas",     url: "#",                       icon: Upload, disabled: true },
-      { title: "Serviços — Saídas",       url: "#",                       icon: Upload, disabled: true },
-      { title: "CT-e — Entradas",         url: "/apuracao/cte-entrada",   icon: Upload },
+      { title: "Entradas Mod. 55",    url: "/apuracao/entrada",     icon: Upload },
+      { title: "Saídas Mod. 55/65",   url: "/apuracao/saida",       icon: Upload },
+      { title: "CT-e — Entradas",     url: "/apuracao/cte-entrada", icon: Upload },
+      { title: "Serviços — Entradas", url: "#",                     icon: Upload, disabled: true },
+      { title: "Serviços — Saídas",   url: "#",                     icon: Upload, disabled: true },
     ],
   },
   {
-    id: "consultar",
-    title: "Apuração Assistida",
+    id: "apuracao",
+    title: "Apuração IBS / CBS",
     sectionIcon: Calculator,
     adminOnly: true,
-    appModule: 'apuracao',
     items: [
-      { title: "Entradas Mod. 55",        url: "/apuracao/entrada/notas",     icon: FileText },
-      { title: "Saídas Mod. 55/65",       url: "/apuracao/saida/notas",       icon: FileText },
-      { title: "Serviços — Entradas",     url: "#",                                   icon: FileText, disabled: true },
-      { title: "Serviços — Saídas",       url: "#",                                   icon: FileText, disabled: true },
-      { title: "CT-e — Entradas",         url: "/apuracao/cte-entrada/notas",         icon: FileText },
-      { title: "Créditos em Risco",       url: "/apuracao/creditos-perdidos",  icon: ShieldAlert, danger: true },
-      { title: "Apuração IBS — mês",      url: "/rfb/apuracao-ibs",            icon: BarChart3 },
-      { title: "Apuração CBS — mês",      url: "/rfb/apuracao-cbs",            icon: BarChart3 },
+      { title: "Entradas Mod. 55",    url: "/apuracao/entrada/notas",     icon: FileText },
+      { title: "Saídas Mod. 55/65",   url: "/apuracao/saida/notas",       icon: FileText },
+      { title: "CT-e — Entradas",     url: "/apuracao/cte-entrada/notas", icon: FileText },
+      { title: "Serviços — Entradas", url: "#",                           icon: FileText, disabled: true },
+      { title: "Serviços — Saídas",   url: "#",                           icon: FileText, disabled: true },
+      { title: "Créditos em Risco",   url: "/apuracao/creditos-perdidos", icon: ShieldAlert, danger: true },
+      { title: "Apuração IBS — mês",  url: "/rfb/apuracao-ibs",          icon: BarChart3 },
+      { title: "Apuração CBS — mês",  url: "/rfb/apuracao-cbs",          icon: BarChart3 },
     ],
   },
   {
@@ -147,15 +124,14 @@ const sections: NavSection[] = [
     title: "Receita Federal",
     sectionIcon: Landmark,
     adminOnly: true,
-    appModule: 'apuracao',
     items: [
-      { title: "Demo Gestão de apuração IBS/CBS", url: "/rfb/gestao-creditos",         icon: BarChart3 },
-      { title: "Importação dos débitos CBS",     url: "/rfb/apuracao",                icon: Download },
-      { title: "Débitos mês corrente",           url: "/rfb/debitos",                 icon: FileText },
-      { title: "Créditos CBS — mês corrente",    url: "/rfb/creditos-cbs",            icon: CreditCard,  disabled: true },
-      { title: "Pagamentos CBS — mês corrente",  url: "/rfb/pagamentos-cbs",          icon: Wallet,      disabled: true },
-      { title: "Pgtos CBS a Fornecedores",       url: "/rfb/pagamentos-fornecedores", icon: Truck,       disabled: true },
-      { title: "Concluir apuração mês ant.",     url: "/rfb/concluir-apuracao",       icon: CheckCircle, disabled: true },
+      { title: "Gestão IBS/CBS",              url: "/rfb/gestao-creditos",         icon: BarChart3 },
+      { title: "Importar débitos CBS",        url: "/rfb/apuracao",                icon: Download },
+      { title: "Débitos mês corrente",        url: "/rfb/debitos",                 icon: FileText },
+      { title: "Créditos CBS — mês",          url: "/rfb/creditos-cbs",            icon: CreditCard,  disabled: true },
+      { title: "Pagamentos CBS — mês",        url: "/rfb/pagamentos-cbs",          icon: Wallet,      disabled: true },
+      { title: "Pgtos CBS a Fornecedores",    url: "/rfb/pagamentos-fornecedores", icon: Truck,       disabled: true },
+      { title: "Concluir apuração mês ant.",  url: "/rfb/concluir-apuracao",       icon: CheckCircle, disabled: true },
     ],
   },
 ]
@@ -163,8 +139,6 @@ const sections: NavSection[] = [
 // ---------------------------------------------------------------------------
 // AppSidebar
 // ---------------------------------------------------------------------------
-const APP_MODULE = (import.meta.env.VITE_APP_MODULE as string) || 'all'
-
 export function AppSidebar() {
   const location = useLocation()
   const { user, company, logout, token } = useAuth()
@@ -236,7 +210,7 @@ export function AppSidebar() {
           <div className="grid flex-1 text-left leading-tight">
             <span className="font-bold text-sm truncate">FBTax Cloud</span>
             <span className="text-[10px] text-muted-foreground truncate">
-              {APP_MODULE === 'apuracao' ? 'Apuração Assistida' : 'Simulador RT'}
+              Apuração Assistida
             </span>
           </div>
         </div>
@@ -246,7 +220,6 @@ export function AppSidebar() {
       <SidebarContent>
         {sections.map((section) => {
           if (section.adminOnly && !isAdmin) return null
-          if (section.appModule && APP_MODULE !== 'all' && section.appModule !== APP_MODULE) return null
           const visibleItems = section.items.filter(
             (item) => !item.adminOnly || isAdmin
           )
@@ -289,7 +262,7 @@ export function AppSidebar() {
                         >
                           <item.icon className="h-4 w-4 shrink-0" />
                           <span className="text-xs">{item.title}</span>
-                          <span className="ml-auto text-[9px] bg-muted text-muted-foreground px-1 py-0.5 rounded font-normal">
+                          <span className="ml-auto text-[9px] bg-sidebar-accent text-sidebar-foreground/50 px-1 py-0.5 rounded font-normal">
                             dev
                           </span>
                         </SidebarMenuButton>
@@ -330,11 +303,11 @@ export function AppSidebar() {
       <SidebarFooter className="border-t">
         {user && (
           <div className="p-2">
-            <div className="flex flex-col gap-1 px-2 py-2 bg-sidebar-accent/60 rounded-lg">
-              <p className="text-[10px] italic truncate text-muted-foreground leading-tight">
+            <div className="flex flex-col gap-1 px-2 py-2 bg-sidebar-accent rounded-lg">
+              <p className="text-[10px] italic truncate text-sidebar-foreground/60 leading-tight">
                 {company || "Empresa não identificada"}
               </p>
-              <p className="text-xs font-medium truncate leading-tight">{user.full_name}</p>
+              <p className="text-xs font-medium truncate leading-tight text-sidebar-foreground">{user.full_name}</p>
               <div className="flex items-center gap-1.5">
                 <span className="bg-yellow-100 text-yellow-700 border border-yellow-200 px-1.5 py-0.5 rounded text-[9px] font-medium">
                   Vence: {new Date(user.trial_ends_at).toLocaleDateString("pt-BR")}
@@ -342,19 +315,19 @@ export function AppSidebar() {
                 <button
                   onClick={() => setPwDialog(true)}
                   title="Trocar senha"
-                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  className="text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors"
                 >
                   <KeyRound className="h-3 w-3" />
                 </button>
               </div>
-              <div className="mt-1 pt-1 border-t border-muted-foreground/20 flex flex-col gap-0.5">
+              <div className="mt-1 pt-1 border-t border-sidebar-border flex flex-col gap-0.5">
                 <FilialSelector />
                 <CompanySwitcher compact />
               </div>
               <Button
                 variant="ghost"
                 size="sm"
-                className="w-full justify-start h-7 px-1 text-muted-foreground hover:text-foreground mt-0.5"
+                className="w-full justify-start h-7 px-1 text-sidebar-foreground/60 hover:text-sidebar-foreground mt-0.5"
                 onClick={logout}
               >
                 <LogOut className="mr-2 h-3.5 w-3.5" />

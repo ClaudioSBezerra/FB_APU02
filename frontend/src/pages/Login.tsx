@@ -174,7 +174,7 @@ const Login = () => {
                 />
               </div>
               <div className="flex justify-end">
-                <Link to="/forgot-password" className="text-xs text-blue-600 hover:underline">
+                <Link to="/forgot-password" className="text-xs text-primary hover:underline">
                   Esqueci minha senha
                 </Link>
               </div>
@@ -183,7 +183,7 @@ const Login = () => {
               </Button>
               <div className="text-center text-xs text-gray-500 mt-2">
                 Não tem uma conta?{" "}
-                <Link to="/register" className="text-blue-600 hover:underline">
+                <Link to="/register" className="text-primary hover:underline">
                   Crie grátis
                 </Link>
               </div>

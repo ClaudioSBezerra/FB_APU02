@@ -103,8 +103,8 @@ export function FileUpload({ onUploadComplete }: FileUploadProps) {
             file:mr-4 file:py-2 file:px-4
             file:rounded-full file:border-0
             file:text-sm file:font-semibold
-            file:bg-blue-50 file:text-blue-700
-            hover:file:bg-blue-100"
+            file:bg-primary/10 file:text-primary
+            hover:file:bg-primary/20"
         />
       </div>
 
@@ -114,7 +114,7 @@ export function FileUpload({ onUploadComplete }: FileUploadProps) {
         className={`w-full font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline transition-colors ${
           !file || isUploading 
             ? 'bg-gray-400 cursor-not-allowed' 
-            : 'bg-blue-500 hover:bg-blue-700 text-white'
+            : 'bg-primary hover:bg-primary/90 text-primary-foreground'
         }`}
       >
         {isUploading ? 'Enviando...' : 'Processar Arquivo'}

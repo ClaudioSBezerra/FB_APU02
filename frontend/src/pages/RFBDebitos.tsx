@@ -131,7 +131,7 @@ export default function RFBDebitos() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
       </div>
     );
   }
@@ -224,7 +224,7 @@ export default function RFBDebitos() {
           <CardContent>
             {detailLoading ? (
               <div className="flex justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
               </div>
             ) : debitos.length > 0 ? (
               <div className="overflow-x-auto">
@@ -310,7 +310,7 @@ export default function RFBDebitos() {
             return (
               <div
                 key={req.id}
-                className="rounded-lg border overflow-hidden cursor-pointer hover:border-blue-300 transition-colors"
+                className="rounded-lg border overflow-hidden cursor-pointer hover:border-primary/30 transition-colors"
                 onClick={() => fetchDetail(req.id)}
               >
                 <div className="flex items-center justify-between p-4">

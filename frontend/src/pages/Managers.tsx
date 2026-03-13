@@ -128,7 +128,7 @@ export default function Managers() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     );
   }
@@ -148,7 +148,7 @@ export default function Managers() {
           <button
             type="button"
             onClick={openModal}
-            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             <span className="mr-2">+</span> Novo Gestor
           </button>
@@ -221,7 +221,7 @@ export default function Managers() {
                           {manager.ativo && (
                             <button
                               onClick={() => handleEdit(manager)}
-                              className="text-blue-600 hover:text-blue-900 mr-4"
+                              className="text-primary hover:text-primary/70 mr-4"
                             >
                               Editar
                             </button>
@@ -295,7 +295,7 @@ export default function Managers() {
                 <div className="mt-5 sm:mt-6 sm:grid sm:grid-flow-row-dense sm:grid-cols-2 sm:gap-3">
                   <button
                     type="submit"
-                    className="inline-flex w-full items-center justify-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 sm:col-start-1"
+                    className="inline-flex w-full items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary/90 sm:col-start-1"
                   >
                     {editingManager ? 'Atualizar' : 'Criar'}
                   </button>
