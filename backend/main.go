@@ -454,6 +454,25 @@ func main() {
 		}
 	})
 
+	// Serve frontend static files (SPA — React Router)
+	staticDir := "./static"
+	if _, err := os.Stat(staticDir); err == nil {
+		fs := http.FileServer(http.Dir(staticDir))
+		http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/api/") {
+				http.NotFound(w, r)
+				return
+			}
+			filePath := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
+			if _, err := os.Stat(filePath); os.IsNotExist(err) {
+				http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
+				return
+			}
+			fs.ServeHTTP(w, r)
+		})
+		fmt.Println("Serving frontend from ./static")
+	}
+
 	fmt.Printf("FB_APU02 Apuração Assistida (Go) starting on port %s...\n", port)
 	fmt.Println("==================================================")
 	fmt.Printf("   FB_APU02 BACKEND - %s\n", BackendVersion)
