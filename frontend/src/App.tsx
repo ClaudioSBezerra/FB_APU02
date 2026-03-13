@@ -21,7 +21,6 @@ import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import ConsultaCTesEntradas from './pages/ConsultaCTesEntradas'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import AdminUsers from './pages/AdminUsers'
-import Painel from './pages/Painel'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
@@ -135,7 +134,7 @@ function AppLayout() {
         <main className="flex-1 overflow-auto">
           <div className="p-4">
             <Routes>
-              <Route path="/" element={<Painel />} />
+              <Route path="/" element={<Navigate to="/rfb/gestao-creditos" replace />} />
 
               {/* Configurações */}
               <Route path="/config/aliquotas"       element={<TabelaAliquotas />} />
