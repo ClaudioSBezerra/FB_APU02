@@ -455,6 +455,8 @@ func main() {
 	})
 
 	// Serve frontend static files (SPA — React Router)
+	// index.html: no-cache para que o browser sempre busque a versão atual após deploy.
+	// Assets com hash (JS/CSS): cache longo — o hash muda a cada build automaticamente.
 	staticDir := "./static"
 	if _, err := os.Stat(staticDir); err == nil {
 		fs := http.FileServer(http.Dir(staticDir))
@@ -465,8 +467,18 @@ func main() {
 			}
 			filePath := filepath.Join(staticDir, filepath.Clean(r.URL.Path))
 			if _, err := os.Stat(filePath); os.IsNotExist(err) {
+				// SPA fallback → index.html nunca cacheado
+				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				w.Header().Set("Pragma", "no-cache")
+				w.Header().Set("Expires", "0")
 				http.ServeFile(w, r, filepath.Join(staticDir, "index.html"))
 				return
+			}
+			// index.html direto também não deve ser cacheado
+			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+				w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+				w.Header().Set("Pragma", "no-cache")
+				w.Header().Set("Expires", "0")
 			}
 			fs.ServeHTTP(w, r)
 		})

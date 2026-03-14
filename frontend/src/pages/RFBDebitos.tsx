@@ -168,7 +168,11 @@ export default function RFBDebitos() {
   const filtered = useMemo(() => {
     return debitos.filter(d => {
       // Filial selecionada no topo da tela (vazio = todas)
-      if (selectedFiliais.length > 0 && !selectedFiliais.includes(d.ni_emitente)) return false;
+      // Normaliza ambos os lados: compara apenas dígitos para evitar diferenças de máscara
+      if (selectedFiliais.length > 0) {
+        const niDigits = d.ni_emitente.replace(/\D/g, '');
+        if (!selectedFiliais.some(f => f.replace(/\D/g, '') === niDigits)) return false;
+      }
       // Filtros manuais
       if (filters.modelo    && d.modelo_dfe !== filters.modelo) return false;
       if (filters.chave     && !d.chave_dfe?.includes(filters.chave)) return false;
