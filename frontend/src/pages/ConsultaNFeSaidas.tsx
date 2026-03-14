@@ -26,8 +26,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Search, X, Copy, Check } from 'lucide-react';
+import { Search, X, Copy, Check, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCnpjComApelido } from '@/lib/formatFilial';
+
+const PAGE_SIZE = 100;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,34 +51,14 @@ interface NfeSaidaRow {
   dest_nome: string;
   dest_uf: string;
   dest_c_mun: string;
-  // ICMSTot
-  v_bc: number;
-  v_icms: number;
-  v_icms_deson: number;
-  v_fcp: number;
-  v_bc_st: number;
-  v_st: number;
-  v_fcp_st: number;
-  v_fcp_st_ret: number;
-  v_prod: number;
-  v_frete: number;
-  v_seg: number;
-  v_desc: number;
-  v_ii: number;
-  v_ipi: number;
-  v_ipi_devol: number;
-  v_pis: number;
-  v_cofins: number;
-  v_outro: number;
-  v_nf: number;
-  // IBSCBSTot
-  v_bc_ibs_cbs: number | null;
-  v_ibs_uf: number | null;
-  v_ibs_mun: number | null;
-  v_ibs: number | null;
-  v_cred_pres_ibs: number | null;
-  v_cbs: number | null;
-  v_cred_pres_cbs: number | null;
+  v_bc: number; v_icms: number; v_icms_deson: number; v_fcp: number;
+  v_bc_st: number; v_st: number; v_fcp_st: number; v_fcp_st_ret: number;
+  v_prod: number; v_frete: number; v_seg: number; v_desc: number;
+  v_ii: number; v_ipi: number; v_ipi_devol: number;
+  v_pis: number; v_cofins: number; v_outro: number; v_nf: number;
+  v_bc_ibs_cbs: number | null; v_ibs_uf: number | null; v_ibs_mun: number | null;
+  v_ibs: number | null; v_cred_pres_ibs: number | null;
+  v_cbs: number | null; v_cred_pres_cbs: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,11 +79,32 @@ function fmtCNPJ(v: string): string {
   return v;
 }
 
-/** Converte "DD/MM/YYYY" → "YYYY-MM-DD" para comparação string sem problemas de timezone */
 function dmyToISO(s: string): string {
   const m = s?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!m) return '';
   return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+async function openDanfe(chave: string, token: string | null, companyId: string | null) {
+  const res = await fetch(`/api/danfe/${chave}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'X-Company-ID': companyId || '',
+    },
+  });
+  if (res.status === 404) {
+    toast.error('XML desta NF-e não encontrado. Importe o XML primeiro para gerar o DANFE.');
+    return;
+  }
+  if (!res.ok) {
+    toast.error('Erro ao gerar DANFE.');
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  if (!win) toast.warning('Permita popups para visualizar o DANFE.');
 }
 
 function CopyChaveButton({ chave }: { chave: string }) {
@@ -114,18 +117,15 @@ function CopyChaveButton({ chave }: { chave: string }) {
     });
   };
   return (
-    <button
-      onClick={copy}
-      title="Copiar chave"
-      className="ml-1 text-muted-foreground hover:text-foreground transition-colors"
-    >
+    <button onClick={copy} title="Copiar chave"
+      className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
       {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
     </button>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Detalhe da Nota (Dialog)
+// Detalhe (Dialog)
 // ---------------------------------------------------------------------------
 function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void }) {
   const Linha = ({ label, value }: { label: string; value: string | number | null | undefined }) => (
@@ -134,23 +134,18 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
       <span className="text-[11px] font-medium text-right">{value ?? '—'}</span>
     </div>
   );
-
   const LinhaBRL = ({ label, value }: { label: string; value: number | null | undefined }) => (
     <div className="flex justify-between py-0.5 border-b border-dashed last:border-0">
       <span className="text-[11px] text-muted-foreground w-36 shrink-0">{label}</span>
       <span className="text-[11px] font-medium text-right">{fmtBRL(value, '—')}</span>
     </div>
   );
-
   const Secao = ({ title, children }: { title: string; children: React.ReactNode }) => (
     <div className="mb-2">
-      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 pb-0.5 border-b">
-        {title}
-      </h3>
+      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 pb-0.5 border-b">{title}</h3>
       {children}
     </div>
   );
-
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -162,7 +157,6 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
             </div>
           </DialogTitle>
         </DialogHeader>
-
         <div className="space-y-1 mt-1">
           <Secao title="Identificação">
             <Linha label="Modelo" value={nfe.modelo} />
@@ -172,21 +166,18 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
             <Linha label="Mês/Ano" value={nfe.mes_ano} />
             <Linha label="Natureza Operação" value={nfe.nat_op} />
           </Secao>
-
           <Secao title="Emitente (Filial)">
             <Linha label="CNPJ" value={fmtCNPJ(nfe.emit_cnpj)} />
             <Linha label="Razão Social" value={nfe.emit_nome} />
             <Linha label="Município" value={nfe.emit_municipio} />
             <Linha label="UF" value={nfe.emit_uf} />
           </Secao>
-
           <Secao title="Destinatário (Cliente)">
             <Linha label="CNPJ/CPF" value={fmtCNPJ(nfe.dest_cnpj_cpf)} />
             <Linha label="Nome/Razão Social" value={nfe.dest_nome} />
             <Linha label="UF" value={nfe.dest_uf} />
             <Linha label="Município (IBGE)" value={nfe.dest_c_mun} />
           </Secao>
-
           <Secao title="ICMSTot — Totais da Nota">
             <LinhaBRL label="vProd" value={nfe.v_prod} />
             <LinhaBRL label="vFrete" value={nfe.v_frete} />
@@ -208,7 +199,6 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
             <LinhaBRL label="vFCPST" value={nfe.v_fcp_st} />
             <LinhaBRL label="vFCPSTRet" value={nfe.v_fcp_st_ret} />
           </Secao>
-
           <Secao title="IBSCBSTot — Reforma Tributária">
             <LinhaBRL label="vBCIBSCBS (Base)" value={nfe.v_bc_ibs_cbs} />
             <LinhaBRL label="vIBSUF" value={nfe.v_ibs_uf} />
@@ -225,6 +215,51 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
 }
 
 // ---------------------------------------------------------------------------
+// Paginação
+// ---------------------------------------------------------------------------
+function Pagination({
+  page, pageCount, onChange,
+}: { page: number; pageCount: number; onChange: (p: number) => void }) {
+  if (pageCount <= 1) return null;
+
+  const pages: (number | '...')[] = [];
+  if (pageCount <= 7) {
+    for (let i = 1; i <= pageCount; i++) pages.push(i);
+  } else {
+    pages.push(1);
+    if (page > 3) pages.push('...');
+    for (let i = Math.max(2, page - 1); i <= Math.min(pageCount - 1, page + 1); i++) pages.push(i);
+    if (page < pageCount - 2) pages.push('...');
+    pages.push(pageCount);
+  }
+
+  return (
+    <div className="flex items-center justify-center gap-1 py-3">
+      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+        disabled={page === 1} onClick={() => onChange(page - 1)}>
+        <ChevronLeft className="h-3 w-3" />
+      </Button>
+      {pages.map((p, i) =>
+        p === '...' ? (
+          <span key={`e${i}`} className="px-1 text-xs text-muted-foreground">…</span>
+        ) : (
+          <Button key={p} size="sm"
+            variant={p === page ? 'default' : 'outline'}
+            className="h-7 w-7 p-0 text-xs"
+            onClick={() => onChange(p as number)}>
+            {p}
+          </Button>
+        )
+      )}
+      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+        disabled={page === pageCount} onClick={() => onChange(page + 1)}>
+        <ChevronRight className="h-3 w-3" />
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Página principal
 // ---------------------------------------------------------------------------
 export default function ConsultaNFeSaidas() {
@@ -234,8 +269,8 @@ export default function ConsultaNFeSaidas() {
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<NfeSaidaRow | null>(null);
   const [apelidos, setApelidos] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
 
-  // Filtros client-side
   const [filterFilial, setFilterFilial] = useState('all');
   const [filterModelo, setFilterModelo] = useState('all');
   const [filterCliente, setFilterCliente] = useState('');
@@ -247,7 +282,6 @@ export default function ConsultaNFeSaidas() {
     'X-Company-ID': companyId || '',
   };
 
-  // Carrega apelidos de filiais
   useEffect(() => {
     if (!token) return;
     fetch('/api/config/filial-apelidos', { headers: authHeaders })
@@ -267,11 +301,9 @@ export default function ConsultaNFeSaidas() {
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       setItems(data.items || []);
-      setFilterFilial('all');
-      setFilterModelo('all');
-      setFilterCliente('');
-      setFilterDataDe('');
-      setFilterDataAte('');
+      setFilterFilial('all'); setFilterModelo('all');
+      setFilterCliente(''); setFilterDataDe(''); setFilterDataAte('');
+      setPage(1);
     } catch (err: unknown) {
       toast.error('Erro ao buscar notas: ' + String(err));
     } finally {
@@ -282,49 +314,53 @@ export default function ConsultaNFeSaidas() {
   useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clearFilters = () => {
-    setFilterFilial('all');
-    setFilterModelo('all');
-    setFilterCliente('');
-    setFilterDataDe('');
-    setFilterDataAte('');
+    setFilterFilial('all'); setFilterModelo('all');
+    setFilterCliente(''); setFilterDataDe(''); setFilterDataAte('');
+    setPage(1);
   };
 
-  // Filiais únicas derivadas dos dados carregados
   const uniqueFiliais = useMemo(() => {
     const seen = new Map<string, string>();
     items.forEach(r => { if (r.emit_cnpj) seen.set(r.emit_cnpj, r.emit_nome); });
-    return Array.from(seen.entries())
-      .map(([cnpj, nome]) => ({ cnpj, nome }))
+    return Array.from(seen.entries()).map(([cnpj, nome]) => ({ cnpj, nome }))
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [items]);
 
-  // Filtros client-side aplicados
+  // Contagem por modelo (para mostrar no filtro)
+  const modelCount = useMemo(() => {
+    const c: Record<string, number> = {};
+    items.forEach(r => { const k = String(r.modelo); c[k] = (c[k] || 0) + 1; });
+    return c;
+  }, [items]);
+
   const displayItems = useMemo(() => {
     return items.filter(r => {
       if (filterFilial !== 'all' && r.emit_cnpj !== filterFilial) return false;
       if (filterModelo !== 'all' && String(r.modelo) !== filterModelo) return false;
-
       if (filterCliente) {
         const nomeOk = r.dest_nome?.toLowerCase().includes(filterCliente.toLowerCase());
         const cnpjOk = r.dest_cnpj_cpf?.replace(/\D/g, '').includes(filterCliente.replace(/\D/g, ''));
         if (!nomeOk && !cnpjOk) return false;
       }
-
-      // Comparação string YYYY-MM-DD — sem problemas de timezone
       const iso = dmyToISO(r.data_emissao);
       if (filterDataDe && iso < filterDataDe) return false;
       if (filterDataAte && iso > filterDataAte) return false;
-
       return true;
     });
   }, [items, filterFilial, filterModelo, filterCliente, filterDataDe, filterDataAte]);
 
+  // Reset página quando filtros mudam
+  useEffect(() => { setPage(1); }, [filterFilial, filterModelo, filterCliente, filterDataDe, filterDataAte]);
+
+  const pageCount = Math.max(1, Math.ceil(displayItems.length / PAGE_SIZE));
+  const pageItems = displayItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   const hasClientFilters = filterFilial !== 'all' || filterModelo !== 'all' || filterCliente || filterDataDe || filterDataAte;
 
-  const totalVNF  = displayItems.reduce((s, r) => s + r.v_nf,           0);
-  const totalICMS = displayItems.reduce((s, r) => s + r.v_icms,          0);
-  const totalIBS  = displayItems.reduce((s, r) => s + (r.v_ibs  ?? 0),  0);
-  const totalCBS  = displayItems.reduce((s, r) => s + (r.v_cbs  ?? 0),  0);
+  const totalVNF  = displayItems.reduce((s, r) => s + r.v_nf,          0);
+  const totalICMS = displayItems.reduce((s, r) => s + r.v_icms,         0);
+  const totalIBS  = displayItems.reduce((s, r) => s + (r.v_ibs  ?? 0), 0);
+  const totalCBS  = displayItems.reduce((s, r) => s + (r.v_cbs  ?? 0), 0);
 
   return (
     <div className="space-y-6">
@@ -338,8 +374,6 @@ export default function ConsultaNFeSaidas() {
       {/* ── Filtros ── */}
       <Card>
         <CardContent className="pt-4 space-y-3">
-
-          {/* Linha 1: Recarregar */}
           <div className="flex flex-wrap gap-3 items-end">
             <Button size="sm" onClick={fetchData} disabled={loading}>
               <Search className="h-3 w-3 mr-1" />
@@ -353,17 +387,17 @@ export default function ConsultaNFeSaidas() {
             )}
             <span className="text-xs text-muted-foreground ml-auto self-end">
               {displayItems.length} de {items.length} nota(s)
+              {pageCount > 1 && ` · Pág. ${page}/${pageCount}`}
             </span>
           </div>
 
-          {/* Linha 2: Filial + Cliente + Datas — só aparecem após dados carregados */}
           {items.length > 0 && (
             <div className="flex flex-wrap gap-3 items-end border-t pt-3">
 
               {/* Filial */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Filial</label>
-                <Select value={filterFilial} onValueChange={setFilterFilial}>
+                <Select value={filterFilial} onValueChange={v => { setFilterFilial(v); setPage(1); }}>
                   <SelectTrigger className="h-8 w-64 text-[11px]">
                     <SelectValue placeholder="Todas as filiais" />
                   </SelectTrigger>
@@ -381,14 +415,14 @@ export default function ConsultaNFeSaidas() {
               {/* Modelo */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Modelo</label>
-                <Select value={filterModelo} onValueChange={setFilterModelo}>
-                  <SelectTrigger className="h-8 w-32 text-[11px]">
+                <Select value={filterModelo} onValueChange={v => { setFilterModelo(v); setPage(1); }}>
+                  <SelectTrigger className="h-8 w-40 text-[11px]">
                     <SelectValue placeholder="Todos" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos</SelectItem>
-                    <SelectItem value="55">55 — NF-e</SelectItem>
-                    <SelectItem value="65">65 — NFC-e</SelectItem>
+                    <SelectItem value="all">Todos ({items.length})</SelectItem>
+                    <SelectItem value="55">55 — NF-e ({modelCount['55'] ?? 0})</SelectItem>
+                    <SelectItem value="65">65 — NFC-e ({modelCount['65'] ?? 0})</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -396,34 +430,26 @@ export default function ConsultaNFeSaidas() {
               {/* Cliente */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Cliente (nome ou CNPJ/CPF)</label>
-                <Input
-                  placeholder="Digite nome ou documento..."
+                <Input placeholder="Digite nome ou documento..."
                   value={filterCliente}
-                  onChange={e => setFilterCliente(e.target.value)}
-                  className="h-8 w-60"
-                />
+                  onChange={e => { setFilterCliente(e.target.value); setPage(1); }}
+                  className="h-8 w-60" />
               </div>
 
               {/* Data De */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Emissão De</label>
-                <Input
-                  type="date"
-                  value={filterDataDe}
-                  onChange={e => setFilterDataDe(e.target.value)}
-                  className="h-8 w-36"
-                />
+                <Input type="date" value={filterDataDe}
+                  onChange={e => { setFilterDataDe(e.target.value); setPage(1); }}
+                  className="h-8 w-36" />
               </div>
 
               {/* Data Até */}
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-muted-foreground">Emissão Até</label>
-                <Input
-                  type="date"
-                  value={filterDataAte}
-                  onChange={e => setFilterDataAte(e.target.value)}
-                  className="h-8 w-36"
-                />
+                <Input type="date" value={filterDataAte}
+                  onChange={e => { setFilterDataAte(e.target.value); setPage(1); }}
+                  className="h-8 w-36" />
               </div>
 
             </div>
@@ -452,7 +478,7 @@ export default function ConsultaNFeSaidas() {
       <Card>
         <CardHeader className="py-2 px-4">
           <CardTitle className="text-[11px] text-muted-foreground font-normal">
-            Clique em uma linha para ver todos os dados da nota
+            Clique em uma linha para ver detalhes · Botão DANFE abre o documento fiscal
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -461,71 +487,79 @@ export default function ConsultaNFeSaidas() {
               {loading ? 'Carregando...' : 'Nenhuma nota encontrada. Use os filtros acima.'}
             </p>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="py-1.5 px-2 text-[11px]">Filial / UF</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Cliente</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Data</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-center">Série</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-center">Nº Nota</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Chave Eletrônica</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">Valor Total (vNF)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {displayItems.map(row => (
-                    <TableRow
-                      key={row.id}
-                      className="cursor-pointer hover:bg-muted/50 h-8"
-                      onClick={() => setSelected(row)}
-                    >
-                      <TableCell className="py-1 px-2">
-                        <div className="text-[11px] font-medium leading-tight">
-                          {formatCnpjComApelido(row.emit_cnpj, apelidos)}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground leading-tight">{row.emit_uf}</div>
-                      </TableCell>
-                      <TableCell className="py-1 px-2">
-                        <div className="text-[11px] font-medium leading-tight">{row.dest_nome || '—'}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono leading-tight">
-                          {fmtCNPJ(row.dest_cnpj_cpf)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">
-                        {row.data_emissao}
-                      </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] text-center">{row.serie}</TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
-                      <TableCell className="py-1 px-2 text-center">
-                        <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
-                      </TableCell>
-                      <TableCell className="py-1 px-2" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          <span className="font-mono text-[10px] text-muted-foreground select-all">
-                            {row.chave_nfe}
-                          </span>
-                          <CopyChaveButton chave={row.chave_nfe} />
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] text-right font-semibold">
-                        {fmtBRL(row.v_nf)}
-                      </TableCell>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="py-1.5 px-2 text-[11px]">Filial / UF</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Cliente</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Data</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Série</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Nº Nota</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Chave Eletrônica</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right">Valor Total</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center">DANFE</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {pageItems.map(row => (
+                      <TableRow key={row.id}
+                        className="cursor-pointer hover:bg-muted/50 h-8"
+                        onClick={() => setSelected(row)}>
+                        <TableCell className="py-1 px-2">
+                          <div className="text-[11px] font-medium leading-tight">
+                            {formatCnpjComApelido(row.emit_cnpj, apelidos)}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground leading-tight">{row.emit_uf}</div>
+                        </TableCell>
+                        <TableCell className="py-1 px-2">
+                          <div className="text-[11px] font-medium leading-tight">{row.dest_nome || '—'}</div>
+                          <div className="text-[10px] text-muted-foreground font-mono leading-tight">
+                            {fmtCNPJ(row.dest_cnpj_cpf)}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">
+                          {row.data_emissao}
+                        </TableCell>
+                        <TableCell className="py-1 px-2 text-[11px] text-center">{row.serie}</TableCell>
+                        <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
+                        <TableCell className="py-1 px-2 text-center">
+                          <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
+                        </TableCell>
+                        <TableCell className="py-1 px-2" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-1">
+                            <span className="font-mono text-[10px] text-muted-foreground select-all">
+                              {row.chave_nfe}
+                            </span>
+                            <CopyChaveButton chave={row.chave_nfe} />
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-1 px-2 text-[11px] text-right font-semibold">
+                          {fmtBRL(row.v_nf)}
+                        </TableCell>
+                        <TableCell className="py-1 px-2 text-center" onClick={e => e.stopPropagation()}>
+                          <button
+                            title="Gerar DANFE"
+                            onClick={() => openDanfe(row.chave_nfe, token, companyId)}
+                            className="text-muted-foreground hover:text-foreground transition-colors">
+                            <FileText className="h-3.5 w-3.5" />
+                          </button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <Pagination page={page} pageCount={pageCount} onChange={setPage} />
+            </>
           )}
         </CardContent>
       </Card>
 
-      {/* ── Dialog de detalhe ── */}
-      {selected && (
-        <DetalheNFe nfe={selected} onClose={() => setSelected(null)} />
-      )}
+      {selected && <DetalheNFe nfe={selected} onClose={() => setSelected(null)} />}
     </div>
   );
 }
