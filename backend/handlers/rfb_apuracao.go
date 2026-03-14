@@ -46,19 +46,21 @@ type RFBResumo struct {
 
 // RFBDebitoRow represents a normalized debit row for the frontend
 type RFBDebitoRow struct {
-	ID               string   `json:"id"`
-	TipoApuracao     string   `json:"tipo_apuracao"`
-	ModeloDfe        string   `json:"modelo_dfe"`
-	NumeroDfe        string   `json:"numero_dfe"`
-	ChaveDfe         string   `json:"chave_dfe"`
-	DataDfeEmissao   *string  `json:"data_dfe_emissao"`
-	DataApuracao     string   `json:"data_apuracao"`
-	NiEmitente       string   `json:"ni_emitente"`
-	NiAdquirente     string   `json:"ni_adquirente"`
-	ValorCBSTotal    float64  `json:"valor_cbs_total"`
-	ValorCBSExtinto  float64  `json:"valor_cbs_extinto"`
-	ValorCBSNaoExtinto float64 `json:"valor_cbs_nao_extinto"`
-	SituacaoDebito   string   `json:"situacao_debito"`
+	ID                 string   `json:"id"`
+	TipoApuracao       string   `json:"tipo_apuracao"`
+	ModeloDfe          string   `json:"modelo_dfe"`
+	Serie              string   `json:"serie"`
+	NumeroDfe          string   `json:"numero_dfe"`
+	ChaveDfe           string   `json:"chave_dfe"`
+	DataDfeEmissao     *string  `json:"data_dfe_emissao"`
+	DataApuracao       string   `json:"data_apuracao"`
+	NiEmitente         string   `json:"ni_emitente"`
+	NiAdquirente       string   `json:"ni_adquirente"`
+	ValorDocumento     *float64 `json:"valor_documento"`
+	ValorCBSTotal      float64  `json:"valor_cbs_total"`
+	ValorCBSExtinto    float64  `json:"valor_cbs_extinto"`
+	ValorCBSNaoExtinto float64  `json:"valor_cbs_nao_extinto"`
+	SituacaoDebito     string   `json:"situacao_debito"`
 }
 
 // SolicitarApuracaoHandler triggers a new CBS assessment request to the RFB API
@@ -642,17 +644,36 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Fetch debits — paginated
+		// - numero_dfe: usa valor da RFB; se vazio, extrai da chave (pos 26-34)
+		// - serie: extrai da chave (pos 23-25)
+		// - valor_documento: JOIN com nfe_saidas pela chave para obter v_nf
 		debitRows, err := db.Query(`
-			SELECT id, tipo_apuracao, COALESCE(modelo_dfe, ''), COALESCE(numero_dfe, ''),
-				COALESCE(chave_dfe, ''),
-				CASE WHEN data_dfe_emissao IS NOT NULL THEN to_char(data_dfe_emissao, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
-				COALESCE(data_apuracao, ''),
-				COALESCE(ni_emitente, ''), COALESCE(ni_adquirente, ''),
-				COALESCE(valor_cbs_total, 0), COALESCE(valor_cbs_extinto, 0), COALESCE(valor_cbs_nao_extinto, 0),
-				COALESCE(situacao_debito, '')
-			FROM rfb_debitos
-			WHERE request_id = $1
-			ORDER BY tipo_apuracao, data_apuracao
+			SELECT d.id,
+				d.tipo_apuracao,
+				COALESCE(d.modelo_dfe, ''),
+				CASE
+					WHEN length(d.chave_dfe) = 44 THEN SUBSTRING(d.chave_dfe, 23, 3)
+					ELSE ''
+				END AS serie,
+				CASE
+					WHEN COALESCE(d.numero_dfe, '') != '' THEN d.numero_dfe
+					WHEN length(d.chave_dfe) = 44 THEN LTRIM(SUBSTRING(d.chave_dfe, 26, 9), '0')
+					ELSE ''
+				END AS numero_dfe,
+				COALESCE(d.chave_dfe, ''),
+				CASE WHEN d.data_dfe_emissao IS NOT NULL THEN to_char(d.data_dfe_emissao, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END,
+				COALESCE(d.data_apuracao, ''),
+				COALESCE(d.ni_emitente, ''),
+				COALESCE(d.ni_adquirente, ''),
+				n.v_nf,
+				COALESCE(d.valor_cbs_total, 0),
+				COALESCE(d.valor_cbs_extinto, 0),
+				COALESCE(d.valor_cbs_nao_extinto, 0),
+				COALESCE(d.situacao_debito, '')
+			FROM rfb_debitos d
+			LEFT JOIN nfe_saidas n ON n.chave_nfe = d.chave_dfe AND n.company_id = d.company_id
+			WHERE d.request_id = $1
+			ORDER BY d.tipo_apuracao, d.data_apuracao
 			LIMIT $2 OFFSET $3
 		`, requestID, pageSize, offset)
 		if err != nil {
@@ -664,9 +685,11 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		var debitos []RFBDebitoRow
 		for debitRows.Next() {
 			var d RFBDebitoRow
-			if err := debitRows.Scan(&d.ID, &d.TipoApuracao, &d.ModeloDfe, &d.NumeroDfe,
+			if err := debitRows.Scan(&d.ID, &d.TipoApuracao, &d.ModeloDfe,
+				&d.Serie, &d.NumeroDfe,
 				&d.ChaveDfe, &d.DataDfeEmissao, &d.DataApuracao,
 				&d.NiEmitente, &d.NiAdquirente,
+				&d.ValorDocumento,
 				&d.ValorCBSTotal, &d.ValorCBSExtinto, &d.ValorCBSNaoExtinto,
 				&d.SituacaoDebito); err != nil {
 				log.Printf("[RFB Detail] Error scanning debit: %v", err)

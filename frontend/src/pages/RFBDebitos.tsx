@@ -372,7 +372,6 @@ export default function RFBDebitos() {
               <table className="min-w-full divide-y divide-gray-100 text-[11px]">
                 <thead className="bg-gray-50 sticky top-0">
                   <tr>
-                    <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Tipo</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Mod.</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Série</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Nº NF</th>
@@ -390,11 +389,6 @@ export default function RFBDebitos() {
                 <tbody className="divide-y divide-gray-50">
                   {filtered.map(d => (
                     <tr key={d.id} className="hover:bg-gray-50/60">
-                      <td className="px-2 py-1">
-                        <Badge variant="outline" className="text-[9px] px-1 py-0 h-4">
-                          {d.tipo_apuracao === 'corrente' ? 'Corr.' : d.tipo_apuracao === 'ajuste' ? 'Ajuste' : 'Extem.'}
-                        </Badge>
-                      </td>
                       <td className="px-2 py-1 font-mono">{d.modelo_dfe || '—'}</td>
                       <td className="px-2 py-1 font-mono">{d.serie || '—'}</td>
                       <td className="px-2 py-1 font-mono">{d.numero_dfe || '—'}</td>
