@@ -9,6 +9,10 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 
+# CACHE_BUST invalida o layer do frontend a cada deploy
+ARG CACHE_BUST=1
+RUN echo "Frontend cache bust: $CACHE_BUST"
+
 COPY frontend/ ./
 ARG VITE_APP_MODULE=apuracao
 ENV VITE_APP_MODULE=$VITE_APP_MODULE
@@ -28,7 +32,7 @@ RUN go mod download
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -a -installsuffix cgo \
-    -o fb_apu01-api main.go
+    -o fb_apu02-api main.go
 
 # Production stage
 FROM alpine:latest
@@ -42,7 +46,7 @@ RUN ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime
 
 WORKDIR /app
 
-COPY --from=backend-builder /app/backend/fb_apu01-api .
+COPY --from=backend-builder /app/backend/fb_apu02-api .
 COPY --from=frontend-builder /app/frontend/dist ./static
 COPY backend/migrations ./migrations
 
@@ -58,9 +62,9 @@ EXPOSE 8081
 
 ENV APP_MODULE=apuracao
 
-CMD ["./fb_apu01-api"]
+CMD ["./fb_apu02-api"]
 
-LABEL maintainer="FB_APU01 Team"
-LABEL version="5.9.11"
-LABEL description="Sistema de Apuração Assistida + Receita Federal"
+LABEL maintainer="FB_APU02 Team"
+LABEL version="1.0.2"
+LABEL description="FB_APU02 — Apuração Assistida + Receita Federal"
 LABEL com.coolify.image=true
