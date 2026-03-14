@@ -273,35 +273,41 @@ func NfeSaidasUploadHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Multipart com limite de 512MB (XMLs são pequenos, mas podem ser muitos)
-		log.Printf("[NfeSaidas] Upload request: company=%s method=%s content-type=%s content-length=%d",
-			companyID, r.Method, r.Header.Get("Content-Type"), r.ContentLength)
-		if err := r.ParseMultipartForm(512 << 20); err != nil {
-			log.Printf("[NfeSaidas] ParseMultipartForm error: %v", err)
+		// Streaming multipart — sem limite de número de partes (Go 1.20+ limita a 1000 com ParseMultipartForm)
+		mr, err := r.MultipartReader()
+		if err != nil {
 			jsonErr(w, http.StatusBadRequest, "Erro ao processar upload: "+err.Error())
 			return
 		}
 
-		files := r.MultipartForm.File["xmls"]
-		log.Printf("[NfeSaidas] files no campo 'xmls': %d", len(files))
-		if len(files) == 0 {
-			jsonErr(w, http.StatusBadRequest, "Nenhum arquivo enviado (campo 'xmls')")
-			return
-		}
-
 		result := nfeSaidaUploadResult{Erros: []nfeSaidaErro{}}
+		totalParts := 0
 
-		for _, fh := range files {
-			filename := fh.Filename
-
-			f, err := fh.Open()
+		for {
+			part, err := mr.NextPart()
+			if err == io.EOF {
+				break
+			}
 			if err != nil {
-				result.Erros = append(result.Erros, nfeSaidaErro{filename, "Erro ao abrir: " + err.Error()})
+				jsonErr(w, http.StatusBadRequest, "Erro ao ler multipart: "+err.Error())
+				return
+			}
+
+			// Ignora partes que não sejam o campo "xmls"
+			if part.FormName() != "xmls" {
+				part.Close()
 				continue
 			}
 
-			data, err := io.ReadAll(f)
-			f.Close()
+			filename := part.FileName()
+			if filename == "" {
+				part.Close()
+				continue
+			}
+
+			totalParts++
+			data, err := io.ReadAll(part)
+			part.Close()
 			if err != nil {
 				result.Erros = append(result.Erros, nfeSaidaErro{filename, "Erro ao ler: " + err.Error()})
 				continue
@@ -405,8 +411,13 @@ func NfeSaidasUploadHandler(db *sql.DB) http.HandlerFunc {
 			result.Importados++
 		}
 
-		// Ajusta ignorados: total - importados - erros
-		result.Ignorados = len(files) - result.Importados - len(result.Erros) - result.Ignorados
+		if totalParts == 0 {
+			jsonErr(w, http.StatusBadRequest, "Nenhum arquivo enviado (campo 'xmls')")
+			return
+		}
+
+		// Ajusta ignorados
+		result.Ignorados = totalParts - result.Importados - len(result.Erros) - result.Ignorados
 		if result.Ignorados < 0 {
 			result.Ignorados = 0
 		}
