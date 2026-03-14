@@ -129,6 +129,7 @@ const Login = () => {
             ))}
           </ul>
 
+          <p className="text-[10px]" style={{ color: "#DA0812" }}>v1.0.2</p>
         </div>
       </div>
 
@@ -190,7 +191,6 @@ const Login = () => {
               </form>
             </CardContent>
           </Card>
-          <p className="text-center text-[10px] text-gray-400 mt-3">v1.0.2</p>
         </div>
       </div>
     </div>
