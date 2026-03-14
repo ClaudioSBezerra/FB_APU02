@@ -101,44 +101,13 @@ function formatNumber(n: number): string {
   return new Intl.NumberFormat('pt-BR').format(n);
 }
 
-// ── URL SEFAZ DANFE por modelo e estado ──────────────────────────────────────
-// cUF = posições 1-2 da chave (1-indexed)
-const NFC_URLS: Record<string, string> = {
-  '11': 'https://www.sefaz.ro.gov.br/nfce/consulta.aspx?chave=',
-  '12': 'https://www.sefaz.ac.gov.br/nfce/consulta.aspx?chave=',
-  '13': 'https://sistemas.sefaz.am.gov.br/nfceweb/consultarNFCe.html?chave=',
-  '14': 'https://www.sefaz.rr.gov.br/nfce/servlet/wp_cons_sit_nfce?chave=',
-  '15': 'https://appnfc.sefa.pa.gov.br/servlet/wp_nfce_consulta?chave=',
-  '16': 'https://nfce.sefaz.ap.gov.br/nfce/consulta.aspx?chave=',
-  '17': 'https://www.sefaz.to.gov.br/nfce/consulta.aspx?chave=',
-  '21': 'https://www.nfce.sefaz.ma.gov.br/nfce/consulta.aspx?chave=',
-  '22': 'https://www.sefaz.pi.gov.br/nfce/consulta.aspx?chave=',
-  '23': 'https://nfceh.sefaz.ce.gov.br/pages/ShowNFCe.html?chave=',
-  '24': 'https://nfce.set.rn.gov.br/consultarNFCe.aspx?chave=',
-  '25': 'https://www.receita.pb.gov.br/nfce/consulta.aspx?chave=',
-  '26': 'https://nfce.sefaz.pe.gov.br/nfce-web/consultarNFCe?chave=',
-  '27': 'https://nfce.sefaz.al.gov.br/consultaNFCe.htm?chave=',
-  '28': 'https://www.nfce.se.gov.br/portalnfce/sistema/consultarNFCe.xhtml?chave=',
-  '29': 'https://nfe.sefaz.ba.gov.br/servicos/nfce/consulta.aspx?chave=',
-  '31': 'https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultarNFCe.xhtml?chave=',
-  '32': 'https://app.sefaz.es.gov.br/ConsultaNFCe/consulta.aspx?chave=',
-  '33': 'https://www.nfce.fazenda.rj.gov.br/consulta/consultaNFCe.aspx?chave=',
-  '35': 'https://www.nfce.fazenda.sp.gov.br/consulta?chave=',
-  '41': 'https://www.nfce.fazenda.pr.gov.br/nfce/consulta?chave=',
-  '42': 'https://www.sef.sc.gov.br/nfce/consulta.aspx?chave=',
-  '43': 'https://www.sefaz.rs.gov.br/NFCE/NFCE-COM.aspx?chave=',
-  '50': 'https://www.dfe.ms.gov.br/nfce/consulta.aspx?chave=',
-  '51': 'https://www.sefaz.mt.gov.br/nfce/consultanfce?chave=',
-  '52': 'https://www.sefaz.go.gov.br/nfeweb/sites/nfce/danfeNFCe.html?chave=',
-  '53': 'https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?chave=',
-};
+// ── URL DANFE via meudanfe.com.br ─────────────────────────────────────────────
+// Suporta NF-e (55) e NFC-e (65), todos os estados, sem captcha
 
-function getDanfeUrl(chave: string, modelo: string): string {
-  if (!chave || chave.length < 2) return '';
-  const cuf = chave.slice(0, 2);
-  if (modelo === '65' && NFC_URLS[cuf]) return NFC_URLS[cuf] + chave;
-  // NF-e (55) ou fallback: SEFAZ nacional
-  return `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=7PhJ+gAVw2g=`;
+function getDanfeUrl(chave: string): string {
+  if (!chave) return '';
+  // meudanfe.com.br — suporta NF-e (55) e NFC-e (65), cobre todos os estados
+  return `https://meudanfe.com.br/danfe/${chave}`;
 }
 
 // ── Botão copiar chave ────────────────────────────────────────────────────────
@@ -495,10 +464,10 @@ export default function RFBDebitos() {
                         {d.chave_dfe && <CopyChaveButton chave={d.chave_dfe} />}
                         {d.chave_dfe && (
                           <a
-                            href={getDanfeUrl(d.chave_dfe, d.modelo_dfe)}
+                            href={getDanfeUrl(d.chave_dfe)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="Ver DANFE no SEFAZ"
+                            title="Ver DANFE (meudanfe.com.br)"
                             className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors"
                           >
                             <FileText className="h-3 w-3" />
