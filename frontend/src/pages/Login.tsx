@@ -45,7 +45,7 @@ const Login = () => {
 
       login(data);
       toast.success("Login realizado com sucesso!");
-      navigate("/mercadorias");
+      navigate("/rfb/gestao-creditos");
     } catch (error: any) {
       const msg = error.message || "Erro desconhecido";
       setErrorMsg(msg);
