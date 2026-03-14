@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useFiliais } from '@/contexts/FilialContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -118,6 +119,8 @@ export default function RFBDebitos() {
   const [filters,       setFilters]       = useState<Filters>(EMPTY_FILTERS);
   const [showFilters,   setShowFilters]   = useState(false);
 
+  const { selectedFiliais } = useFiliais();
+
   const getHeaders = () => ({
     'Authorization': `Bearer ${localStorage.getItem('token')}`,
     'X-Company-ID':  localStorage.getItem('companyId') || '',
@@ -164,12 +167,16 @@ export default function RFBDebitos() {
   // ── Filtragem client-side ────────────────────────────────────────────────
   const filtered = useMemo(() => {
     return debitos.filter(d => {
+      // Filial selecionada no topo da tela (vazio = todas)
+      if (selectedFiliais.length > 0 && !selectedFiliais.includes(d.ni_emitente)) return false;
+      // Filtros manuais
       if (filters.modelo    && d.modelo_dfe !== filters.modelo) return false;
       if (filters.chave     && !d.chave_dfe?.includes(filters.chave)) return false;
       if (filters.cliente   && !d.ni_adquirente?.includes(filters.cliente.replace(/\D/g, ''))) return false;
       if (filters.numInicio && Number(d.numero_dfe) < Number(filters.numInicio)) return false;
       if (filters.numFim    && Number(d.numero_dfe) > Number(filters.numFim)) return false;
-      if (filters.valorMin  && d.valor_cbs_total < Number(filters.valorMin.replace(',','.'))) return false;
+      if (filters.valorMin  && d.valor_documento != null &&
+          d.valor_documento < Number(filters.valorMin.replace(',', '.'))) return false;
       if (filters.dataInicio && d.data_dfe_emissao) {
         if (new Date(d.data_dfe_emissao) < new Date(filters.dataInicio)) return false;
       }
@@ -178,7 +185,7 @@ export default function RFBDebitos() {
       }
       return true;
     });
-  }, [debitos, filters]);
+  }, [debitos, filters, selectedFiliais]);
 
   const hasActiveFilters = Object.values(filters).some(v => v !== '');
   const modelosUnicos = useMemo(() => [...new Set(debitos.map(d => d.modelo_dfe).filter(Boolean))].sort(), [debitos]);
@@ -331,7 +338,7 @@ export default function RFBDebitos() {
                 value={filters.cliente} onChange={e => setFilter('cliente', e.target.value)} />
             </div>
             <div>
-              <Label className="text-[10px] text-muted-foreground mb-1 block">CBS Mín. (R$)</Label>
+              <Label className="text-[10px] text-muted-foreground mb-1 block">Valor Doc. Mín. (R$)</Label>
               <Input placeholder="0,00" className="h-7 text-xs"
                 value={filters.valorMin} onChange={e => setFilter('valorMin', e.target.value)} />
             </div>
