@@ -474,7 +474,7 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 			idx++
 		}
 
-		query += " ORDER BY data_emissao DESC, numero_cte DESC LIMIT 500"
+		query += " ORDER BY data_emissao DESC, numero_cte DESC"
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
