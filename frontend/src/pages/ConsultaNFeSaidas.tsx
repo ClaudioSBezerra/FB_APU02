@@ -215,42 +215,44 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
 }
 
 // ---------------------------------------------------------------------------
-// Paginação
+// Paginação com input de página
 // ---------------------------------------------------------------------------
 function Pagination({
   page, pageCount, onChange,
 }: { page: number; pageCount: number; onChange: (p: number) => void }) {
+  const [inputVal, setInputVal] = useState(String(page));
+
+  // Sincroniza input quando page muda externamente (ex: reset por filtro)
+  useEffect(() => { setInputVal(String(page)); }, [page]);
+
   if (pageCount <= 1) return null;
 
-  const pages: (number | '...')[] = [];
-  if (pageCount <= 7) {
-    for (let i = 1; i <= pageCount; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    if (page > 3) pages.push('...');
-    for (let i = Math.max(2, page - 1); i <= Math.min(pageCount - 1, page + 1); i++) pages.push(i);
-    if (page < pageCount - 2) pages.push('...');
-    pages.push(pageCount);
-  }
+  const go = (raw: string) => {
+    const n = parseInt(raw, 10);
+    if (!isNaN(n) && n >= 1 && n <= pageCount) onChange(n);
+    else setInputVal(String(page)); // reverte se inválido
+  };
 
   return (
-    <div className="flex items-center justify-center gap-1 py-3">
+    <div className="flex items-center justify-center gap-2 py-3">
       <Button size="sm" variant="outline" className="h-7 w-7 p-0"
         disabled={page === 1} onClick={() => onChange(page - 1)}>
         <ChevronLeft className="h-3 w-3" />
       </Button>
-      {pages.map((p, i) =>
-        p === '...' ? (
-          <span key={`e${i}`} className="px-1 text-xs text-muted-foreground">…</span>
-        ) : (
-          <Button key={p} size="sm"
-            variant={p === page ? 'default' : 'outline'}
-            className="h-7 w-7 p-0 text-xs"
-            onClick={() => onChange(p as number)}>
-            {p}
-          </Button>
-        )
-      )}
+
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span>Pág.</span>
+        <input
+          type="number" min={1} max={pageCount}
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onBlur={e => go(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') go(inputVal); }}
+          className="w-14 h-7 rounded border border-input bg-background px-2 text-center text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <span>de {pageCount}</span>
+      </div>
+
       <Button size="sm" variant="outline" className="h-7 w-7 p-0"
         disabled={page === pageCount} onClick={() => onChange(page + 1)}>
         <ChevronRight className="h-3 w-3" />
@@ -506,29 +508,37 @@ export default function ConsultaNFeSaidas() {
                   <TableBody>
                     {pageItems.map(row => (
                       <TableRow key={row.id}
-                        className="cursor-pointer hover:bg-muted/50 h-8"
+                        className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelected(row)}>
-                        <TableCell className="py-1 px-2">
-                          <div className="text-[11px] font-medium leading-tight">
-                            {formatCnpjComApelido(row.emit_cnpj, apelidos)}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground leading-tight">{row.emit_uf}</div>
-                        </TableCell>
-                        <TableCell className="py-1 px-2">
-                          <div className="text-[11px] font-medium leading-tight">{row.dest_nome || '—'}</div>
-                          <div className="text-[10px] text-muted-foreground font-mono leading-tight">
-                            {fmtCNPJ(row.dest_cnpj_cpf)}
+                        {/* Filial: UF · CNPJ/Apelido */}
+                        <TableCell className="py-0.5 px-2">
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-[10px] font-semibold text-muted-foreground w-6 shrink-0">{row.emit_uf}</span>
+                            <span className="text-[11px] font-medium leading-none truncate max-w-[140px]">
+                              {formatCnpjComApelido(row.emit_cnpj, apelidos)}
+                            </span>
                           </div>
                         </TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">
+                        {/* Cliente: doc · nome */}
+                        <TableCell className="py-0.5 px-2">
+                          <div className="flex items-baseline gap-1">
+                            <span className="font-mono text-[10px] text-muted-foreground shrink-0 whitespace-nowrap">
+                              {fmtCNPJ(row.dest_cnpj_cpf)}
+                            </span>
+                            <span className="text-[11px] font-medium leading-none truncate max-w-[160px]">
+                              {row.dest_nome || '—'}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">
                           {row.data_emissao}
                         </TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-center">{row.serie}</TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
-                        <TableCell className="py-1 px-2 text-center">
+                        <TableCell className="py-0.5 px-2 text-[11px] text-center">{row.serie}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-center">
                           <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
                         </TableCell>
-                        <TableCell className="py-1 px-2" onClick={e => e.stopPropagation()}>
+                        <TableCell className="py-0.5 px-2" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
                             <span className="font-mono text-[10px] text-muted-foreground select-all">
                               {row.chave_nfe}
@@ -536,12 +546,11 @@ export default function ConsultaNFeSaidas() {
                             <CopyChaveButton chave={row.chave_nfe} />
                           </div>
                         </TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-right font-semibold">
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold">
                           {fmtBRL(row.v_nf)}
                         </TableCell>
-                        <TableCell className="py-1 px-2 text-center" onClick={e => e.stopPropagation()}>
-                          <button
-                            title="Gerar DANFE"
+                        <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
+                          <button title="Gerar DANFE"
                             onClick={() => openDanfe(row.chave_nfe, token, companyId)}
                             className="text-muted-foreground hover:text-foreground transition-colors">
                             <FileText className="h-3.5 w-3.5" />
