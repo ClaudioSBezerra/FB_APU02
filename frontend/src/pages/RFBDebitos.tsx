@@ -182,10 +182,10 @@ export default function RFBDebitos() {
       if (filters.valorMin  && d.valor_documento != null &&
           d.valor_documento < Number(filters.valorMin.replace(',', '.'))) return false;
       if (filters.dataInicio && d.data_dfe_emissao) {
-        if (new Date(d.data_dfe_emissao) < new Date(filters.dataInicio)) return false;
+        if (d.data_dfe_emissao.slice(0, 10) < filters.dataInicio) return false;
       }
       if (filters.dataFim && d.data_dfe_emissao) {
-        if (new Date(d.data_dfe_emissao) > new Date(filters.dataFim)) return false;
+        if (d.data_dfe_emissao.slice(0, 10) > filters.dataFim) return false;
       }
       return true;
     });

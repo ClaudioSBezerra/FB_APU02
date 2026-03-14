@@ -650,7 +650,11 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		debitRows, err := db.Query(`
 			SELECT d.id,
 				d.tipo_apuracao,
-				COALESCE(d.modelo_dfe, ''),
+				CASE
+				WHEN COALESCE(d.modelo_dfe, '') != '' THEN d.modelo_dfe
+				WHEN length(d.chave_dfe) = 44 THEN SUBSTRING(d.chave_dfe, 21, 2)
+				ELSE ''
+			END AS modelo_dfe,
 				CASE
 					WHEN length(d.chave_dfe) = 44 THEN SUBSTRING(d.chave_dfe, 23, 3)
 					ELSE ''
