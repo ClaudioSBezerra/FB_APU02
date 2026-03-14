@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { useFiliais } from '@/contexts/FilialContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,7 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Filter, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, X, Download, Copy, Check, FileText } from 'lucide-react';
+import { toast } from 'sonner';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -42,7 +44,6 @@ interface RFBDebito {
   data_apuracao: string;
   ni_emitente: string;
   ni_adquirente: string;
-  valor_documento?: number;
   valor_cbs_total: number;
   valor_cbs_extinto: number;
   valor_cbs_nao_extinto: number;
@@ -64,12 +65,11 @@ interface Filters {
   numFim: string;
   chave: string;
   cliente: string;
-  valorMin: string;
 }
 
 const EMPTY_FILTERS: Filters = {
   modelo: '', dataInicio: '', dataFim: '',
-  numInicio: '', numFim: '', chave: '', cliente: '', valorMin: '',
+  numInicio: '', numFim: '', chave: '', cliente: '',
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -101,9 +101,67 @@ function formatNumber(n: number): string {
   return new Intl.NumberFormat('pt-BR').format(n);
 }
 
-function chaveShort(chave: string): string {
-  if (!chave || chave.length < 10) return chave || '—';
-  return `${chave.slice(0, 9)}…${chave.slice(-4)}`;
+// ── URL SEFAZ DANFE por modelo e estado ──────────────────────────────────────
+// cUF = posições 1-2 da chave (1-indexed)
+const NFC_URLS: Record<string, string> = {
+  '11': 'https://www.sefaz.ro.gov.br/nfce/consulta.aspx?chave=',
+  '12': 'https://www.sefaz.ac.gov.br/nfce/consulta.aspx?chave=',
+  '13': 'https://sistemas.sefaz.am.gov.br/nfceweb/consultarNFCe.html?chave=',
+  '14': 'https://www.sefaz.rr.gov.br/nfce/servlet/wp_cons_sit_nfce?chave=',
+  '15': 'https://appnfc.sefa.pa.gov.br/servlet/wp_nfce_consulta?chave=',
+  '16': 'https://nfce.sefaz.ap.gov.br/nfce/consulta.aspx?chave=',
+  '17': 'https://www.sefaz.to.gov.br/nfce/consulta.aspx?chave=',
+  '21': 'https://www.nfce.sefaz.ma.gov.br/nfce/consulta.aspx?chave=',
+  '22': 'https://www.sefaz.pi.gov.br/nfce/consulta.aspx?chave=',
+  '23': 'https://nfceh.sefaz.ce.gov.br/pages/ShowNFCe.html?chave=',
+  '24': 'https://nfce.set.rn.gov.br/consultarNFCe.aspx?chave=',
+  '25': 'https://www.receita.pb.gov.br/nfce/consulta.aspx?chave=',
+  '26': 'https://nfce.sefaz.pe.gov.br/nfce-web/consultarNFCe?chave=',
+  '27': 'https://nfce.sefaz.al.gov.br/consultaNFCe.htm?chave=',
+  '28': 'https://www.nfce.se.gov.br/portalnfce/sistema/consultarNFCe.xhtml?chave=',
+  '29': 'https://nfe.sefaz.ba.gov.br/servicos/nfce/consulta.aspx?chave=',
+  '31': 'https://portalsped.fazenda.mg.gov.br/portalnfce/sistema/consultarNFCe.xhtml?chave=',
+  '32': 'https://app.sefaz.es.gov.br/ConsultaNFCe/consulta.aspx?chave=',
+  '33': 'https://www.nfce.fazenda.rj.gov.br/consulta/consultaNFCe.aspx?chave=',
+  '35': 'https://www.nfce.fazenda.sp.gov.br/consulta?chave=',
+  '41': 'https://www.nfce.fazenda.pr.gov.br/nfce/consulta?chave=',
+  '42': 'https://www.sef.sc.gov.br/nfce/consulta.aspx?chave=',
+  '43': 'https://www.sefaz.rs.gov.br/NFCE/NFCE-COM.aspx?chave=',
+  '50': 'https://www.dfe.ms.gov.br/nfce/consulta.aspx?chave=',
+  '51': 'https://www.sefaz.mt.gov.br/nfce/consultanfce?chave=',
+  '52': 'https://www.sefaz.go.gov.br/nfeweb/sites/nfce/danfeNFCe.html?chave=',
+  '53': 'https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?chave=',
+};
+
+function getDanfeUrl(chave: string, modelo: string): string {
+  if (!chave || chave.length < 2) return '';
+  const cuf = chave.slice(0, 2);
+  if (modelo === '65' && NFC_URLS[cuf]) return NFC_URLS[cuf] + chave;
+  // NF-e (55) ou fallback: SEFAZ nacional
+  return `https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=7PhJ+gAVw2g=`;
+}
+
+// ── Botão copiar chave ────────────────────────────────────────────────────────
+
+function CopyChaveButton({ chave }: { chave: string }) {
+  const [copied, setCopied] = useState(false);
+  function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation();
+    navigator.clipboard.writeText(chave).then(() => {
+      setCopied(true);
+      toast.success('Chave copiada!');
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copiar chave de acesso"
+      className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors"
+    >
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
 }
 
 // ── Componente principal ─────────────────────────────────────────────────────
@@ -168,19 +226,15 @@ export default function RFBDebitos() {
   const filtered = useMemo(() => {
     return debitos.filter(d => {
       // Filial selecionada no topo da tela (vazio = todas)
-      // Normaliza ambos os lados: compara apenas dígitos para evitar diferenças de máscara
       if (selectedFiliais.length > 0) {
         const niDigits = d.ni_emitente.replace(/\D/g, '');
         if (!selectedFiliais.some(f => f.replace(/\D/g, '') === niDigits)) return false;
       }
-      // Filtros manuais
       if (filters.modelo    && d.modelo_dfe !== filters.modelo) return false;
       if (filters.chave     && !d.chave_dfe?.includes(filters.chave)) return false;
       if (filters.cliente   && !d.ni_adquirente?.includes(filters.cliente.replace(/\D/g, ''))) return false;
       if (filters.numInicio && Number(d.numero_dfe) < Number(filters.numInicio)) return false;
       if (filters.numFim    && Number(d.numero_dfe) > Number(filters.numFim)) return false;
-      if (filters.valorMin  && d.valor_documento != null &&
-          d.valor_documento < Number(filters.valorMin.replace(',', '.'))) return false;
       if (filters.dataInicio && d.data_dfe_emissao) {
         if (d.data_dfe_emissao.slice(0, 10) < filters.dataInicio) return false;
       }
@@ -197,6 +251,34 @@ export default function RFBDebitos() {
   function clearFilters() { setFilters(EMPTY_FILTERS); }
   function setFilter(key: keyof Filters, value: string) {
     setFilters(prev => ({ ...prev, [key]: value }));
+  }
+
+  // ── Export Excel ─────────────────────────────────────────────────────────
+  function exportExcel() {
+    const periodo = resumo ? formatPeriodo(resumo.data_apuracao) : 'export';
+    const rows = filtered.map(d => ({
+      'Modelo':         d.modelo_dfe || '—',
+      'Série':          d.serie || '—',
+      'Nº NF':          d.numero_dfe || '—',
+      'CNPJ Emitente':  d.ni_emitente,
+      'Cliente':        d.ni_adquirente,
+      'Data Emissão':   d.data_dfe_emissao ? d.data_dfe_emissao.slice(0, 10) : '—',
+      'Chave Eletrônica': d.chave_dfe,
+      'CBS Total':      d.valor_cbs_total,
+      'CBS Extinto':    d.valor_cbs_extinto,
+      'CBS Não Extinto': d.valor_cbs_nao_extinto,
+      'Situação':       d.situacao_debito || '—',
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    // Largura das colunas
+    ws['!cols'] = [
+      { wch: 8 }, { wch: 6 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
+      { wch: 12 }, { wch: 46 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Débitos CBS');
+    XLSX.writeFile(wb, `debitos_cbs_${periodo.replace('/', '-')}.xlsx`);
+    toast.success(`${formatNumber(filtered.length)} registros exportados`);
   }
 
   const selectedRequest = requests.find(r => r.id === selectedId);
@@ -248,13 +330,13 @@ export default function RFBDebitos() {
         {resumo && (
           <div className="flex flex-wrap gap-2 flex-1">
             {[
-              { label: 'Total Débitos',   value: formatNumber(resumo.total_debitos),              color: 'text-foreground' },
-              { label: 'CBS Total',       value: formatCurrency(resumo.valor_cbs_total),           color: 'text-red-600' },
-              { label: 'CBS Não Extinto', value: formatCurrency(resumo.valor_cbs_nao_extinto),     color: 'text-orange-600' },
-              { label: 'CBS Extinto',     value: formatCurrency(resumo.valor_cbs_extinto),         color: 'text-green-600' },
-              { label: 'Corrente',        value: formatNumber(resumo.total_corrente),              color: 'text-foreground' },
-              { label: 'Ajuste',          value: formatNumber(resumo.total_ajuste),                color: 'text-foreground' },
-              { label: 'Extemporâneo',    value: formatNumber(resumo.total_extemporaneo),          color: 'text-foreground' },
+              { label: 'Total Débitos',   value: formatNumber(resumo.total_debitos),          color: 'text-foreground' },
+              { label: 'CBS Total',       value: formatCurrency(resumo.valor_cbs_total),       color: 'text-red-600' },
+              { label: 'CBS Não Extinto', value: formatCurrency(resumo.valor_cbs_nao_extinto), color: 'text-orange-600' },
+              { label: 'CBS Extinto',     value: formatCurrency(resumo.valor_cbs_extinto),     color: 'text-green-600' },
+              { label: 'Corrente',        value: formatNumber(resumo.total_corrente),          color: 'text-foreground' },
+              { label: 'Ajuste',          value: formatNumber(resumo.total_ajuste),            color: 'text-foreground' },
+              { label: 'Extemporâneo',    value: formatNumber(resumo.total_extemporaneo),      color: 'text-foreground' },
             ].map(c => (
               <Card key={c.label} className="shrink-0">
                 <CardContent className="px-3 py-1.5">
@@ -341,11 +423,6 @@ export default function RFBDebitos() {
               <Input placeholder="Somente números" className="h-7 text-xs"
                 value={filters.cliente} onChange={e => setFilter('cliente', e.target.value)} />
             </div>
-            <div>
-              <Label className="text-[10px] text-muted-foreground mb-1 block">Valor Doc. Mín. (R$)</Label>
-              <Input placeholder="0,00" className="h-7 text-xs"
-                value={filters.valorMin} onChange={e => setFilter('valorMin', e.target.value)} />
-            </div>
           </div>
         )}
       </div>
@@ -359,7 +436,15 @@ export default function RFBDebitos() {
               : <>{formatNumber(pagination.total)} registros · pág. {pagination.page}/{pagination.total_pages}</>
             }
           </span>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+              onClick={exportExcel}
+              disabled={filtered.length === 0}
+            >
+              <Download className="h-3.5 w-3.5" />
+              Excel ({formatNumber(filtered.length)})
+            </Button>
             <Button size="sm" variant="outline" className="h-6 w-6 p-0"
               disabled={pagination.page <= 1 || detailLoading || hasActiveFilters}
               onClick={() => selectedId && fetchDetail(selectedId, pagination.page - 1)}>
@@ -390,7 +475,6 @@ export default function RFBDebitos() {
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Cliente</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Data Emissão</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Chave Eletrônica</th>
-                    <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Valor Doc.</th>
                     <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">CBS Total</th>
                     <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Extinto</th>
                     <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Não Extinto</th>
@@ -406,10 +490,21 @@ export default function RFBDebitos() {
                       <td className="px-2 py-1 font-mono text-[10px]">{formatCNPJBase(d.ni_emitente)}</td>
                       <td className="px-2 py-1 font-mono text-[10px]">{formatCNPJBase(d.ni_adquirente)}</td>
                       <td className="px-2 py-1">{formatDate(d.data_dfe_emissao)}</td>
-                      <td className="px-2 py-1 font-mono text-[10px] text-muted-foreground" title={d.chave_dfe}>
-                        {chaveShort(d.chave_dfe)}
+                      <td className="px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                        <span className="select-all">{d.chave_dfe || '—'}</span>
+                        {d.chave_dfe && <CopyChaveButton chave={d.chave_dfe} />}
+                        {d.chave_dfe && (
+                          <a
+                            href={getDanfeUrl(d.chave_dfe, d.modelo_dfe)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Ver DANFE no SEFAZ"
+                            className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors"
+                          >
+                            <FileText className="h-3 w-3" />
+                          </a>
+                        )}
                       </td>
-                      <td className="px-2 py-1 text-right">{d.valor_documento != null ? formatCurrency(d.valor_documento) : '—'}</td>
                       <td className="px-2 py-1 text-right font-medium text-red-600">{formatCurrency(d.valor_cbs_total)}</td>
                       <td className="px-2 py-1 text-right text-green-600">{formatCurrency(d.valor_cbs_extinto)}</td>
                       <td className="px-2 py-1 text-right text-orange-600">{formatCurrency(d.valor_cbs_nao_extinto)}</td>

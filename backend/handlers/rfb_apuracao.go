@@ -687,6 +687,7 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		defer debitRows.Close()
 
 		var debitos []RFBDebitoRow
+		modelCount := map[string]int{}
 		for debitRows.Next() {
 			var d RFBDebitoRow
 			if err := debitRows.Scan(&d.ID, &d.TipoApuracao, &d.ModeloDfe,
@@ -699,8 +700,10 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 				log.Printf("[RFB Detail] Error scanning debit: %v", err)
 				continue
 			}
+			modelCount[d.ModeloDfe]++
 			debitos = append(debitos, d)
 		}
+		log.Printf("[RFB Detail] request=%s modelos encontrados: %v", requestID, modelCount)
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"request": req,
