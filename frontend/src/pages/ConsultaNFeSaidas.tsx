@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Search, X } from 'lucide-react';
+import { Search, X, Copy, Check } from 'lucide-react';
 import { formatCnpjComApelido } from '@/lib/formatFilial';
 
 // ---------------------------------------------------------------------------
@@ -97,11 +97,31 @@ function fmtCNPJ(v: string): string {
   return v;
 }
 
-/** Converte "DD/MM/YYYY" → Date (para comparação de range) */
-function parseDMY(s: string): Date | null {
+/** Converte "DD/MM/YYYY" → "YYYY-MM-DD" para comparação string sem problemas de timezone */
+function dmyToISO(s: string): string {
   const m = s?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return null;
-  return new Date(+m[3], +m[2] - 1, +m[1]);
+  if (!m) return '';
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function CopyChaveButton({ chave }: { chave: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(chave).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+  return (
+    <button
+      onClick={copy}
+      title="Copiar chave"
+      className="ml-1 text-muted-foreground hover:text-foreground transition-colors"
+    >
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +237,7 @@ export default function ConsultaNFeSaidas() {
 
   // Filtros client-side
   const [filterFilial, setFilterFilial] = useState('all');
+  const [filterModelo, setFilterModelo] = useState('all');
   const [filterCliente, setFilterCliente] = useState('');
   const [filterDataDe, setFilterDataDe] = useState('');
   const [filterDataAte, setFilterDataAte] = useState('');
@@ -247,6 +268,7 @@ export default function ConsultaNFeSaidas() {
       const data = await res.json();
       setItems(data.items || []);
       setFilterFilial('all');
+      setFilterModelo('all');
       setFilterCliente('');
       setFilterDataDe('');
       setFilterDataAte('');
@@ -261,6 +283,7 @@ export default function ConsultaNFeSaidas() {
 
   const clearFilters = () => {
     setFilterFilial('all');
+    setFilterModelo('all');
     setFilterCliente('');
     setFilterDataDe('');
     setFilterDataAte('');
@@ -277,11 +300,9 @@ export default function ConsultaNFeSaidas() {
 
   // Filtros client-side aplicados
   const displayItems = useMemo(() => {
-    const dataDe  = filterDataDe  ? new Date(filterDataDe)  : null;
-    const dataAte = filterDataAte ? new Date(filterDataAte) : null;
-
     return items.filter(r => {
       if (filterFilial !== 'all' && r.emit_cnpj !== filterFilial) return false;
+      if (filterModelo !== 'all' && String(r.modelo) !== filterModelo) return false;
 
       if (filterCliente) {
         const nomeOk = r.dest_nome?.toLowerCase().includes(filterCliente.toLowerCase());
@@ -289,18 +310,16 @@ export default function ConsultaNFeSaidas() {
         if (!nomeOk && !cnpjOk) return false;
       }
 
-      if (dataDe || dataAte) {
-        const d = parseDMY(r.data_emissao);
-        if (!d) return false;
-        if (dataDe && d < dataDe) return false;
-        if (dataAte && d > dataAte) return false;
-      }
+      // Comparação string YYYY-MM-DD — sem problemas de timezone
+      const iso = dmyToISO(r.data_emissao);
+      if (filterDataDe && iso < filterDataDe) return false;
+      if (filterDataAte && iso > filterDataAte) return false;
 
       return true;
     });
-  }, [items, filterFilial, filterCliente, filterDataDe, filterDataAte]);
+  }, [items, filterFilial, filterModelo, filterCliente, filterDataDe, filterDataAte]);
 
-  const hasClientFilters = filterFilial !== 'all' || filterCliente || filterDataDe || filterDataAte;
+  const hasClientFilters = filterFilial !== 'all' || filterModelo !== 'all' || filterCliente || filterDataDe || filterDataAte;
 
   const totalVNF  = displayItems.reduce((s, r) => s + r.v_nf,           0);
   const totalICMS = displayItems.reduce((s, r) => s + r.v_icms,          0);
@@ -355,6 +374,21 @@ export default function ConsultaNFeSaidas() {
                         {formatCnpjComApelido(f.cnpj, apelidos)}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Modelo */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-muted-foreground">Modelo</label>
+                <Select value={filterModelo} onValueChange={setFilterModelo}>
+                  <SelectTrigger className="h-8 w-32 text-[11px]">
+                    <SelectValue placeholder="Todos" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="55">55 — NF-e</SelectItem>
+                    <SelectItem value="65">65 — NFC-e</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -431,13 +465,13 @@ export default function ConsultaNFeSaidas() {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Emitente</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Filial / UF</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Cliente</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Data</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-center">Série</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-center">Nº Nota</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px]">Chave Eletrônica</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-right">Valor Total (vNF)</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -448,11 +482,10 @@ export default function ConsultaNFeSaidas() {
                       className="cursor-pointer hover:bg-muted/50 h-8"
                       onClick={() => setSelected(row)}
                     >
-                      <TableCell className="py-1 px-2 font-mono text-[11px]">
-                        {fmtCNPJ(row.emit_cnpj)}
-                      </TableCell>
                       <TableCell className="py-1 px-2">
-                        <div className="text-[11px] font-medium leading-tight">{row.emit_nome || '—'}</div>
+                        <div className="text-[11px] font-medium leading-tight">
+                          {formatCnpjComApelido(row.emit_cnpj, apelidos)}
+                        </div>
                         <div className="text-[10px] text-muted-foreground leading-tight">{row.emit_uf}</div>
                       </TableCell>
                       <TableCell className="py-1 px-2">
@@ -468,6 +501,14 @@ export default function ConsultaNFeSaidas() {
                       <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
                       <TableCell className="py-1 px-2 text-center">
                         <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
+                      </TableCell>
+                      <TableCell className="py-1 px-2" onClick={e => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-[10px] text-muted-foreground select-all">
+                            {row.chave_nfe}
+                          </span>
+                          <CopyChaveButton chave={row.chave_nfe} />
+                        </div>
                       </TableCell>
                       <TableCell className="py-1 px-2 text-[11px] text-right font-semibold">
                         {fmtBRL(row.v_nf)}
