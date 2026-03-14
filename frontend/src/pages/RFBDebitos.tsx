@@ -101,13 +101,32 @@ function formatNumber(n: number): string {
   return new Intl.NumberFormat('pt-BR').format(n);
 }
 
-// ── URL DANFE via meudanfe.com.br ─────────────────────────────────────────────
-// Suporta NF-e (55) e NFC-e (65), todos os estados, sem captcha
+// ── DANFE via backend (/api/danfe/{chave}) ────────────────────────────────────
 
-function getDanfeUrl(chave: string): string {
-  if (!chave) return '';
-  // meudanfe.com.br — suporta NF-e (55) e NFC-e (65), cobre todos os estados
-  return `https://meudanfe.com.br/danfe/${chave}`;
+async function openDanfe(chave: string) {
+  const res = await fetch(`/api/danfe/${chave}`, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      'X-Company-ID':  localStorage.getItem('companyId') || '',
+    },
+  });
+
+  if (res.status === 404) {
+    toast.error('XML desta NF-e não encontrado. Importe o XML de saída primeiro.');
+    return;
+  }
+  if (!res.ok) {
+    toast.error('Erro ao gerar DANFE. Tente novamente.');
+    return;
+  }
+
+  const contentType = res.headers.get('Content-Type') || '';
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const win  = window.open(url, '_blank');
+  // revoga o blob URL após abrir
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  if (!win) toast.warning('Permita popups para visualizar o DANFE.');
 }
 
 // ── Botão copiar chave ────────────────────────────────────────────────────────
@@ -463,15 +482,13 @@ export default function RFBDebitos() {
                         <span className="select-all">{d.chave_dfe || '—'}</span>
                         {d.chave_dfe && <CopyChaveButton chave={d.chave_dfe} />}
                         {d.chave_dfe && (
-                          <a
-                            href={getDanfeUrl(d.chave_dfe)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="Ver DANFE (meudanfe.com.br)"
+                          <button
+                            onClick={() => openDanfe(d.chave_dfe)}
+                            title="Ver DANFE"
                             className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors"
                           >
                             <FileText className="h-3 w-3" />
-                          </a>
+                          </button>
                         )}
                       </td>
                       <td className="px-2 py-1 text-right font-medium text-red-600">{formatCurrency(d.valor_cbs_total)}</td>

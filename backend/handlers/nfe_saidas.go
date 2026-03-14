@@ -391,6 +391,13 @@ func NfeSaidasUploadHandler(db *sql.DB) http.HandlerFunc {
 				continue
 			}
 
+			// Save raw XML to dfe_xml for DANFE generation
+			_, _ = db.Exec(`
+				INSERT INTO dfe_xml (company_id, chave, tipo, modelo, xml_raw)
+				VALUES ($1, $2, 'nfe', $3, $4)
+				ON CONFLICT ON CONSTRAINT uq_dfe_xml_company_chave DO UPDATE SET xml_raw = EXCLUDED.xml_raw
+			`, companyID, chave, modInt, string(data))
+
 			result.Importados++
 		}
 
