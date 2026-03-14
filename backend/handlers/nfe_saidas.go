@@ -274,12 +274,16 @@ func NfeSaidasUploadHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Multipart com limite de 512MB (XMLs são pequenos, mas podem ser muitos)
+		log.Printf("[NfeSaidas] Upload request: company=%s method=%s content-type=%s content-length=%d",
+			companyID, r.Method, r.Header.Get("Content-Type"), r.ContentLength)
 		if err := r.ParseMultipartForm(512 << 20); err != nil {
+			log.Printf("[NfeSaidas] ParseMultipartForm error: %v", err)
 			jsonErr(w, http.StatusBadRequest, "Erro ao processar upload: "+err.Error())
 			return
 		}
 
 		files := r.MultipartForm.File["xmls"]
+		log.Printf("[NfeSaidas] files no campo 'xmls': %d", len(files))
 		if len(files) == 0 {
 			jsonErr(w, http.StatusBadRequest, "Nenhum arquivo enviado (campo 'xmls')")
 			return
