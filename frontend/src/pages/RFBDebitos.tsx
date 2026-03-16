@@ -229,9 +229,20 @@ export default function RFBDebitos() {
           .filter((r: RFBRequest) => r.status === 'completed')
           .sort((a: RFBRequest, b: RFBRequest) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
+        // Normaliza qualquer formato de período para YYYY-MM para de-duplicação
+        const toPeriodKey = (r: RFBRequest): string => {
+          const raw = r.resumo?.data_apuracao;
+          if (raw) {
+            if (/^\d{6}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}`; // 202603 → 2026-03
+            const m = raw.match(/^(\d{4})-(\d{2})/);
+            if (m) return `${m[1]}-${m[2]}`; // 2026-03-xx → 2026-03
+          }
+          return r.created_at.slice(0, 7); // fallback: YYYY-MM do created_at
+        };
+
         const seen = new Set<string>();
         const deduped = completed.filter((r: RFBRequest) => {
-          const key = r.resumo?.data_apuracao || r.created_at.slice(0, 7);
+          const key = toPeriodKey(r);
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
