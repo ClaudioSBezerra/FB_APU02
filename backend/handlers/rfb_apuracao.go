@@ -64,7 +64,7 @@ type RFBDebitoRow struct {
 	SituacaoDebito     string   `json:"situacao_debito"`
 }
 
-// SolicitarApuracaoHandler triggers a new CBS assessment request to the RFB API
+// SolicitarApuracaoHandler triggers a new CBS assessment request to the RFB API (manual — uses up to 2 slots/day)
 func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -88,82 +88,39 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Check if company has active credentials
-		var clientID, clientSecret, cnpjMatriz, ambiente string
-		err = db.QueryRow(`
-			SELECT client_id, client_secret, cnpj_matriz, COALESCE(ambiente, 'producao') FROM rfb_credentials
-			WHERE company_id = $1 AND ativo = true
-		`, companyID).Scan(&clientID, &clientSecret, &cnpjMatriz, &ambiente)
-		if err == sql.ErrNoRows {
-			http.Error(w, "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.", http.StatusBadRequest)
-			return
-		}
-		if err != nil {
-			http.Error(w, "Erro ao buscar credenciais: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Check daily limit (max 2 requests per day)
+		// Manual requests: full 2/day limit (timezone-correct)
 		var todayCount int
-		err = db.QueryRow(`
+		db.QueryRow(`
 			SELECT COUNT(*) FROM rfb_requests
 			WHERE company_id = $1 AND status != 'error'
-			AND created_at >= CURRENT_DATE
+			  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 		`, companyID).Scan(&todayCount)
-		if err == nil && todayCount >= 2 {
+		if todayCount >= 2 {
 			http.Error(w, "Limite diário atingido (máximo 2 solicitações por dia)", http.StatusTooManyRequests)
 			return
 		}
 
-		// Extract CNPJ base (first 8 digits)
-		cnpjBase := cnpjMatriz
-		if len(cnpjBase) > 8 {
-			cnpjBase = cnpjBase[:8]
-		}
-
-		// 1. Get OAuth2 token
-		rfbClient := services.NewRFBClient()
-		rfbClient.SetAmbiente(ambiente)
-		token, err := rfbClient.GetToken(clientID, clientSecret)
-		if err != nil {
-			// Save failed request
-			db.Exec(`
-				INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message)
-				VALUES ($1, $2, 'error', 'TOKEN_ERROR', $3)
-			`, companyID, cnpjBase, err.Error())
-			http.Error(w, "Erro ao obter token da RFB: "+err.Error(), http.StatusBadGateway)
-			return
-		}
-
-		// 2. Request CBS assessment
-		tiquete, err := rfbClient.SolicitarApuracao(token, cnpjBase)
-		if err != nil {
-			db.Exec(`
-				INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message)
-				VALUES ($1, $2, 'error', 'REQUEST_ERROR', $3)
-			`, companyID, cnpjBase, err.Error())
-			http.Error(w, "Erro ao solicitar apuração: "+err.Error(), http.StatusBadGateway)
-			return
-		}
-
-		// 3. Save request with ticket
-		var requestID string
-		err = db.QueryRow(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status)
-			VALUES ($1, $2, $3, 'requested')
-			RETURNING id
-		`, companyID, cnpjBase, tiquete).Scan(&requestID)
-		if err != nil {
-			http.Error(w, "Erro ao salvar solicitação: "+err.Error(), http.StatusInternalServerError)
+		if err := services.SolicitarApuracaoParaEmpresa(db, companyID); err != nil {
+			msg := err.Error()
+			switch {
+			case strings.Contains(msg, "credenciais RFB não encontradas"):
+				http.Error(w, "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.", http.StatusBadRequest)
+			case strings.Contains(msg, "slot automático já utilizado"):
+				http.Error(w, "Limite diário atingido (máximo 2 solicitações por dia)", http.StatusTooManyRequests)
+			case strings.Contains(msg, "TOKEN_ERROR"):
+				http.Error(w, "Erro ao obter token da RFB: "+msg, http.StatusBadGateway)
+			case strings.Contains(msg, "REQUEST_ERROR"):
+				http.Error(w, "Erro ao solicitar apuração: "+msg, http.StatusBadGateway)
+			default:
+				http.Error(w, msg, http.StatusInternalServerError)
+			}
 			return
 		}
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"request_id": requestID,
-			"tiquete":    tiquete,
-			"status":     "requested",
-			"message":    "Solicitação enviada à Receita Federal. Aguarde o retorno via webhook.",
+			"status":  "requested",
+			"message": "Solicitação enviada à Receita Federal. Aguarde o retorno via webhook.",
 		})
 	}
 }

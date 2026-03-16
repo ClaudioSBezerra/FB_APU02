@@ -3,7 +3,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Globe, Save, Trash2, Pencil, CheckCircle2, XCircle } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Globe, Save, Trash2, Pencil, CheckCircle2, XCircle, Clock } from 'lucide-react';
 
 interface RFBCredential {
   id: string;
@@ -13,6 +14,8 @@ interface RFBCredential {
   client_secret: string;
   ambiente: string;
   ativo: boolean;
+  agendamento_ativo: boolean;
+  horario_agendamento: string; // HH:MM
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +34,8 @@ export default function RFBCredentials() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
+  const [scheduleData, setScheduleData] = useState({ agendamento_ativo: false, horario_agendamento: '06:00' });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [formData, setFormData] = useState({
     cnpj_matriz: '',
@@ -58,6 +63,10 @@ export default function RFBCredentials() {
             client_id: data.credential.client_id,
             client_secret: '',
             ambiente: data.credential.ambiente || 'producao_restrita',
+          });
+          setScheduleData({
+            agendamento_ativo: data.credential.agendamento_ativo ?? false,
+            horario_agendamento: data.credential.horario_agendamento || '06:00',
           });
           setEditing(false);
         } else {
@@ -149,6 +158,34 @@ export default function RFBCredentials() {
       client_secret: '',
       ambiente: credential?.ambiente || 'producao_restrita',
     });
+  };
+
+  const handleSaveSchedule = async () => {
+    setSavingSchedule(true);
+    setMessage(null);
+    try {
+      const token = localStorage.getItem('token');
+      const companyId = localStorage.getItem('companyId');
+      const response = await fetch('/api/rfb/credentials/agendamento', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+          'X-Company-ID': companyId || '',
+        },
+        body: JSON.stringify(scheduleData),
+      });
+      if (response.ok) {
+        setMessage({ type: 'success', text: 'Agendamento salvo com sucesso!' });
+      } else {
+        const text = await response.text();
+        setMessage({ type: 'error', text: text || 'Erro ao salvar agendamento' });
+      }
+    } catch {
+      setMessage({ type: 'error', text: 'Erro de conexão' });
+    } finally {
+      setSavingSchedule(false);
+    }
   };
 
   if (loading) {
@@ -327,6 +364,51 @@ export default function RFBCredentials() {
           )}
         </CardContent>
       </Card>
+
+      {credential && (
+        <Card className="mt-6">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Clock className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <CardTitle className="text-lg">Agendamento Automático</CardTitle>
+                <CardDescription>
+                  Solicitação diária automática no horário configurado (fuso Brasília)
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Ativar agendamento</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Usa 1 slot/dia — preserva 1 slot para solicitação manual
+                </p>
+              </div>
+              <Switch
+                checked={scheduleData.agendamento_ativo}
+                onCheckedChange={(v) => setScheduleData({ ...scheduleData, agendamento_ativo: v })}
+              />
+            </div>
+            <div>
+              <Label htmlFor="horario_agendamento">Horário (Brasília)</Label>
+              <Input
+                id="horario_agendamento"
+                type="time"
+                value={scheduleData.horario_agendamento}
+                onChange={(e) => setScheduleData({ ...scheduleData, horario_agendamento: e.target.value })}
+                className="mt-1 w-36"
+                disabled={!scheduleData.agendamento_ativo}
+              />
+            </div>
+            <Button onClick={handleSaveSchedule} disabled={savingSchedule} variant="outline">
+              <Save className="mr-2 h-4 w-4" />
+              {savingSchedule ? 'Salvando...' : 'Salvar Agendamento'}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

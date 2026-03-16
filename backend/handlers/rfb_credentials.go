@@ -11,15 +11,17 @@ import (
 )
 
 type RFBCredential struct {
-	ID           string    `json:"id"`
-	CompanyID    string    `json:"company_id"`
-	CNPJMatriz   string    `json:"cnpj_matriz"`
-	ClientID     string    `json:"client_id"`
-	ClientSecret string    `json:"client_secret"`
-	Ambiente     string    `json:"ambiente"`
-	Ativo        bool      `json:"ativo"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	CompanyID           string    `json:"company_id"`
+	CNPJMatriz          string    `json:"cnpj_matriz"`
+	ClientID            string    `json:"client_id"`
+	ClientSecret        string    `json:"client_secret"`
+	Ambiente            string    `json:"ambiente"`
+	Ativo               bool      `json:"ativo"`
+	AgendamentoAtivo    bool      `json:"agendamento_ativo"`
+	HorarioAgendamento  string    `json:"horario_agendamento"` // HH:MM
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
 }
 
 // GetRFBCredentialHandler returns the RFB credential for the user's company
@@ -42,11 +44,16 @@ func GetRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		var cred RFBCredential
+		var horario string
 		err = db.QueryRow(`
-			SELECT id, company_id, cnpj_matriz, client_id, client_secret, COALESCE(ambiente, 'producao'), ativo, created_at, updated_at
+			SELECT id, company_id, cnpj_matriz, client_id, client_secret, COALESCE(ambiente, 'producao'), ativo,
+			       COALESCE(agendamento_ativo, false), COALESCE(TO_CHAR(horario_agendamento, 'HH24:MI'), '06:00'),
+			       created_at, updated_at
 			FROM rfb_credentials
 			WHERE company_id = $1
-		`, companyID).Scan(&cred.ID, &cred.CompanyID, &cred.CNPJMatriz, &cred.ClientID, &cred.ClientSecret, &cred.Ambiente, &cred.Ativo, &cred.CreatedAt, &cred.UpdatedAt)
+		`, companyID).Scan(&cred.ID, &cred.CompanyID, &cred.CNPJMatriz, &cred.ClientID, &cred.ClientSecret, &cred.Ambiente, &cred.Ativo,
+			&cred.AgendamentoAtivo, &horario, &cred.CreatedAt, &cred.UpdatedAt)
+		cred.HorarioAgendamento = horario
 
 		if err == sql.ErrNoRows {
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -147,10 +154,15 @@ func SaveRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 
 		// Fetch saved credential
 		var cred RFBCredential
+		var horario string
 		err = db.QueryRow(`
-			SELECT id, company_id, cnpj_matriz, client_id, client_secret, COALESCE(ambiente, 'producao'), ativo, created_at, updated_at
+			SELECT id, company_id, cnpj_matriz, client_id, client_secret, COALESCE(ambiente, 'producao'), ativo,
+			       COALESCE(agendamento_ativo, false), COALESCE(TO_CHAR(horario_agendamento, 'HH24:MI'), '06:00'),
+			       created_at, updated_at
 			FROM rfb_credentials WHERE id = $1
-		`, id).Scan(&cred.ID, &cred.CompanyID, &cred.CNPJMatriz, &cred.ClientID, &cred.ClientSecret, &cred.Ambiente, &cred.Ativo, &cred.CreatedAt, &cred.UpdatedAt)
+		`, id).Scan(&cred.ID, &cred.CompanyID, &cred.CNPJMatriz, &cred.ClientID, &cred.ClientSecret, &cred.Ambiente, &cred.Ativo,
+			&cred.AgendamentoAtivo, &horario, &cred.CreatedAt, &cred.UpdatedAt)
+		cred.HorarioAgendamento = horario
 		if err != nil {
 			http.Error(w, "Credential saved but error fetching", http.StatusInternalServerError)
 			return
@@ -165,6 +177,62 @@ func SaveRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"credential": cred,
 			"message":    "Credenciais salvas com sucesso",
+		})
+	}
+}
+
+// UpdateRFBScheduleHandler updates agendamento_ativo and horario_agendamento for the credential
+func UpdateRFBScheduleHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		if r.Method != http.MethodPatch {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := claims["user_id"].(string)
+
+		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+		if err != nil {
+			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		var req struct {
+			AgendamentoAtivo   bool   `json:"agendamento_ativo"`
+			HorarioAgendamento string `json:"horario_agendamento"` // HH:MM
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Validate HH:MM format
+		if len(req.HorarioAgendamento) != 5 || req.HorarioAgendamento[2] != ':' {
+			req.HorarioAgendamento = "06:00"
+		}
+
+		_, err = db.Exec(`
+			UPDATE rfb_credentials
+			SET agendamento_ativo = $1, horario_agendamento = $2::TIME, updated_at = CURRENT_TIMESTAMP
+			WHERE company_id = $3
+		`, req.AgendamentoAtivo, req.HorarioAgendamento, companyID)
+		if err != nil {
+			http.Error(w, "Erro ao atualizar agendamento: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"agendamento_ativo":   req.AgendamentoAtivo,
+			"horario_agendamento": req.HorarioAgendamento,
+			"message":             "Agendamento atualizado com sucesso",
 		})
 	}
 }

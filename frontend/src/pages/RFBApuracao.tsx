@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Globe, Send, RefreshCw, AlertTriangle, Download, Trash2, RotateCcw, CheckCircle2 } from 'lucide-react';
+import { Globe, Send, RefreshCw, AlertTriangle, Download, Trash2, RotateCcw, CheckCircle2, CalendarClock } from 'lucide-react';
 
 interface RFBResumo {
   total_debitos: number;
@@ -59,6 +59,7 @@ export default function RFBApuracao() {
   const [loading, setLoading] = useState(true);
   const [soliciting, setSoliciting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [scheduleInfo, setScheduleInfo] = useState<{ agendamento_ativo: boolean; horario_agendamento: string } | null>(null);
 
   const getHeaders = () => {
     const token = localStorage.getItem('token');
@@ -85,6 +86,22 @@ export default function RFBApuracao() {
 
   useEffect(() => {
     fetchRequests();
+    // Buscar info de agendamento para banner informativo
+    const token = localStorage.getItem('token');
+    const companyId = localStorage.getItem('companyId');
+    fetch('/api/rfb/credentials', {
+      headers: { 'Authorization': `Bearer ${token}`, 'X-Company-ID': companyId || '' },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.credential) {
+          setScheduleInfo({
+            agendamento_ativo: data.credential.agendamento_ativo ?? false,
+            horario_agendamento: data.credential.horario_agendamento || '06:00',
+          });
+        }
+      })
+      .catch(() => {});
   }, [fetchRequests]);
 
   // Poll para requests em andamento
@@ -216,6 +233,15 @@ export default function RFBApuracao() {
           </Button>
         </div>
       </div>
+
+      {scheduleInfo?.agendamento_ativo && (
+        <div className="mb-4 flex items-center gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-blue-800">
+          <CalendarClock className="h-4 w-4 shrink-0" />
+          <p className="text-sm">
+            <strong>Importação automática ativa</strong> — a solicitação de débitos CBS é enviada automaticamente à Receita Federal todos os dias às <strong>{scheduleInfo.horario_agendamento}</strong> (horário de Brasília).
+          </p>
+        </div>
+      )}
 
       {message && (
         <div className={`mb-4 rounded-md p-4 ${message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>

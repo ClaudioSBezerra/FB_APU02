@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"fb_apu02/handlers"
+	"fb_apu02/services"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -235,6 +236,7 @@ func main() {
 	PrintVersion()
 
 	initDBAsync()
+	go services.StartRFBScheduler(getDB)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -420,6 +422,14 @@ func main() {
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+	http.HandleFunc("/api/rfb/credentials/agendamento", func(w http.ResponseWriter, r *http.Request) {
+		database := getDB()
+		if database == nil {
+			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
+			return
+		}
+		handlers.AuthMiddleware(handlers.UpdateRFBScheduleHandler(database), "")(w, r)
 	})
 
 	// RFB Apuração
