@@ -17,8 +17,8 @@ type ResetCompanyDataRequest struct {
 	CompanyID string `json:"company_id"`
 }
 
-// LimparDadosApuracaoHandler deletes all IBS/CBS apuration data for the active company (admin only).
-// Clears: nfe_saidas, nfe_entradas, cte_entradas, dfe_xml, rfb_requests (cascades rfb_debitos + rfb_resumo).
+// LimparDadosApuracaoHandler deletes IBS/CBS XML import data for the active company (admin only).
+// Clears: nfe_saidas, nfe_entradas, cte_entradas, dfe_xml. RFB imports are preserved.
 func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -65,17 +65,6 @@ func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			results = append(results, tableResult{t, n})
 			log.Printf("[LimparApuracao] %s: %d registros removidos", t, n)
 		}
-
-		// rfb_requests cascades rfb_debitos + rfb_resumo
-		rfbRes, err := db.Exec("DELETE FROM rfb_requests WHERE company_id = $1", companyID)
-		if err != nil {
-			log.Printf("[LimparApuracao] Erro ao limpar rfb_requests: %v", err)
-			http.Error(w, "Erro ao limpar rfb_requests: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		rfbN, _ := rfbRes.RowsAffected()
-		results = append(results, tableResult{"rfb_requests", rfbN})
-		log.Printf("[LimparApuracao] rfb_requests: %d registros removidos (cascata: rfb_debitos, rfb_resumo)", rfbN)
 
 		totals := map[string]int64{}
 		for _, r := range results {

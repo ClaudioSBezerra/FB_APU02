@@ -10,7 +10,6 @@ interface LimparResult {
   nfe_entradas: number;
   cte_entradas: number;
   dfe_xml: number;
-  rfb_requests: number;
 }
 
 function fmtN(n: number) {
@@ -20,11 +19,10 @@ function fmtN(n: number) {
 const CONFIRM_WORD = 'LIMPAR';
 
 const DATA_ITEMS = [
-  { label: 'NF-e Saídas',       desc: 'Notas fiscais de saída importadas' },
-  { label: 'NF-e Entradas',     desc: 'Notas fiscais de entrada importadas' },
-  { label: 'CT-e Entradas',     desc: 'Conhecimentos de transporte importados' },
-  { label: 'XMLs armazenados',  desc: 'Arquivos XML brutos (dfe_xml)' },
-  { label: 'Importações RFB',   desc: 'Débitos CBS e resumos da Receita Federal' },
+  { label: 'NF-e Saídas',      desc: 'Notas fiscais de saída importadas' },
+  { label: 'NF-e Entradas',    desc: 'Notas fiscais de entrada importadas' },
+  { label: 'CT-e Entradas',    desc: 'Conhecimentos de transporte importados' },
+  { label: 'XMLs armazenados', desc: 'Arquivos XML brutos (dfe_xml)' },
 ];
 
 export default function LimparDadosApuracao() {
@@ -75,11 +73,10 @@ export default function LimparDadosApuracao() {
 
         <div className="border rounded-lg divide-y text-sm">
           {[
-            { label: 'NF-e Saídas',       value: result.nfe_saidas },
-            { label: 'NF-e Entradas',     value: result.nfe_entradas },
-            { label: 'CT-e Entradas',     value: result.cte_entradas },
-            { label: 'XMLs armazenados',  value: result.dfe_xml },
-            { label: 'Importações RFB',   value: result.rfb_requests },
+            { label: 'NF-e Saídas',      value: result.nfe_saidas },
+            { label: 'NF-e Entradas',    value: result.nfe_entradas },
+            { label: 'CT-e Entradas',    value: result.cte_entradas },
+            { label: 'XMLs armazenados', value: result.dfe_xml },
           ].map(row => (
             <div key={row.label} className="flex justify-between items-center px-4 py-2">
               <span className="text-muted-foreground">{row.label}</span>
@@ -128,7 +125,7 @@ export default function LimparDadosApuracao() {
           ))}
         </div>
         <p className="text-xs text-muted-foreground mt-2">
-          Configurações (alíquotas, CFOP, credenciais RFB, usuários) <strong>não</strong> serão afetadas.
+          Importações da RFB (débitos CBS), configurações (alíquotas, CFOP, credenciais) e usuários <strong>não</strong> serão afetados.
         </p>
       </div>
 
