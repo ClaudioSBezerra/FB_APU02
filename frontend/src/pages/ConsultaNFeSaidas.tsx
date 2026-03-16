@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,14 +27,26 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Search, X, Copy, Check, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Copy, Check, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCnpjComApelido } from '@/lib/formatFilial';
 
 const PAGE_SIZE = 100;
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// ── Meses disponíveis ─────────────────────────────────────────────────────────
+function buildMesAnoOptions(): { value: string; label: string }[] {
+  const opts: { value: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = String(d.getFullYear());
+    opts.push({ value: `${mm}/${yyyy}`, label: `${mm}/${yyyy}` });
+  }
+  return opts;
+}
+const MES_ANO_OPTIONS = buildMesAnoOptions();
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface NfeSaidaRow {
   id: string;
   chave_nfe: string;
@@ -61,9 +74,16 @@ interface NfeSaidaRow {
   v_cbs: number | null; v_cred_pres_cbs: number | null;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+interface NfeSaidaResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  totals: { v_nf: number; v_icms: number; v_ibs: number; v_cbs: number };
+  items: NfeSaidaRow[];
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtBRL(v: number | null | undefined, dash = '—'): string {
   if (v == null) return dash;
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -72,34 +92,17 @@ function fmtBRL(v: number | null | undefined, dash = '—'): string {
 function fmtCNPJ(v: string): string {
   if (!v) return '—';
   const d = v.replace(/\D/g, '');
-  if (d.length === 14)
-    return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
-  if (d.length === 11)
-    return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
+  if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
+  if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
   return v;
-}
-
-function dmyToISO(s: string): string {
-  const m = s?.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (!m) return '';
-  return `${m[3]}-${m[2]}-${m[1]}`;
 }
 
 async function openDanfe(chave: string, token: string | null, companyId: string | null) {
   const res = await fetch(`/api/danfe/${chave}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'X-Company-ID': companyId || '',
-    },
+    headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' },
   });
-  if (res.status === 404) {
-    toast.error('XML desta NF-e não encontrado. Importe o XML primeiro para gerar o DANFE.');
-    return;
-  }
-  if (!res.ok) {
-    toast.error('Erro ao gerar DANFE.');
-    return;
-  }
+  if (res.status === 404) { toast.error('XML desta NF-e não encontrado. Importe o XML primeiro.'); return; }
+  if (!res.ok) { toast.error('Erro ao gerar DANFE.'); return; }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const win = window.open(url, '_blank');
@@ -124,9 +127,43 @@ function CopyChaveButton({ chave }: { chave: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Detalhe (Dialog)
-// ---------------------------------------------------------------------------
+// ── Paginação com input de página ─────────────────────────────────────────────
+function Pagination({
+  page, pageCount, onChange,
+}: { page: number; pageCount: number; onChange: (p: number) => void }) {
+  const [inputVal, setInputVal] = useState(String(page));
+  useEffect(() => { setInputVal(String(page)); }, [page]);
+  if (pageCount <= 1) return null;
+  const go = (raw: string) => {
+    const n = parseInt(raw, 10);
+    if (!isNaN(n) && n >= 1 && n <= pageCount) onChange(n);
+    else setInputVal(String(page));
+  };
+  return (
+    <div className="flex items-center justify-center gap-2 py-3">
+      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+        disabled={page === 1} onClick={() => onChange(page - 1)}>
+        <ChevronLeft className="h-3 w-3" />
+      </Button>
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span>Pág.</span>
+        <input type="number" min={1} max={pageCount} value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onBlur={e => go(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') go(inputVal); }}
+          className="w-14 h-7 rounded border border-input bg-background px-2 text-center text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <span>de {pageCount}</span>
+      </div>
+      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+        disabled={page === pageCount} onClick={() => onChange(page + 1)}>
+        <ChevronRight className="h-3 w-3" />
+      </Button>
+    </div>
+  );
+}
+
+// ── Detalhe (Dialog) ──────────────────────────────────────────────────────────
 function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void }) {
   const Linha = ({ label, value }: { label: string; value: string | number | null | undefined }) => (
     <div className="flex justify-between py-0.5 border-b border-dashed last:border-0">
@@ -152,9 +189,7 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
         <DialogHeader>
           <DialogTitle className="text-xs">
             NF-e {nfe.modelo} · Série {nfe.serie} · Nº {nfe.numero_nfe}
-            <div className="text-[11px] font-normal text-muted-foreground mt-0.5 break-all">
-              Chave: {nfe.chave_nfe}
-            </div>
+            <div className="text-[11px] font-normal text-muted-foreground mt-0.5 break-all">Chave: {nfe.chave_nfe}</div>
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-1 mt-1">
@@ -214,76 +249,39 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
   );
 }
 
-// ---------------------------------------------------------------------------
-// Paginação com input de página
-// ---------------------------------------------------------------------------
-function Pagination({
-  page, pageCount, onChange,
-}: { page: number; pageCount: number; onChange: (p: number) => void }) {
-  const [inputVal, setInputVal] = useState(String(page));
-
-  // Sincroniza input quando page muda externamente (ex: reset por filtro)
-  useEffect(() => { setInputVal(String(page)); }, [page]);
-
-  if (pageCount <= 1) return null;
-
-  const go = (raw: string) => {
-    const n = parseInt(raw, 10);
-    if (!isNaN(n) && n >= 1 && n <= pageCount) onChange(n);
-    else setInputVal(String(page)); // reverte se inválido
-  };
-
-  return (
-    <div className="flex items-center justify-center gap-2 py-3">
-      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
-        disabled={page === 1} onClick={() => onChange(page - 1)}>
-        <ChevronLeft className="h-3 w-3" />
-      </Button>
-
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span>Pág.</span>
-        <input
-          type="number" min={1} max={pageCount}
-          value={inputVal}
-          onChange={e => setInputVal(e.target.value)}
-          onBlur={e => go(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') go(inputVal); }}
-          className="w-14 h-7 rounded border border-input bg-background px-2 text-center text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-        />
-        <span>de {pageCount}</span>
-      </div>
-
-      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
-        disabled={page === pageCount} onClick={() => onChange(page + 1)}>
-        <ChevronRight className="h-3 w-3" />
-      </Button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Página principal
-// ---------------------------------------------------------------------------
+// ── Página principal ──────────────────────────────────────────────────────────
 export default function ConsultaNFeSaidas() {
   const { token, companyId } = useAuth();
 
-  const [items, setItems] = useState<NfeSaidaRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<NfeSaidaRow | null>(null);
-  const [apelidos, setApelidos] = useState<Record<string, string>>({});
-  const [page, setPage] = useState(1);
-
-  const [filterFilial, setFilterFilial] = useState('all');
-  const [filterModelo, setFilterModelo] = useState('all');
+  // Mês obrigatório — sem seleção não carrega dados
+  const defaultMes = MES_ANO_OPTIONS[0]?.value ?? '';
+  const [mesAno,       setMesAno]       = useState(defaultMes);
+  const [filterFilial, setFilterFilial] = useState('');
+  const [filterModelo, setFilterModelo] = useState('');
   const [filterCliente, setFilterCliente] = useState('');
   const [filterDataDe, setFilterDataDe] = useState('');
   const [filterDataAte, setFilterDataAte] = useState('');
+  const [page, setPage] = useState(1);
+
+  // Debounce do campo de cliente para não disparar query a cada tecla
+  const [clienteDebounced, setClienteDebounced] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setClienteDebounced(filterCliente), 400);
+    return () => clearTimeout(t);
+  }, [filterCliente]);
+
+  // Reset página quando qualquer filtro muda
+  useEffect(() => { setPage(1); }, [mesAno, filterFilial, filterModelo, clienteDebounced, filterDataDe, filterDataAte]);
+
+  const [selected, setSelected] = useState<NfeSaidaRow | null>(null);
+  const [apelidos, setApelidos] = useState<Record<string, string>>({});
 
   const authHeaders = {
     Authorization: `Bearer ${token}`,
     'X-Company-ID': companyId || '',
   };
 
+  // Carrega apelidos de filiais
   useEffect(() => {
     if (!token) return;
     fetch('/api/config/filial-apelidos', { headers: authHeaders })
@@ -296,73 +294,50 @@ export default function ConsultaNFeSaidas() {
       .catch(() => {});
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/nfe-saidas', { headers: authHeaders });
+  // ── React Query: busca server-side ───────────────────────────────────────
+  const { data, isFetching, isError } = useQuery<NfeSaidaResponse>({
+    queryKey: ['nfe-saidas', companyId, {
+      page, mesAno, filterFilial, filterModelo,
+      clienteDebounced, filterDataDe, filterDataAte,
+    }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('page_size', String(PAGE_SIZE));
+      if (mesAno)             params.set('mes_ano',   mesAno);
+      if (filterFilial)       params.set('emit_cnpj', filterFilial);
+      if (filterModelo)       params.set('modelo',    filterModelo);
+      if (filterDataDe)       params.set('data_de',   filterDataDe);
+      if (filterDataAte)      params.set('data_ate',  filterDataAte);
+      if (clienteDebounced) {
+        const digits = clienteDebounced.replace(/\D/g, '');
+        // Se for apenas dígitos → busca por CNPJ/CPF; senão → busca por nome
+        if (digits && digits === clienteDebounced.replace(/[.\-/]/g, '').replace(/\s/g, '')) {
+          params.set('dest_cnpj', digits);
+        } else {
+          params.set('dest_nome', clienteDebounced);
+        }
+      }
+      const res = await fetch(`/api/nfe-saidas?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json();
-      setItems(data.items || []);
-      setFilterFilial('all'); setFilterModelo('all');
-      setFilterCliente(''); setFilterDataDe(''); setFilterDataAte('');
-      setPage(1);
-    } catch (err: unknown) {
-      toast.error('Erro ao buscar notas: ' + String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
+      return res.json();
+    },
+    placeholderData: keepPreviousData,
+    enabled: !!token && !!companyId,
+  });
 
-  useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const items      = data?.items      ?? [];
+  const total      = data?.total      ?? 0;
+  const totalPages = data?.total_pages ?? 1;
+  const totals     = data?.totals     ?? { v_nf: 0, v_icms: 0, v_ibs: 0, v_cbs: 0 };
 
-  const clearFilters = () => {
-    setFilterFilial('all'); setFilterModelo('all');
+  const hasFilters = !!(filterFilial || filterModelo || filterCliente || filterDataDe || filterDataAte);
+
+  function clearFilters() {
+    setFilterFilial(''); setFilterModelo('');
     setFilterCliente(''); setFilterDataDe(''); setFilterDataAte('');
     setPage(1);
-  };
-
-  const uniqueFiliais = useMemo(() => {
-    const seen = new Map<string, string>();
-    items.forEach(r => { if (r.emit_cnpj) seen.set(r.emit_cnpj, r.emit_nome); });
-    return Array.from(seen.entries()).map(([cnpj, nome]) => ({ cnpj, nome }))
-      .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [items]);
-
-  // Contagem por modelo (para mostrar no filtro)
-  const modelCount = useMemo(() => {
-    const c: Record<string, number> = {};
-    items.forEach(r => { const k = String(r.modelo); c[k] = (c[k] || 0) + 1; });
-    return c;
-  }, [items]);
-
-  const displayItems = useMemo(() => {
-    return items.filter(r => {
-      if (filterFilial !== 'all' && r.emit_cnpj !== filterFilial) return false;
-      if (filterModelo !== 'all' && String(r.modelo) !== filterModelo) return false;
-      if (filterCliente) {
-        const nomeOk = r.dest_nome?.toLowerCase().includes(filterCliente.toLowerCase());
-        const cnpjOk = r.dest_cnpj_cpf?.replace(/\D/g, '').includes(filterCliente.replace(/\D/g, ''));
-        if (!nomeOk && !cnpjOk) return false;
-      }
-      const iso = dmyToISO(r.data_emissao);
-      if (filterDataDe && iso < filterDataDe) return false;
-      if (filterDataAte && iso > filterDataAte) return false;
-      return true;
-    });
-  }, [items, filterFilial, filterModelo, filterCliente, filterDataDe, filterDataAte]);
-
-  // Reset página quando filtros mudam
-  useEffect(() => { setPage(1); }, [filterFilial, filterModelo, filterCliente, filterDataDe, filterDataAte]);
-
-  const pageCount = Math.max(1, Math.ceil(displayItems.length / PAGE_SIZE));
-  const pageItems = displayItems.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const hasClientFilters = filterFilial !== 'all' || filterModelo !== 'all' || filterCliente || filterDataDe || filterDataAte;
-
-  const totalVNF  = displayItems.reduce((s, r) => s + r.v_nf,          0);
-  const totalICMS = displayItems.reduce((s, r) => s + r.v_icms,         0);
-  const totalIBS  = displayItems.reduce((s, r) => s + (r.v_ibs  ?? 0), 0);
-  const totalCBS  = displayItems.reduce((s, r) => s + (r.v_cbs  ?? 0), 0);
+  }
 
   return (
     <div className="space-y-6">
@@ -377,96 +352,93 @@ export default function ConsultaNFeSaidas() {
       <Card>
         <CardContent className="pt-4 space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
-            <Button size="sm" onClick={fetchData} disabled={loading}>
-              <Search className="h-3 w-3 mr-1" />
-              {loading ? 'Carregando...' : 'Recarregar'}
-            </Button>
-            {hasClientFilters && (
-              <Button size="sm" variant="ghost" onClick={clearFilters}>
+
+            {/* Mês/Ano — obrigatório */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Mês/Ano</label>
+              <Select value={mesAno} onValueChange={v => { setMesAno(v); setPage(1); }}>
+                <SelectTrigger className="h-8 w-32 text-[11px]">
+                  <SelectValue placeholder="Selecione..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {MES_ANO_OPTIONS.map(o => (
+                    <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Filial */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Filial (CNPJ)</label>
+              <Input placeholder="CNPJ da filial..."
+                value={filterFilial}
+                onChange={e => { setFilterFilial(e.target.value.replace(/\D/g, '')); setPage(1); }}
+                className="h-8 w-40 font-mono text-xs" />
+            </div>
+
+            {/* Modelo */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Modelo</label>
+              <Select value={filterModelo || 'all'} onValueChange={v => { setFilterModelo(v === 'all' ? '' : v); setPage(1); }}>
+                <SelectTrigger className="h-8 w-36 text-[11px]">
+                  <SelectValue placeholder="Todos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="55">55 — NF-e</SelectItem>
+                  <SelectItem value="65">65 — NFC-e</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Cliente */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Cliente (nome ou CNPJ/CPF)</label>
+              <Input placeholder="Digite nome ou documento..."
+                value={filterCliente}
+                onChange={e => setFilterCliente(e.target.value)}
+                className="h-8 w-60" />
+            </div>
+
+            {/* Data De */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Emissão De</label>
+              <Input type="date" value={filterDataDe}
+                onChange={e => { setFilterDataDe(e.target.value); setPage(1); }}
+                className="h-8 w-36" />
+            </div>
+
+            {/* Data Até */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Emissão Até</label>
+              <Input type="date" value={filterDataAte}
+                onChange={e => { setFilterDataAte(e.target.value); setPage(1); }}
+                className="h-8 w-36" />
+            </div>
+
+            {hasFilters && (
+              <Button size="sm" variant="ghost" onClick={clearFilters} className="self-end">
                 <X className="h-3 w-3 mr-1" />
                 Limpar filtros
               </Button>
             )}
+
             <span className="text-xs text-muted-foreground ml-auto self-end">
-              {displayItems.length} de {items.length} nota(s)
-              {pageCount > 1 && ` · Pág. ${page}/${pageCount}`}
+              {isFetching ? 'Carregando...' : `${total.toLocaleString('pt-BR')} nota(s)`}
             </span>
           </div>
-
-          {items.length > 0 && (
-            <div className="flex flex-wrap gap-3 items-end border-t pt-3">
-
-              {/* Filial */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground">Filial</label>
-                <Select value={filterFilial} onValueChange={v => { setFilterFilial(v); setPage(1); }}>
-                  <SelectTrigger className="h-8 w-64 text-[11px]">
-                    <SelectValue placeholder="Todas as filiais" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as filiais</SelectItem>
-                    {uniqueFiliais.map(f => (
-                      <SelectItem key={f.cnpj} value={f.cnpj}>
-                        {formatCnpjComApelido(f.cnpj, apelidos)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Modelo */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground">Modelo</label>
-                <Select value={filterModelo} onValueChange={v => { setFilterModelo(v); setPage(1); }}>
-                  <SelectTrigger className="h-8 w-40 text-[11px]">
-                    <SelectValue placeholder="Todos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos ({items.length})</SelectItem>
-                    <SelectItem value="55">55 — NF-e ({modelCount['55'] ?? 0})</SelectItem>
-                    <SelectItem value="65">65 — NFC-e ({modelCount['65'] ?? 0})</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Cliente */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground">Cliente (nome ou CNPJ/CPF)</label>
-                <Input placeholder="Digite nome ou documento..."
-                  value={filterCliente}
-                  onChange={e => { setFilterCliente(e.target.value); setPage(1); }}
-                  className="h-8 w-60" />
-              </div>
-
-              {/* Data De */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground">Emissão De</label>
-                <Input type="date" value={filterDataDe}
-                  onChange={e => { setFilterDataDe(e.target.value); setPage(1); }}
-                  className="h-8 w-36" />
-              </div>
-
-              {/* Data Até */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs text-muted-foreground">Emissão Até</label>
-                <Input type="date" value={filterDataAte}
-                  onChange={e => { setFilterDataAte(e.target.value); setPage(1); }}
-                  className="h-8 w-36" />
-              </div>
-
-            </div>
-          )}
         </CardContent>
       </Card>
 
       {/* ── Totalizador ── */}
-      {displayItems.length > 0 && (
+      {total > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
           {[
-            { label: 'Total vNF',   value: totalVNF },
-            { label: 'Total vICMS', value: totalICMS },
-            { label: 'Total vIBS',  value: totalIBS },
-            { label: 'Total vCBS',  value: totalCBS },
+            { label: 'Total vNF',   value: totals.v_nf },
+            { label: 'Total vICMS', value: totals.v_icms },
+            { label: 'Total vIBS',  value: totals.v_ibs },
+            { label: 'Total vCBS',  value: totals.v_cbs },
           ].map(c => (
             <Card key={c.label} className="p-2">
               <p className="text-[10px] text-muted-foreground">{c.label}</p>
@@ -484,9 +456,11 @@ export default function ConsultaNFeSaidas() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {displayItems.length === 0 ? (
+          {isError ? (
+            <p className="text-xs text-red-500 text-center py-8">Erro ao carregar dados. Tente recarregar a página.</p>
+          ) : items.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">
-              {loading ? 'Carregando...' : 'Nenhuma nota encontrada. Use os filtros acima.'}
+              {isFetching ? 'Carregando...' : 'Nenhuma nota encontrada para o período/filtros selecionados.'}
             </p>
           ) : (
             <>
@@ -506,11 +480,10 @@ export default function ConsultaNFeSaidas() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pageItems.map(row => (
+                    {items.map(row => (
                       <TableRow key={row.id}
                         className="cursor-pointer hover:bg-muted/50"
                         onClick={() => setSelected(row)}>
-                        {/* Filial: UF · CNPJ/Apelido */}
                         <TableCell className="py-0.5 px-2">
                           <div className="flex items-baseline gap-1">
                             <span className="text-[10px] font-semibold text-muted-foreground w-6 shrink-0">{row.emit_uf}</span>
@@ -519,7 +492,6 @@ export default function ConsultaNFeSaidas() {
                             </span>
                           </div>
                         </TableCell>
-                        {/* Cliente: doc · nome */}
                         <TableCell className="py-0.5 px-2">
                           <div className="flex items-baseline gap-1">
                             <span className="font-mono text-[10px] text-muted-foreground shrink-0 whitespace-nowrap">
@@ -530,9 +502,7 @@ export default function ConsultaNFeSaidas() {
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">
-                          {row.data_emissao}
-                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-center">{row.serie}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
                         <TableCell className="py-0.5 px-2 text-center">
@@ -540,15 +510,11 @@ export default function ConsultaNFeSaidas() {
                         </TableCell>
                         <TableCell className="py-0.5 px-2" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
-                            <span className="font-mono text-[10px] text-muted-foreground select-all">
-                              {row.chave_nfe}
-                            </span>
+                            <span className="font-mono text-[10px] text-muted-foreground select-all">{row.chave_nfe}</span>
                             <CopyChaveButton chave={row.chave_nfe} />
                           </div>
                         </TableCell>
-                        <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold">
-                          {fmtBRL(row.v_nf)}
-                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold">{fmtBRL(row.v_nf)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
                           <button title="Gerar DANFE"
                             onClick={() => openDanfe(row.chave_nfe, token, companyId)}
@@ -561,8 +527,7 @@ export default function ConsultaNFeSaidas() {
                   </TableBody>
                 </Table>
               </div>
-
-              <Pagination page={page} pageCount={pageCount} onChange={setPage} />
+              <Pagination page={page} pageCount={totalPages} onChange={setPage} />
             </>
           )}
         </CardContent>

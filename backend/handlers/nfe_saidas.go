@@ -510,10 +510,48 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		q := r.URL.Query()
-		mesAno := q.Get("mes_ano")
+		mesAno   := q.Get("mes_ano")
 		emitCNPJ := q.Get("emit_cnpj")
+		modelo   := q.Get("modelo")
+		destCNPJ := q.Get("dest_cnpj")
+		dataDe   := q.Get("data_de")
+		dataAte  := q.Get("data_ate")
 
-		query := `
+		page, pageSize := 1, 100
+		if p, e := strconv.Atoi(q.Get("page")); e == nil && p > 0 { page = p }
+		if ps, e := strconv.Atoi(q.Get("page_size")); e == nil && ps > 0 && ps <= 500 { pageSize = ps }
+
+		// ── Monta WHERE dinâmico ──────────────────────────────────────────────
+		args := []interface{}{companyID}
+		idx  := 2
+		where := "WHERE company_id = $1"
+
+		if mesAno != "" { where += fmt.Sprintf(" AND mes_ano = $%d", idx); args = append(args, mesAno); idx++ }
+		if emitCNPJ != "" { where += fmt.Sprintf(" AND emit_cnpj = $%d", idx); args = append(args, emitCNPJ); idx++ }
+		if modelo != "" { where += fmt.Sprintf(" AND modelo = $%d", idx); args = append(args, modelo); idx++ }
+		if dataDe != "" { where += fmt.Sprintf(" AND data_emissao >= $%d", idx); args = append(args, dataDe); idx++ }
+		if dataAte != "" { where += fmt.Sprintf(" AND data_emissao <= $%d", idx); args = append(args, dataAte); idx++ }
+		if destCNPJ != "" { where += fmt.Sprintf(" AND dest_cnpj_cpf LIKE $%d", idx); args = append(args, destCNPJ+"%"); idx++ }
+		if destNome := q.Get("dest_nome"); destNome != "" { where += fmt.Sprintf(" AND dest_nome ILIKE $%d", idx); args = append(args, "%"+destNome+"%"); idx++ }
+
+		// ── COUNT total ───────────────────────────────────────────────────────
+		var total int
+		if err := db.QueryRow("SELECT COUNT(*) FROM nfe_saidas "+where, args...).Scan(&total); err != nil {
+			log.Printf("NfeSaidasList count error: %v", err)
+			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
+			return
+		}
+
+		// ── Totalizadores (mesmos filtros) ────────────────────────────────────
+		var totVNF, totICMS, totIBS, totCBS float64
+		db.QueryRow(
+			"SELECT COALESCE(SUM(v_nf),0), COALESCE(SUM(v_icms),0), COALESCE(SUM(v_ibs),0), COALESCE(SUM(v_cbs),0) FROM nfe_saidas "+where,
+			args...,
+		).Scan(&totVNF, &totICMS, &totIBS, &totCBS)
+
+		// ── SELECT paginado ───────────────────────────────────────────────────
+		offset := (page - 1) * pageSize
+		selectQ := `
 			SELECT
 				id, chave_nfe, modelo, serie, numero_nfe,
 				TO_CHAR(data_emissao, 'DD/MM/YYYY'), mes_ano, COALESCE(nat_op,''),
@@ -525,26 +563,11 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 				v_ii, v_ipi, v_ipi_devol, v_pis, v_cofins, v_outro, v_nf,
 				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cred_pres_ibs,
 				v_cbs, v_cred_pres_cbs
-			FROM nfe_saidas
-			WHERE company_id = $1`
+			FROM nfe_saidas ` + where +
+			fmt.Sprintf(" ORDER BY data_emissao DESC, numero_nfe DESC LIMIT $%d OFFSET $%d", idx, idx+1)
+		pageArgs := append(args, pageSize, offset)
 
-		args := []interface{}{companyID}
-		idx := 2
-
-		if mesAno != "" {
-			query += fmt.Sprintf(" AND mes_ano = $%d", idx)
-			args = append(args, mesAno)
-			idx++
-		}
-		if emitCNPJ != "" {
-			query += fmt.Sprintf(" AND emit_cnpj = $%d", idx)
-			args = append(args, emitCNPJ)
-			idx++
-		}
-
-		query += " ORDER BY data_emissao DESC, numero_nfe DESC"
-
-		rows, err := db.Query(query, args...)
+		rows, err := db.Query(selectQ, pageArgs...)
 		if err != nil {
 			log.Printf("NfeSaidasList error: %v", err)
 			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
@@ -574,8 +597,19 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 			list = append(list, row)
 		}
 
+		totalPages := (total + pageSize - 1) / pageSize
+
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"total": len(list),
+			"total":       total,
+			"page":        page,
+			"page_size":   pageSize,
+			"total_pages": totalPages,
+			"totals": map[string]float64{
+				"v_nf":   totVNF,
+				"v_icms": totICMS,
+				"v_ibs":  totIBS,
+				"v_cbs":  totCBS,
+			},
 			"items": list,
 		})
 	}

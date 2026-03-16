@@ -75,9 +75,9 @@ func initDBAsync() {
 			if err == nil {
 				err = conn.Ping()
 				if err == nil {
-					conn.SetMaxOpenConns(25)
-					conn.SetMaxIdleConns(10)
-					conn.SetConnMaxLifetime(30 * time.Minute)
+					conn.SetMaxOpenConns(50)
+					conn.SetMaxIdleConns(15)
+					conn.SetConnMaxLifetime(15 * time.Minute)
 
 					dbMutex.Lock()
 					db = conn
@@ -195,6 +195,21 @@ func onDBConnected() {
 			}
 		}
 	}
+
+	// Retenção automática de dfe_xml: apaga XMLs com mais de 5 anos (obrigação fiscal = 5 anos)
+	go func() {
+		ticker := time.NewTicker(7 * 24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			cutoff := time.Now().AddDate(-5, 0, 0)
+			res, err := database.Exec(`DELETE FROM dfe_xml WHERE created_at < $1`, cutoff)
+			if err == nil {
+				if n, _ := res.RowsAffected(); n > 0 {
+					log.Printf("[Retention] Deleted %d dfe_xml records older than 5 years", n)
+				}
+			}
+		}
+	}()
 }
 
 func DBMiddleware(next http.HandlerFunc) http.HandlerFunc {

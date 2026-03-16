@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { useFiliais } from '@/contexts/FilialContext';
 import { Card, CardContent } from '@/components/ui/card';
@@ -44,33 +45,71 @@ interface RFBDebito {
   data_apuracao: string;
   ni_emitente: string;
   ni_adquirente: string;
+  valor_documento?: number;
   valor_cbs_total: number;
   valor_cbs_extinto: number;
   valor_cbs_nao_extinto: number;
   situacao_debito: string;
 }
 
-interface Pagination {
-  page: number;
-  page_size: number;
-  total: number;
-  total_pages: number;
+interface DebitPage {
+  debitos: RFBDebito[];
+  resumo: RFBResumo | null;
+  pagination: { page: number; page_size: number; total: number; total_pages: number };
 }
+
+// ── Paginação ─────────────────────────────────────────────────────────────────
+
+function PaginationBar({
+  page, pageCount, onChange,
+}: { page: number; pageCount: number; onChange: (p: number) => void }) {
+  const [inputVal, setInputVal] = useState(String(page));
+  useEffect(() => { setInputVal(String(page)); }, [page]);
+  if (pageCount <= 1) return null;
+  const go = (raw: string) => {
+    const n = parseInt(raw, 10);
+    if (!isNaN(n) && n >= 1 && n <= pageCount) onChange(n);
+    else setInputVal(String(page));
+  };
+  return (
+    <div className="flex items-center justify-center gap-2 py-3 border-t">
+      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+        disabled={page === 1} onClick={() => onChange(page - 1)}>
+        <ChevronLeft className="h-3 w-3" />
+      </Button>
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span>Pág.</span>
+        <input
+          type="number" min={1} max={pageCount}
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onBlur={e => go(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') go(inputVal); }}
+          className="w-14 h-7 rounded border border-input bg-background px-2 text-center text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+        <span>de {pageCount}</span>
+      </div>
+      <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+        disabled={page === pageCount} onClick={() => onChange(page + 1)}>
+        <ChevronRight className="h-3 w-3" />
+      </Button>
+    </div>
+  );
+}
+
+// ── Filtros ──────────────────────────────────────────────────────────────────
 
 interface Filters {
   modelo: string;
   dataInicio: string;
   dataFim: string;
-  numInicio: string;
-  numFim: string;
   chave: string;
   cliente: string;
 }
 
-const EMPTY_FILTERS: Filters = {
-  modelo: '', dataInicio: '', dataFim: '',
-  numInicio: '', numFim: '', chave: '', cliente: '',
-};
+const EMPTY_FILTERS: Filters = { modelo: '', dataInicio: '', dataFim: '', chave: '', cliente: '' };
+
+const MODELOS_DFE = ['55', '65', '57', '67', '58', '63'];
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -110,21 +149,11 @@ async function openDanfe(chave: string) {
       'X-Company-ID':  localStorage.getItem('companyId') || '',
     },
   });
-
-  if (res.status === 404) {
-    toast.error('XML desta NF-e não encontrado. Importe o XML de saída primeiro.');
-    return;
-  }
-  if (!res.ok) {
-    toast.error('Erro ao gerar DANFE. Tente novamente.');
-    return;
-  }
-
-  const contentType = res.headers.get('Content-Type') || '';
+  if (res.status === 404) { toast.error('XML desta NF-e não encontrado. Importe o XML de saída primeiro.'); return; }
+  if (!res.ok) { toast.error('Erro ao gerar DANFE. Tente novamente.'); return; }
   const blob = await res.blob();
-  const url  = URL.createObjectURL(blob);
-  const win  = window.open(url, '_blank');
-  // revoga o blob URL após abrir
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
   if (!win) toast.warning('Permita popups para visualizar o DANFE.');
 }
@@ -142,11 +171,8 @@ function CopyChaveButton({ chave }: { chave: string }) {
     });
   }
   return (
-    <button
-      onClick={handleCopy}
-      title="Copiar chave de acesso"
-      className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors"
-    >
+    <button onClick={handleCopy} title="Copiar chave de acesso"
+      className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors">
       {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
     </button>
   );
@@ -155,24 +181,39 @@ function CopyChaveButton({ chave }: { chave: string }) {
 // ── Componente principal ─────────────────────────────────────────────────────
 
 export default function RFBDebitos() {
-  const [requests,      setRequests]      = useState<RFBRequest[]>([]);
-  const [loadingList,   setLoadingList]   = useState(true);
-  const [selectedId,    setSelectedId]    = useState<string | null>(null);
-  const [resumo,        setResumo]        = useState<RFBResumo | null>(null);
-  const [debitos,       setDebitos]       = useState<RFBDebito[]>([]);
-  const [pagination,    setPagination]    = useState<Pagination>({ page:1, page_size:500, total:0, total_pages:1 });
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [filters,       setFilters]       = useState<Filters>(EMPTY_FILTERS);
-  const [showFilters,   setShowFilters]   = useState(false);
+  const [requests,    setRequests]    = useState<RFBRequest[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [selectedId,  setSelectedId]  = useState<string | null>(null);
+  const [page,        setPage]        = useState(1);
+  const [filters,     setFilters]     = useState<Filters>(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Debounced text filters
+  const [chaveDebounced,   setChaveDebounced]   = useState('');
+  const [clienteDebounced, setClienteDebounced] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setChaveDebounced(filters.chave), 400);
+    return () => clearTimeout(t);
+  }, [filters.chave]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setClienteDebounced(filters.cliente), 400);
+    return () => clearTimeout(t);
+  }, [filters.cliente]);
 
   const { selectedFiliais } = useFiliais();
+  const niEmitente = selectedFiliais.length === 1 ? selectedFiliais[0].replace(/\D/g, '') : '';
 
-  const getHeaders = () => ({
+  const getHeaders = useCallback(() => ({
     'Authorization': `Bearer ${localStorage.getItem('token')}`,
     'X-Company-ID':  localStorage.getItem('companyId') || '',
-  });
+  }), []);
 
-  // ── Carrega lista de requests ─────────────────────────────────────────────
+  // Reset page when filters or filial change
+  useEffect(() => { setPage(1); }, [filters, niEmitente]);
+
+  // ── Carrega lista de requests concluídos ──────────────────────────────────
   const fetchRequests = useCallback(async () => {
     try {
       const res = await fetch('/api/rfb/apuracao/status', { headers: getHeaders() });
@@ -182,83 +223,93 @@ export default function RFBDebitos() {
         setRequests(completed);
         return completed as RFBRequest[];
       }
-    } catch { /* silent */ }
-    finally { setLoadingList(false); }
+    } catch { /* silent */ } finally { setLoadingList(false); }
     return [];
-  }, []);
+  }, [getHeaders]);
 
-  // ── Carrega detalhes de um request ───────────────────────────────────────
-  const fetchDetail = useCallback(async (requestId: string, page = 1) => {
-    setSelectedId(requestId);
-    setDetailLoading(true);
-    try {
-      const res = await fetch(`/api/rfb/apuracao/${requestId}?page=${page}&page_size=500`, { headers: getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setResumo(data.resumo || null);
-        setDebitos(data.debitos || []);
-        setPagination(data.pagination || { page:1, page_size:500, total:0, total_pages:1 });
-      }
-    } catch { /* silent */ }
-    finally { setDetailLoading(false); }
-  }, []);
-
-  // ── Auto-carrega ao abrir a aba ──────────────────────────────────────────
   useEffect(() => {
     fetchRequests().then(list => {
-      if (list.length > 0) fetchDetail(list[0].id);
+      if (list.length > 0) setSelectedId(list[0].id);
     });
-  }, [fetchRequests, fetchDetail]);
+  }, [fetchRequests]);
 
-  // ── Filtragem client-side ────────────────────────────────────────────────
-  const filtered = useMemo(() => {
-    return debitos.filter(d => {
-      // Filial selecionada no topo da tela (vazio = todas)
-      if (selectedFiliais.length > 0) {
-        const niDigits = d.ni_emitente.replace(/\D/g, '');
-        if (!selectedFiliais.some(f => f.replace(/\D/g, '') === niDigits)) return false;
-      }
-      if (filters.modelo    && d.modelo_dfe !== filters.modelo) return false;
-      if (filters.chave     && !d.chave_dfe?.includes(filters.chave)) return false;
-      if (filters.cliente   && !d.ni_adquirente?.includes(filters.cliente.replace(/\D/g, ''))) return false;
-      if (filters.numInicio && Number(d.numero_dfe) < Number(filters.numInicio)) return false;
-      if (filters.numFim    && Number(d.numero_dfe) > Number(filters.numFim)) return false;
-      if (filters.dataInicio && d.data_dfe_emissao) {
-        if (d.data_dfe_emissao.slice(0, 10) < filters.dataInicio) return false;
-      }
-      if (filters.dataFim && d.data_dfe_emissao) {
-        if (d.data_dfe_emissao.slice(0, 10) > filters.dataFim) return false;
-      }
-      return true;
-    });
-  }, [debitos, filters, selectedFiliais]);
+  // ── React Query para débitos ──────────────────────────────────────────────
+  const { data: debitData, isLoading: detailLoading } = useQuery<DebitPage>({
+    queryKey: ['rfb-debitos', selectedId, {
+      page, modelo: filters.modelo, dataInicio: filters.dataInicio,
+      dataFim: filters.dataFim, chave: chaveDebounced,
+      cliente: clienteDebounced, niEmitente,
+    }],
+    queryFn: async () => {
+      if (!selectedId) return { debitos: [], resumo: null, pagination: { page: 1, page_size: 100, total: 0, total_pages: 1 } };
+      const params = new URLSearchParams({ page: String(page), page_size: '100' });
+      if (filters.modelo)     params.set('modelo',       filters.modelo);
+      if (filters.dataInicio) params.set('data_de',      filters.dataInicio);
+      if (filters.dataFim)    params.set('data_ate',     filters.dataFim);
+      if (chaveDebounced)     params.set('chave',        chaveDebounced);
+      if (clienteDebounced)   params.set('ni_adquirente', clienteDebounced.replace(/\D/g, ''));
+      if (niEmitente)         params.set('ni_emitente',  niEmitente);
+      const res = await fetch(`/api/rfb/apuracao/${selectedId}?${params}`, { headers: getHeaders() });
+      if (!res.ok) throw new Error('Erro ao carregar débitos');
+      return res.json();
+    },
+    enabled: !!selectedId,
+    placeholderData: keepPreviousData,
+  });
+
+  const debitos    = debitData?.debitos    || [];
+  const resumo     = debitData?.resumo     || null;
+  const pagination = debitData?.pagination || { page: 1, page_size: 100, total: 0, total_pages: 1 };
+  const pageCount  = pagination.total_pages;
 
   const hasActiveFilters = Object.values(filters).some(v => v !== '');
-  const modelosUnicos = useMemo(() => [...new Set(debitos.map(d => d.modelo_dfe).filter(Boolean))].sort(), [debitos]);
 
   function clearFilters() { setFilters(EMPTY_FILTERS); }
   function setFilter(key: keyof Filters, value: string) {
     setFilters(prev => ({ ...prev, [key]: value }));
   }
 
-  // ── Export Excel ─────────────────────────────────────────────────────────
-  function exportExcel() {
+  // ── Export Excel (busca todos os registros filtrados) ──────────────────────
+  async function exportExcel() {
+    if (!selectedId) return;
+    const params = new URLSearchParams({ page: '1', page_size: '500' });
+    if (filters.modelo)     params.set('modelo',       filters.modelo);
+    if (filters.dataInicio) params.set('data_de',      filters.dataInicio);
+    if (filters.dataFim)    params.set('data_ate',     filters.dataFim);
+    if (chaveDebounced)     params.set('chave',        chaveDebounced);
+    if (clienteDebounced)   params.set('ni_adquirente', clienteDebounced.replace(/\D/g, ''));
+    if (niEmitente)         params.set('ni_emitente',  niEmitente);
+
+    let allRows: RFBDebito[] = [];
+    try {
+      const res = await fetch(`/api/rfb/apuracao/${selectedId}?${params}`, { headers: getHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        allRows = data.debitos || [];
+        if (data.pagination?.total > 500) {
+          toast.warning(`Exportando primeiros 500 de ${formatNumber(data.pagination.total)} registros`);
+        }
+      }
+    } catch {
+      toast.error('Erro ao buscar dados para exportação');
+      return;
+    }
+
     const periodo = resumo ? formatPeriodo(resumo.data_apuracao) : 'export';
-    const rows = filtered.map(d => ({
-      'Modelo':         d.modelo_dfe || '—',
-      'Série':          d.serie || '—',
-      'Nº NF':          d.numero_dfe || '—',
-      'CNPJ Emitente':  d.ni_emitente,
-      'Cliente':        d.ni_adquirente,
-      'Data Emissão':   d.data_dfe_emissao ? d.data_dfe_emissao.slice(0, 10) : '—',
+    const rows = allRows.map(d => ({
+      'Modelo':           d.modelo_dfe || '—',
+      'Série':            d.serie || '—',
+      'Nº NF':            d.numero_dfe || '—',
+      'CNPJ Emitente':    d.ni_emitente,
+      'Cliente':          d.ni_adquirente,
+      'Data Emissão':     d.data_dfe_emissao ? d.data_dfe_emissao.slice(0, 10) : '—',
       'Chave Eletrônica': d.chave_dfe,
-      'CBS Total':      d.valor_cbs_total,
-      'CBS Extinto':    d.valor_cbs_extinto,
-      'CBS Não Extinto': d.valor_cbs_nao_extinto,
-      'Situação':       d.situacao_debito || '—',
+      'CBS Total':        d.valor_cbs_total,
+      'CBS Extinto':      d.valor_cbs_extinto,
+      'CBS Não Extinto':  d.valor_cbs_nao_extinto,
+      'Situação':         d.situacao_debito || '—',
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
-    // Largura das colunas
     ws['!cols'] = [
       { wch: 8 }, { wch: 6 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
       { wch: 12 }, { wch: 46 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 },
@@ -266,13 +317,13 @@ export default function RFBDebitos() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Débitos CBS');
     XLSX.writeFile(wb, `debitos_cbs_${periodo.replace('/', '-')}.xlsx`);
-    toast.success(`${formatNumber(filtered.length)} registros exportados`);
+    toast.success(`${formatNumber(allRows.length)} registros exportados`);
   }
 
   const selectedRequest = requests.find(r => r.id === selectedId);
 
   // ── Loading inicial ──────────────────────────────────────────────────────
-  if (loadingList || (detailLoading && !resumo)) {
+  if (loadingList || (detailLoading && !resumo && debitos.length === 0)) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
@@ -299,7 +350,7 @@ export default function RFBDebitos() {
         {/* Período */}
         <div className="shrink-0">
           <Label className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 block">Período</Label>
-          <Select value={selectedId ?? ''} onValueChange={id => fetchDetail(id)}>
+          <Select value={selectedId ?? ''} onValueChange={id => { setSelectedId(id); setPage(1); }}>
             <SelectTrigger className="h-8 text-xs w-44">
               <SelectValue placeholder="Selecione..." />
             </SelectTrigger>
@@ -375,7 +426,7 @@ export default function RFBDebitos() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="_all" className="text-xs">Todos</SelectItem>
-                  {modelosUnicos.map(m => (
+                  {MODELOS_DFE.map(m => (
                     <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
                   ))}
                 </SelectContent>
@@ -390,16 +441,6 @@ export default function RFBDebitos() {
               <Label className="text-[10px] text-muted-foreground mb-1 block">Data Emissão Fim</Label>
               <Input type="date" className="h-7 text-xs"
                 value={filters.dataFim} onChange={e => setFilter('dataFim', e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-[10px] text-muted-foreground mb-1 block">Nº NF Início</Label>
-              <Input placeholder="0" className="h-7 text-xs"
-                value={filters.numInicio} onChange={e => setFilter('numInicio', e.target.value)} />
-            </div>
-            <div>
-              <Label className="text-[10px] text-muted-foreground mb-1 block">Nº NF Fim</Label>
-              <Input placeholder="999999" className="h-7 text-xs"
-                value={filters.numFim} onChange={e => setFilter('numFim', e.target.value)} />
             </div>
             <div>
               <Label className="text-[10px] text-muted-foreground mb-1 block">Chave Eletrônica</Label>
@@ -419,29 +460,19 @@ export default function RFBDebitos() {
       <Card>
         <div className="flex items-center justify-between px-4 py-2 border-b">
           <span className="text-xs text-muted-foreground">
-            {hasActiveFilters
-              ? <>{formatNumber(filtered.length)} <span className="text-primary font-medium">filtrados</span> de {formatNumber(debitos.length)} registros</>
-              : <>{formatNumber(pagination.total)} registros · pág. {pagination.page}/{pagination.total_pages}</>
+            {detailLoading
+              ? 'Carregando...'
+              : <>{formatNumber(pagination.total)} registros{hasActiveFilters && <span className="text-primary font-medium"> filtrados</span>}</>
             }
           </span>
           <div className="flex items-center gap-2">
             <Button
               size="sm" variant="outline" className="h-7 text-xs gap-1.5"
               onClick={exportExcel}
-              disabled={filtered.length === 0}
+              disabled={pagination.total === 0 || detailLoading}
             >
               <Download className="h-3.5 w-3.5" />
-              Excel ({formatNumber(filtered.length)})
-            </Button>
-            <Button size="sm" variant="outline" className="h-6 w-6 p-0"
-              disabled={pagination.page <= 1 || detailLoading || hasActiveFilters}
-              onClick={() => selectedId && fetchDetail(selectedId, pagination.page - 1)}>
-              <ChevronLeft className="h-3 w-3" />
-            </Button>
-            <Button size="sm" variant="outline" className="h-6 w-6 p-0"
-              disabled={pagination.page >= pagination.total_pages || detailLoading || hasActiveFilters}
-              onClick={() => selectedId && fetchDetail(selectedId, pagination.page + 1)}>
-              <ChevronRight className="h-3 w-3" />
+              Excel ({formatNumber(Math.min(pagination.total, 500))})
             </Button>
           </div>
         </div>
@@ -451,7 +482,7 @@ export default function RFBDebitos() {
             <div className="flex justify-center py-10">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
             </div>
-          ) : filtered.length > 0 ? (
+          ) : debitos.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-100 text-[11px]">
                 <thead className="bg-gray-50 sticky top-0">
@@ -470,7 +501,7 @@ export default function RFBDebitos() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filtered.map(d => (
+                  {debitos.map(d => (
                     <tr key={d.id} className="hover:bg-gray-50/60">
                       <td className="px-2 py-1 font-mono">{d.modelo_dfe || '—'}</td>
                       <td className="px-2 py-1 font-mono">{d.serie || '—'}</td>
@@ -506,6 +537,7 @@ export default function RFBDebitos() {
             </div>
           )}
         </CardContent>
+        <PaginationBar page={page} pageCount={pageCount} onChange={setPage} />
       </Card>
 
       {selectedRequest && (

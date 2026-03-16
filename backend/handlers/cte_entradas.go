@@ -446,8 +446,49 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 		q := r.URL.Query()
 		mesAno   := q.Get("mes_ano")
 		emitCNPJ := q.Get("emit_cnpj")
+		modelo   := q.Get("modelo")
+		destCNPJ := q.Get("dest_cnpj")
+		dataDe   := q.Get("data_de")
+		dataAte  := q.Get("data_ate")
 
-		query := `
+		page, pageSize := 1, 100
+		if p, e := strconv.Atoi(q.Get("page")); e == nil && p > 0 { page = p }
+		if ps, e := strconv.Atoi(q.Get("page_size")); e == nil && ps > 0 && ps <= 500 { pageSize = ps }
+
+		// ── Monta WHERE dinâmico ──────────────────────────────────────────────
+		args := []interface{}{companyID}
+		idx  := 2
+		where := "WHERE company_id = $1"
+
+		if mesAno != "" { where += fmt.Sprintf(" AND mes_ano = $%d", idx); args = append(args, mesAno); idx++ }
+		if emitCNPJ != "" { where += fmt.Sprintf(" AND emit_cnpj = $%d", idx); args = append(args, emitCNPJ); idx++ }
+		if modelo != "" { where += fmt.Sprintf(" AND modelo = $%d", idx); args = append(args, modelo); idx++ }
+		if dataDe != "" { where += fmt.Sprintf(" AND data_emissao >= $%d", idx); args = append(args, dataDe); idx++ }
+		if dataAte != "" { where += fmt.Sprintf(" AND data_emissao <= $%d", idx); args = append(args, dataAte); idx++ }
+		if destCNPJ != "" { where += fmt.Sprintf(" AND dest_cnpj_cpf LIKE $%d", idx); args = append(args, destCNPJ+"%"); idx++ }
+		if destNome := q.Get("dest_nome"); destNome != "" { where += fmt.Sprintf(" AND dest_nome ILIKE $%d", idx); args = append(args, "%"+destNome+"%"); idx++ }
+		if emitNome := q.Get("emit_nome"); emitNome != "" { where += fmt.Sprintf(" AND emit_nome ILIKE $%d", idx); args = append(args, "%"+emitNome+"%"); idx++ }
+		if emitCNPJSearch := q.Get("emit_cnpj_search"); emitCNPJSearch != "" { where += fmt.Sprintf(" AND emit_cnpj LIKE $%d", idx); args = append(args, emitCNPJSearch+"%"); idx++ }
+		if q.Get("sem_ibs_cbs") == "true" { where += " AND (COALESCE(v_ibs,0) = 0 AND COALESCE(v_cbs,0) = 0)" }
+
+		// ── COUNT total ───────────────────────────────────────────────────────
+		var total int
+		if err := db.QueryRow("SELECT COUNT(*) FROM cte_entradas "+where, args...).Scan(&total); err != nil {
+			log.Printf("CteEntradasList count error: %v", err)
+			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
+			return
+		}
+
+		// ── Totalizadores ─────────────────────────────────────────────────────
+		var totVPrest, totIBS, totCBS float64
+		db.QueryRow(
+			"SELECT COALESCE(SUM(v_prest),0), COALESCE(SUM(v_ibs),0), COALESCE(SUM(v_cbs),0) FROM cte_entradas "+where,
+			args...,
+		).Scan(&totVPrest, &totIBS, &totCBS)
+
+		// ── SELECT paginado ───────────────────────────────────────────────────
+		offset := (page - 1) * pageSize
+		selectQ := `
 			SELECT
 				id, chave_cte, modelo, serie, numero_cte,
 				TO_CHAR(data_emissao, 'DD/MM/YYYY'), mes_ano,
@@ -457,26 +498,11 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(dest_cnpj_cpf,''), COALESCE(dest_nome,''), COALESCE(dest_uf,''),
 				v_prest, v_rec, v_carga, v_bc_icms, v_icms,
 				v_bc_ibs_cbs, v_ibs, v_cbs
-			FROM cte_entradas
-			WHERE company_id = $1`
+			FROM cte_entradas ` + where +
+			fmt.Sprintf(" ORDER BY data_emissao DESC, numero_cte DESC LIMIT $%d OFFSET $%d", idx, idx+1)
+		pageArgs := append(args, pageSize, offset)
 
-		args := []interface{}{companyID}
-		idx := 2
-
-		if mesAno != "" {
-			query += fmt.Sprintf(" AND mes_ano = $%d", idx)
-			args = append(args, mesAno)
-			idx++
-		}
-		if emitCNPJ != "" {
-			query += fmt.Sprintf(" AND emit_cnpj = $%d", idx)
-			args = append(args, emitCNPJ)
-			idx++
-		}
-
-		query += " ORDER BY data_emissao DESC, numero_cte DESC"
-
-		rows, err := db.Query(query, args...)
+		rows, err := db.Query(selectQ, pageArgs...)
 		if err != nil {
 			log.Printf("CteEntradasList error: %v", err)
 			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
@@ -503,8 +529,18 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 			list = append(list, row)
 		}
 
+		totalPages := (total + pageSize - 1) / pageSize
+
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"total": len(list),
+			"total":       total,
+			"page":        page,
+			"page_size":   pageSize,
+			"total_pages": totalPages,
+			"totals": map[string]float64{
+				"v_prest": totVPrest,
+				"v_ibs":   totIBS,
+				"v_cbs":   totCBS,
+			},
 			"items": list,
 		})
 	}

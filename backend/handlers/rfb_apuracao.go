@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -623,21 +624,66 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			resumo = &r2
 		}
 
-		// Pagination — default 500 per page
-		const pageSize = 500
+		// Query params — pagination + filters
+		qp := r.URL.Query()
 		page := 1
-		if p, err := strconv.Atoi(r.URL.Query().Get("page")); err == nil && p > 0 {
+		pageSize := 100
+		if p, e := strconv.Atoi(qp.Get("page")); e == nil && p > 0 {
 			page = p
 		}
-		offset := (page - 1) * pageSize
-
-		// Total debit count (uses summary if available, falls back to COUNT)
-		totalDebits := 0
-		if resumo != nil {
-			totalDebits = resumo.TotalDebitos
-		} else {
-			db.QueryRow(`SELECT COUNT(*) FROM rfb_debitos WHERE request_id = $1`, requestID).Scan(&totalDebits)
+		if ps, e := strconv.Atoi(qp.Get("page_size")); e == nil && ps > 0 && ps <= 500 {
+			pageSize = ps
 		}
+
+		filterModelo := qp.Get("modelo")
+		filterDataDe := qp.Get("data_de")
+		filterDataAte := qp.Get("data_ate")
+		filterChave := qp.Get("chave")
+		filterAdquir := qp.Get("ni_adquirente")
+		filterEmit := qp.Get("ni_emitente")
+
+		// Build dynamic WHERE for rfb_debitos
+		args := []interface{}{requestID}
+		idx := 2
+		where := "WHERE d.request_id = $1"
+
+		if filterModelo != "" {
+			where += fmt.Sprintf(
+				" AND (d.modelo_dfe = $%d OR (COALESCE(d.modelo_dfe,'')='' AND length(d.chave_dfe)=44 AND SUBSTRING(d.chave_dfe,21,2)=$%d))",
+				idx, idx)
+			args = append(args, filterModelo)
+			idx++
+		}
+		if filterDataDe != "" {
+			where += fmt.Sprintf(" AND d.data_dfe_emissao >= $%d::date", idx)
+			args = append(args, filterDataDe)
+			idx++
+		}
+		if filterDataAte != "" {
+			where += fmt.Sprintf(" AND d.data_dfe_emissao <= $%d::date", idx)
+			args = append(args, filterDataAte)
+			idx++
+		}
+		if filterChave != "" {
+			where += fmt.Sprintf(" AND d.chave_dfe ILIKE $%d", idx)
+			args = append(args, "%"+filterChave+"%")
+			idx++
+		}
+		if filterAdquir != "" {
+			where += fmt.Sprintf(" AND d.ni_adquirente LIKE $%d", idx)
+			args = append(args, "%"+filterAdquir+"%")
+			idx++
+		}
+		if filterEmit != "" {
+			where += fmt.Sprintf(" AND d.ni_emitente = $%d", idx)
+			args = append(args, filterEmit)
+			idx++
+		}
+
+		// COUNT with filters
+		var totalDebits int
+		db.QueryRow("SELECT COUNT(*) FROM rfb_debitos d "+where, args...).Scan(&totalDebits)
+
 		totalPages := (totalDebits + pageSize - 1) / pageSize
 		if totalPages == 0 {
 			totalPages = 1
@@ -647,7 +693,8 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		// - numero_dfe: usa valor da RFB; se vazio, extrai da chave (pos 26-34)
 		// - serie: extrai da chave (pos 23-25)
 		// - valor_documento: JOIN com nfe_saidas pela chave para obter v_nf
-		debitRows, err := db.Query(`
+		offset := (page - 1) * pageSize
+		selectQ := `
 			SELECT d.id,
 				d.tipo_apuracao,
 				CASE
@@ -676,10 +723,11 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(d.situacao_debito, '')
 			FROM rfb_debitos d
 			LEFT JOIN nfe_saidas n ON n.chave_nfe = d.chave_dfe AND n.company_id = d.company_id
-			WHERE d.request_id = $1
+			` + where + fmt.Sprintf(`
 			ORDER BY d.tipo_apuracao, d.data_apuracao
-			LIMIT $2 OFFSET $3
-		`, requestID, pageSize, offset)
+			LIMIT $%d OFFSET $%d`, idx, idx+1)
+		pageArgs := append(args, pageSize, offset)
+		debitRows, err := db.Query(selectQ, pageArgs...)
 		if err != nil {
 			http.Error(w, "Error querying debits: "+err.Error(), http.StatusInternalServerError)
 			return
