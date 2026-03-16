@@ -112,6 +112,8 @@ func StartRFBScheduler(dbFn func() *sql.DB) {
 		now := time.Now().In(loc)
 		currentHHMM := now.Format("15:04")
 
+		log.Printf("[RFB Scheduler] Tick %s — verificando empresas agendadas...", now.Format("2006-01-02 15:04"))
+
 		rows, err := db.Query(`
 			SELECT company_id FROM rfb_credentials
 			WHERE ativo = true
@@ -132,9 +134,16 @@ func StartRFBScheduler(dbFn func() *sql.DB) {
 		}
 		rows.Close()
 
+		if len(companies) == 0 {
+			log.Printf("[RFB Scheduler] Nenhuma empresa agendada para %s", currentHHMM)
+			continue
+		}
+
+		log.Printf("[RFB Scheduler] %d empresa(s) agendada(s) para %s — disparando...", len(companies), currentHHMM)
 		for _, companyID := range companies {
 			cid := companyID
 			go func() {
+				log.Printf("[RFB Scheduler] Iniciando solicitação automática para companyID=%s", cid)
 				if runErr := SolicitarApuracaoParaEmpresa(db, cid); runErr != nil {
 					log.Printf("[RFB Scheduler] Erro ao executar agendamento para %s: %v", cid, runErr)
 				}
