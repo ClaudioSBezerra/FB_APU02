@@ -346,58 +346,60 @@ export default function AdminUsers() {
       <div className="rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Nome</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Ambiente</TableHead>
-              <TableHead>Grupo</TableHead>
-              <TableHead>Empresa</TableHead>
-              <TableHead>Trial Vence Em</TableHead>
-              <TableHead>Criado Em</TableHead>
-              <TableHead className="text-right">Ações</TableHead>
+            <TableRow className="h-7">
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Nome</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Email</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Status</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Role</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Ambiente</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Grupo</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Empresa</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Trial</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2">Criado</TableHead>
+              <TableHead className="text-[10px] uppercase tracking-wide py-1.5 px-2 text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {users?.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell className="font-medium">{user.full_name}</TableCell>
-                <TableCell>{user.email}</TableCell>
-                <TableCell>
+              <TableRow key={user.id} className="h-7">
+                <TableCell className="text-xs font-medium py-1 px-2 whitespace-nowrap">{user.full_name}</TableCell>
+                <TableCell className="text-xs py-1 px-2 whitespace-nowrap">{user.email}</TableCell>
+                <TableCell className="py-1 px-2">
                   {user.is_verified ? (
-                    <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Verificado</Badge>
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200">Verificado</Badge>
                   ) : (
-                    <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">Pendente</Badge>
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-yellow-50 text-yellow-700 border-yellow-200">Pendente</Badge>
                   )}
                 </TableCell>
-                <TableCell>
-                  <Badge variant={user.role === 'admin' ? "default" : "secondary"}>
+                <TableCell className="py-1 px-2">
+                  <Badge variant={user.role === 'admin' ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4">
                     {user.role}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {user.environment_name || <span className="text-xs italic">—</span>}
+                <TableCell className="text-xs text-muted-foreground py-1 px-2 whitespace-nowrap">
+                  {user.environment_name || <span className="italic">—</span>}
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {user.group_name || <span className="text-xs italic">—</span>}
+                <TableCell className="text-xs text-muted-foreground py-1 px-2 whitespace-nowrap">
+                  {user.group_name || <span className="italic">—</span>}
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {user.company_name || <span className="text-xs italic">—</span>}
+                <TableCell className="text-xs text-muted-foreground py-1 px-2 whitespace-nowrap">
+                  {user.company_name || <span className="italic">—</span>}
                 </TableCell>
-                <TableCell>
-                  {new Date(user.trial_ends_at).toLocaleDateString()}
+                <TableCell className="text-xs py-1 px-2 whitespace-nowrap">
+                  {new Date(user.trial_ends_at).toLocaleDateString('pt-BR')}
                   {new Date(user.trial_ends_at) < new Date() && (
-                    <span className="ml-2 text-xs text-red-500 font-medium">(Expirado)</span>
+                    <span className="ml-1 text-[10px] text-red-500 font-medium">Exp.</span>
                   )}
                 </TableCell>
-                <TableCell>{new Date(user.created_at).toLocaleDateString()}</TableCell>
-                <TableCell className="text-right space-x-2">
-                  <Button variant="ghost" size="icon" onClick={() => handleOpenPromote(user)} title="Editar usuário">
-                    <UserCheck className="h-4 w-4" />
+                <TableCell className="text-xs text-muted-foreground py-1 px-2 whitespace-nowrap">
+                  {new Date(user.created_at).toLocaleDateString('pt-BR')}
+                </TableCell>
+                <TableCell className="py-1 px-2 text-right">
+                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleOpenPromote(user)} title="Editar usuário">
+                    <UserCheck className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-600" onClick={() => handleDelete(user.id)} title="Excluir usuário">
-                    <Trash2 className="h-4 w-4" />
+                  <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-600" onClick={() => handleDelete(user.id)} title="Excluir usuário">
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </TableCell>
               </TableRow>

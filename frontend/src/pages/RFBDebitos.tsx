@@ -224,9 +224,21 @@ export default function RFBDebitos() {
       const res = await fetch('/api/rfb/apuracao/status', { headers: getHeaders() });
       if (res.ok) {
         const data = await res.json();
-        const completed = (data.requests || []).filter((r: RFBRequest) => r.status === 'completed');
-        setRequests(completed);
-        return completed as RFBRequest[];
+        // Ordena mais recente primeiro e de-duplica por período — mantém 1 entrada por MM/AAAA
+        const completed = (data.requests || [] as RFBRequest[])
+          .filter((r: RFBRequest) => r.status === 'completed')
+          .sort((a: RFBRequest, b: RFBRequest) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+        const seen = new Set<string>();
+        const deduped = completed.filter((r: RFBRequest) => {
+          const key = r.resumo?.data_apuracao || r.created_at.slice(0, 7);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        setRequests(deduped);
+        return deduped as RFBRequest[];
       }
     } catch { /* silent */ } finally { setLoadingList(false); }
     return [];
