@@ -58,6 +58,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Ambiente',         path: '/config/ambiente' },
       { label: 'Credenciais RFB',  path: '/rfb/credenciais' },
       { label: 'Usuários',         path: '/config/usuarios' },
+      { label: 'Limpar Dados',     path: '/config/limpar-dados', danger: true },
     ],
   },
 }

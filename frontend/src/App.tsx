@@ -21,6 +21,7 @@ import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import ConsultaCTesEntradas from './pages/ConsultaCTesEntradas'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import AdminUsers from './pages/AdminUsers'
+import LimparDadosApuracao from './pages/LimparDadosApuracao'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
@@ -144,6 +145,7 @@ function AppLayout() {
               <Route path="/config/gestores"        element={<Managers />} />
               <Route path="/config/ambiente"        element={<ProtectedRoute><GestaoAmbiente /></ProtectedRoute>} />
               <Route path="/config/usuarios"        element={<AdminRoute><AdminUsers /></AdminRoute>} />
+              <Route path="/config/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
               <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
 
               {/* Importações */}

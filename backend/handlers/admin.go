@@ -17,6 +17,77 @@ type ResetCompanyDataRequest struct {
 	CompanyID string `json:"company_id"`
 }
 
+// LimparDadosApuracaoHandler deletes all IBS/CBS apuration data for the active company (admin only).
+// Clears: nfe_saidas, nfe_entradas, cte_entradas, dfe_xml, rfb_requests (cascades rfb_debitos + rfb_resumo).
+func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodDelete {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := claims["user_id"].(string)
+		role := claims["role"].(string)
+		if role != "admin" {
+			http.Error(w, "Forbidden: apenas administradores podem executar esta operação", http.StatusForbidden)
+			return
+		}
+
+		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+		if err != nil {
+			http.Error(w, "Erro ao identificar empresa: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("[LimparApuracao] Admin %s limpando dados de apuração da empresa %s", userID, companyID)
+
+		type tableResult struct {
+			table   string
+			deleted int64
+		}
+		results := []tableResult{}
+
+		tables := []string{"nfe_saidas", "nfe_entradas", "cte_entradas", "dfe_xml"}
+		for _, t := range tables {
+			res, err := db.Exec("DELETE FROM "+t+" WHERE company_id = $1", companyID)
+			if err != nil {
+				log.Printf("[LimparApuracao] Erro ao limpar %s: %v", t, err)
+				http.Error(w, "Erro ao limpar "+t+": "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			n, _ := res.RowsAffected()
+			results = append(results, tableResult{t, n})
+			log.Printf("[LimparApuracao] %s: %d registros removidos", t, n)
+		}
+
+		// rfb_requests cascades rfb_debitos + rfb_resumo
+		rfbRes, err := db.Exec("DELETE FROM rfb_requests WHERE company_id = $1", companyID)
+		if err != nil {
+			log.Printf("[LimparApuracao] Erro ao limpar rfb_requests: %v", err)
+			http.Error(w, "Erro ao limpar rfb_requests: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		rfbN, _ := rfbRes.RowsAffected()
+		results = append(results, tableResult{"rfb_requests", rfbN})
+		log.Printf("[LimparApuracao] rfb_requests: %d registros removidos (cascata: rfb_debitos, rfb_resumo)", rfbN)
+
+		totals := map[string]int64{}
+		for _, r := range results {
+			totals[r.table] = r.deleted
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Dados de apuração removidos com sucesso",
+			"totals":  totals,
+		})
+	}
+}
+
 // ResetCompanyDataHandler deletes all import jobs for a specific Company ID
 // It allows users to clean their own company data, or admins to clean any company.
 func ResetCompanyDataHandler(db *sql.DB) http.HandlerFunc {
