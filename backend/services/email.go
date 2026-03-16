@@ -3,6 +3,7 @@ package services
 import (
 	"crypto/tls"
 	"fmt"
+	"html"
 	"log"
 	"math"
 	"net/smtp"
@@ -214,6 +215,9 @@ func SendPasswordResetEmail(email, resetToken string) error {
 // The email mirrors exactly what is displayed on screen: structured KPI data first,
 // AI narrative (commentary) at the bottom.
 func SendAIReportEmail(recipients []string, companyName, periodo, narrativaMarkdown, dadosBrutosJSON string, taxData TaxComparisonData) error {
+	// Escape user-controlled strings before use in HTML context
+	companyName = html.EscapeString(companyName)
+	periodo = html.EscapeString(periodo)
 	config := GetEmailConfig()
 
 	if config.Password == "" {
