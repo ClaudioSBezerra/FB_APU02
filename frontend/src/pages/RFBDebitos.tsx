@@ -123,8 +123,13 @@ function formatCNPJBase(cnpj: string): string {
 }
 
 function formatPeriodo(p: string): string {
-  if (p && p.length === 6) return `${p.slice(4,6)}/${p.slice(0,4)}`;
-  return p || '—';
+  if (!p) return '—';
+  // YYYYMM → MM/YYYY
+  if (/^\d{6}$/.test(p)) return `${p.slice(4, 6)}/${p.slice(0, 4)}`;
+  // YYYY-MM ou YYYY-MM-DD → MM/YYYY
+  const m = p.match(/^(\d{4})-(\d{2})/);
+  if (m) return `${m[2]}/${m[1]}`;
+  return p;
 }
 
 function formatDate(s?: string): string {
@@ -355,12 +360,16 @@ export default function RFBDebitos() {
               <SelectValue placeholder="Selecione..." />
             </SelectTrigger>
             <SelectContent>
-              {requests.map(r => (
-                <SelectItem key={r.id} value={r.id} className="text-xs">
-                  {r.resumo ? formatPeriodo(r.resumo.data_apuracao) : new Date(r.created_at).toLocaleDateString('pt-BR')}
-                  {' — '}{formatCNPJBase(r.cnpj_base)}
-                </SelectItem>
-              ))}
+              {requests.map(r => {
+                const periodo = r.resumo?.data_apuracao
+                  ? formatPeriodo(r.resumo.data_apuracao)
+                  : formatPeriodo(r.created_at.slice(0, 7)); // YYYY-MM
+                return (
+                  <SelectItem key={r.id} value={r.id} className="text-xs">
+                    {periodo}{' — '}{formatCNPJBase(r.cnpj_base)}
+                  </SelectItem>
+                );
+              })}
             </SelectContent>
           </Select>
         </div>
@@ -368,19 +377,37 @@ export default function RFBDebitos() {
         {/* Cards resumo compactos */}
         {resumo && (
           <div className="flex flex-wrap gap-2 flex-1">
+            {/* Valores CBS */}
             {[
-              { label: 'Total Débitos',   value: formatNumber(resumo.total_debitos),          color: 'text-foreground' },
               { label: 'CBS Total',       value: formatCurrency(resumo.valor_cbs_total),       color: 'text-red-600' },
               { label: 'CBS Não Extinto', value: formatCurrency(resumo.valor_cbs_nao_extinto), color: 'text-orange-600' },
               { label: 'CBS Extinto',     value: formatCurrency(resumo.valor_cbs_extinto),     color: 'text-green-600' },
-              { label: 'Corrente',        value: formatNumber(resumo.total_corrente),          color: 'text-foreground' },
-              { label: 'Ajuste',          value: formatNumber(resumo.total_ajuste),            color: 'text-foreground' },
-              { label: 'Extemporâneo',    value: formatNumber(resumo.total_extemporaneo),      color: 'text-foreground' },
             ].map(c => (
               <Card key={c.label} className="shrink-0">
                 <CardContent className="px-3 py-1.5">
                   <p className="text-[9px] text-muted-foreground uppercase tracking-wide leading-tight">{c.label}</p>
                   <p className={`text-sm font-bold leading-tight ${c.color}`}>{c.value}</p>
+                </CardContent>
+              </Card>
+            ))}
+
+            {/* Separador visual */}
+            <div className="self-stretch w-px bg-border mx-1" />
+
+            {/* Contagens de documentos */}
+            {[
+              { label: 'Total Docs',   value: resumo.total_debitos,       color: 'text-foreground' },
+              { label: 'Corrente',     value: resumo.total_corrente,      color: 'text-blue-600' },
+              { label: 'Ajuste',       value: resumo.total_ajuste,        color: 'text-purple-600' },
+              { label: 'Extemporâneo', value: resumo.total_extemporaneo,  color: 'text-amber-600' },
+            ].map(c => (
+              <Card key={c.label} className="shrink-0">
+                <CardContent className="px-3 py-1.5">
+                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide leading-tight">{c.label}</p>
+                  <p className={`text-sm font-bold leading-tight ${c.color}`}>
+                    {formatNumber(c.value)}
+                    <span className="text-[9px] font-normal text-muted-foreground ml-1">docs</span>
+                  </p>
                 </CardContent>
               </Card>
             ))}
