@@ -175,6 +175,53 @@ func GetUserIDFromContext(r *http.Request) string {
 	return userID
 }
 
+// UpdatePreferredCompanyHandler persiste a empresa preferida do usuário no banco,
+// garantindo que após logout+login a última empresa usada seja restaurada.
+func UpdatePreferredCompanyHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := GetUserIDFromContext(r)
+		if userID == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		var req struct {
+			CompanyID string `json:"company_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CompanyID == "" {
+			http.Error(w, "company_id required", http.StatusBadRequest)
+			return
+		}
+
+		// Obtém o environment_id da empresa
+		var envID string
+		err := db.QueryRow(`
+			SELECT e.id FROM companies c
+			JOIN enterprise_groups eg ON c.group_id = eg.id
+			JOIN environments e ON eg.environment_id = e.id
+			WHERE c.id = $1
+		`, req.CompanyID).Scan(&envID)
+		if err != nil {
+			http.Error(w, "Company not found", http.StatusNotFound)
+			return
+		}
+
+		// UPSERT: cria ou atualiza preferred_company_id em user_environments
+		_, err = db.Exec(`
+			INSERT INTO user_environments (user_id, environment_id, role, preferred_company_id)
+			VALUES ($1, $2, 'admin', $3)
+			ON CONFLICT (user_id, environment_id) DO UPDATE SET preferred_company_id = $3
+		`, userID, envID, req.CompanyID)
+		if err != nil {
+			log.Printf("[PreferredCompany] Erro ao salvar preferência userID=%s companyID=%s: %v", userID, req.CompanyID, err)
+			http.Error(w, "Error saving preference", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // GetEffectiveCompanyID fetches the company ID to use for the current request.
 // If requestedCompanyID is provided (e.g. via header), it verifies if the user has access to it.
 // If not provided or invalid, it falls back to the default company (Owner > Member).
@@ -207,12 +254,16 @@ func GetEffectiveCompanyID(db *sql.DB, userID, requestedCompanyID string) (strin
 	// 2. Default Logic (Owner > Member)
 	var companyID string
 
-	// Strategy A: Check if user OWNS a company
+	// Strategy A: Check if user OWNS a company — prioriza preferred_company_id se existir
 	err := db.QueryRowContext(ctx, `
 		SELECT c.id
 		FROM companies c
+		JOIN enterprise_groups eg ON c.group_id = eg.id
+		LEFT JOIN user_environments ue ON ue.user_id = $1 AND ue.environment_id = eg.environment_id
 		WHERE c.owner_id = $1
-		ORDER BY c.created_at DESC
+		ORDER BY
+			(ue.preferred_company_id IS NOT NULL AND ue.preferred_company_id = c.id) DESC,
+			c.created_at DESC
 		LIMIT 1
 	`, userID).Scan(&companyID)
 
@@ -500,14 +551,17 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
 
-		// Strategy A: Check if user OWNS a company (Fastest/Most Common)
+		// Strategy A: Check if user OWNS a company — prioriza preferred_company_id se existir
 		err = db.QueryRowContext(ctx, `
 			SELECT e.name, eg.name, c.name, c.id
 			FROM companies c
 			JOIN enterprise_groups eg ON c.group_id = eg.id
 			JOIN environments e ON eg.environment_id = e.id
+			LEFT JOIN user_environments ue ON ue.user_id = $1 AND ue.environment_id = e.id
 			WHERE c.owner_id = $1
-			ORDER BY c.created_at DESC
+			ORDER BY
+				(ue.preferred_company_id IS NOT NULL AND ue.preferred_company_id = c.id) DESC,
+				c.created_at DESC
 			LIMIT 1
 		`, user.ID).Scan(&envName, &groupName, &companyName, &companyID)
 

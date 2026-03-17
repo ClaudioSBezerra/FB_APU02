@@ -170,9 +170,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.setItem('company', name);
     localStorage.setItem('companyId', id);
     localStorage.setItem('cnpj', newCnpj);
-    // Salva preferência persistente para este usuário
+    // Salva preferência persistente para este usuário (localStorage + banco)
     if (user?.id) {
       localStorage.setItem(`pref_company_${user.id}`, JSON.stringify({ id, name, cnpj: newCnpj }));
+    }
+    const tok = localStorage.getItem('token');
+    if (tok) {
+      fetch('/api/user/preferred-company', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+        body: JSON.stringify({ company_id: id }),
+      }).catch(() => {}); // fire-and-forget
     }
     window.location.reload();
   };

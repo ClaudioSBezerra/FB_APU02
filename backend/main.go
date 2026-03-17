@@ -316,6 +316,7 @@ func main() {
 	http.HandleFunc("/api/auth/change-password", withAuth(handlers.ChangePasswordHandler, ""))
 	http.HandleFunc("/api/user/hierarchy", withAuth(handlers.GetUserHierarchyHandler, ""))
 	http.HandleFunc("/api/user/companies", withAuth(handlers.GetUserCompaniesHandler, ""))
+	http.HandleFunc("/api/user/preferred-company", withAuth(handlers.UpdatePreferredCompanyHandler, ""))
 
 	// Admin Endpoints
 	http.HandleFunc("/api/admin/reset-db", withAuth(handlers.ResetDatabaseHandler, "admin"))
