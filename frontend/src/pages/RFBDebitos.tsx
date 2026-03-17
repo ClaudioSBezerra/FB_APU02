@@ -85,7 +85,7 @@ function PaginationBar({
           onChange={e => setInputVal(e.target.value)}
           onBlur={e => go(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') go(inputVal); }}
-          className="w-14 h-7 rounded border border-input bg-background px-2 text-center text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          className="w-20 h-7 rounded border border-input bg-background px-2 text-center text-xs focus:outline-none focus:ring-1 focus:ring-ring"
         />
         <span>de {pageCount}</span>
       </div>
