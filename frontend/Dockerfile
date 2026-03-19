@@ -4,6 +4,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
+ARG VITE_APP_MODULE=apuracao
+ENV VITE_APP_MODULE=$VITE_APP_MODULE
 RUN npm run build
 
 # Serve Stage
