@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -328,6 +332,29 @@ func ReprocessHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+// verifyWebhookSignature validates the HMAC-SHA256 signature sent by RFB.
+// Expects header X-RFB-Signature: sha256=<hex> computed over the raw body.
+// If RFB_WEBHOOK_SECRET is not set, validation is skipped (dev fallback with warning).
+func verifyWebhookSignature(r *http.Request, body []byte) bool {
+	secret := os.Getenv("RFB_WEBHOOK_SECRET")
+	if secret == "" {
+		log.Println("[RFB Webhook] WARNING: RFB_WEBHOOK_SECRET not set — skipping signature validation")
+		return true
+	}
+	sig := r.Header.Get("X-RFB-Signature")
+	if sig == "" {
+		return false
+	}
+	// Accept both "sha256=<hex>" and raw hex
+	if len(sig) > 7 && sig[:7] == "sha256=" {
+		sig = sig[7:]
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(sig), []byte(expected))
+}
+
 // RFBWebhookHandler receives callbacks from the RFB API (PUBLIC - no JWT auth)
 func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -345,6 +372,13 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		defer r.Body.Close()
+
+		// Validate HMAC signature
+		if !verifyWebhookSignature(r, body) {
+			log.Printf("[RFB Webhook] Invalid signature from %s", GetClientIP(r))
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 
 		log.Printf("[RFB Webhook] ===== CALLBACK RECEIVED =====")
 		log.Printf("[RFB Webhook] Method: %s | RemoteAddr: %s", r.Method, r.RemoteAddr)

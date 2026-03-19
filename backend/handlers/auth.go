@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"fb_apu02/services"
@@ -56,15 +57,68 @@ type AuthResponse struct {
 	CNPJ        string `json:"cnpj"`       // Added CNPJ for company context
 }
 
-// --- Utils ---
+// --- Token stores ---
 
-var jwtSecret = []byte(getEnv("JWT_SECRET", "super-secret-key-change-me-in-prod"))
+type refreshTokenData struct {
+	UserID    string
+	Role      string
+	ExpiresAt time.Time
+}
+
+var (
+	refreshTokenStore sync.Map // string → refreshTokenData
+	tokenBlacklist    sync.Map // string(accessToken) → time.Time(expiry)
+)
+
+func init() {
+	// Periodic cleanup of expired tokens (hourly)
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		for range ticker.C {
+			now := time.Now()
+			refreshTokenStore.Range(func(k, v interface{}) bool {
+				if d, ok := v.(refreshTokenData); ok && now.After(d.ExpiresAt) {
+					refreshTokenStore.Delete(k)
+				}
+				return true
+			})
+			tokenBlacklist.Range(func(k, v interface{}) bool {
+				if exp, ok := v.(time.Time); ok && now.After(exp) {
+					tokenBlacklist.Delete(k)
+				}
+				return true
+			})
+		}
+	}()
+}
+
+// --- Utils ---
 
 func getEnv(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
 	return fallback
+}
+
+// getJWTSecret reads JWT_SECRET from the environment at call time.
+// This ensures godotenv.Load() in main() takes effect before first use.
+func getJWTSecret() []byte {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return []byte("super-secret-key-change-me-in-prod")
+	}
+	return []byte(secret)
+}
+
+// ValidateJWTSecret logs a warning (dev) or fatals (prod) if JWT_SECRET is not set.
+func ValidateJWTSecret() {
+	if os.Getenv("JWT_SECRET") == "" {
+		if os.Getenv("DATABASE_URL") != "" {
+			log.Fatal("FATAL: JWT_SECRET not set — set it to a 32+ byte random value before deploying.")
+		}
+		log.Println("WARNING: JWT_SECRET not set — using insecure default (OK for local dev only).")
+	}
 }
 
 func HashPassword(password string) (string, error) {
@@ -81,10 +135,45 @@ func GenerateToken(userID, role string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"role":    role,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(), // 24 hours
+		"exp":     time.Now().Add(30 * time.Minute).Unix(), // 30 minutes
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(getJWTSecret())
+}
+
+func generateRefreshTokenString() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func isSecureCookie(r *http.Request) bool {
+	return os.Getenv("COOKIE_SECURE") == "true" ||
+		r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+func setRefreshCookie(w http.ResponseWriter, r *http.Request, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    token,
+		Path:     "/api/auth/",
+		HttpOnly: true,
+		Secure:   isSecureCookie(r),
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   7 * 24 * 60 * 60, // 7 days
+	})
+}
+
+func clearRefreshCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		Path:     "/api/auth/",
+		HttpOnly: true,
+		Secure:   isSecureCookie(r),
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
 }
 
 // --- Handlers ---
@@ -131,8 +220,14 @@ func AuthMiddleware(next http.HandlerFunc, requiredRole string) http.HandlerFunc
 			return
 		}
 
+		// Check blacklist before validating signature
+		if _, revoked := tokenBlacklist.Load(tokenString); revoked {
+			http.Error(w, "Token revoked", http.StatusUnauthorized)
+			return
+		}
+
 		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			return jwtSecret, nil
+			return getJWTSecret(), nil
 		})
 
 		if err != nil || !token.Valid {
@@ -371,6 +466,15 @@ func RegisterHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Rate limiting
+		ip := GetClientIP(r)
+		if !RegisterRL.Allow(ip) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode("Muitos cadastros deste IP. Tente novamente mais tarde.")
+			return
+		}
+
 		// 1. Hash Password
 		hash, err := HashPassword(req.Password)
 		if err != nil {
@@ -463,6 +567,15 @@ func RegisterHandler(db *sql.DB) http.HandlerFunc {
 		// Generate Token
 		token, _ := GenerateToken(userID, "user")
 
+		// Issue refresh token cookie
+		refreshToken := generateRefreshTokenString()
+		refreshTokenStore.Store(refreshToken, refreshTokenData{
+			UserID:    userID,
+			Role:      "user",
+			ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		})
+		setRefreshCookie(w, r, refreshToken)
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(AuthResponse{
 			Token: token,
@@ -542,6 +655,15 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "Error generating token", http.StatusInternalServerError)
 			return
 		}
+
+		// Issue refresh token cookie
+		refreshToken := generateRefreshTokenString()
+		refreshTokenStore.Store(refreshToken, refreshTokenData{
+			UserID:    user.ID,
+			Role:      user.Role,
+			ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		})
+		setRefreshCookie(w, r, refreshToken)
 
 		// 4. Get Environment, Group, and Company Context
 		// OPTIMIZATION: Split query to avoid complex joins and potential locks/slowdowns
@@ -892,9 +1014,9 @@ func ChangePasswordHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if len(req.NewPassword) < 6 {
+		if len(req.NewPassword) < 8 {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "A nova senha deve ter no mínimo 6 caracteres"})
+			json.NewEncoder(w).Encode(map[string]string{"error": "A nova senha deve ter no mínimo 8 caracteres"})
 			return
 		}
 
@@ -928,5 +1050,90 @@ func ChangePasswordHandler(db *sql.DB) http.HandlerFunc {
 
 		log.Printf("[ChangePassword] Password changed for user %s", userID)
 		json.NewEncoder(w).Encode(map[string]string{"message": "Senha alterada com sucesso"})
+	}
+}
+
+// RefreshHandler issues a new short-lived access token using the httpOnly refresh cookie.
+func RefreshHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		cookie, err := r.Cookie("refresh_token")
+		if err != nil {
+			http.Error(w, "Refresh token required", http.StatusUnauthorized)
+			return
+		}
+
+		val, ok := refreshTokenStore.Load(cookie.Value)
+		if !ok {
+			http.Error(w, "Invalid refresh token", http.StatusUnauthorized)
+			return
+		}
+
+		data := val.(refreshTokenData)
+		if time.Now().After(data.ExpiresAt) {
+			refreshTokenStore.Delete(cookie.Value)
+			clearRefreshCookie(w, r)
+			http.Error(w, "Refresh token expired", http.StatusUnauthorized)
+			return
+		}
+
+		// Rotate refresh token
+		refreshTokenStore.Delete(cookie.Value)
+		newRefreshToken := generateRefreshTokenString()
+		refreshTokenStore.Store(newRefreshToken, refreshTokenData{
+			UserID:    data.UserID,
+			Role:      data.Role,
+			ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+		})
+		setRefreshCookie(w, r, newRefreshToken)
+
+		// Issue new access token
+		accessToken, err := GenerateToken(data.UserID, data.Role)
+		if err != nil {
+			http.Error(w, "Error generating token", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": accessToken})
+	}
+}
+
+// LogoutHandler revokes the current access token and clears the refresh cookie.
+func LogoutHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Blacklist the current access token
+		authHeader := r.Header.Get("Authorization")
+		if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+			tokenString := authHeader[7:]
+			tok, _ := jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+				return getJWTSecret(), nil
+			})
+			if tok != nil {
+				if claims, ok := tok.Claims.(jwt.MapClaims); ok {
+					if exp, ok := claims["exp"].(float64); ok {
+						tokenBlacklist.Store(tokenString, time.Unix(int64(exp), 0))
+					}
+				}
+			}
+		}
+
+		// Delete refresh token
+		if cookie, err := r.Cookie("refresh_token"); err == nil {
+			refreshTokenStore.Delete(cookie.Value)
+		}
+
+		clearRefreshCookie(w, r)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"message": "Sessão encerrada com sucesso"})
 	}
 }

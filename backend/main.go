@@ -235,6 +235,7 @@ func main() {
 	_ = godotenv.Load()
 	PrintVersion()
 
+	handlers.ValidateJWTSecret()
 	initDBAsync()
 	go services.StartRFBScheduler(getDB)
 
@@ -317,6 +318,8 @@ func main() {
 	http.HandleFunc("/api/auth/forgot-password", withDB(handlers.ForgotPasswordHandler))
 	http.HandleFunc("/api/auth/reset-password", withDB(handlers.ResetPasswordHandler))
 	http.HandleFunc("/api/auth/change-password", withAuth(handlers.ChangePasswordHandler, ""))
+	http.HandleFunc("/api/auth/refresh", withDB(handlers.RefreshHandler))
+	http.HandleFunc("/api/auth/logout", withDB(handlers.LogoutHandler))
 	http.HandleFunc("/api/user/hierarchy", withAuth(handlers.GetUserHierarchyHandler, ""))
 	http.HandleFunc("/api/user/companies", withAuth(handlers.GetUserCompaniesHandler, ""))
 	http.HandleFunc("/api/user/preferred-company", withAuth(handlers.UpdatePreferredCompanyHandler, ""))
