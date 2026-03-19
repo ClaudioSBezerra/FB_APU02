@@ -1,4 +1,4 @@
-import { LayoutDashboard, FolderInput, Calculator, Landmark, Settings, LogOut, KeyRound } from 'lucide-react'
+import { LayoutDashboard, FolderInput, Calculator, Landmark, Settings, LogOut, KeyRound, SearchX } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
@@ -35,6 +35,7 @@ const mainItems = [
   { id: 'importacoes', icon: FolderInput,      label: 'Importações',      path: '/apuracao/saida' },
   { id: 'apuracao',    icon: Calculator,       label: 'Apuração IBS/CBS', path: '/apuracao/saida/notas' },
   { id: 'rfb',         icon: Landmark,         label: 'Receita Federal',  path: '/rfb/gestao-creditos' },
+  { id: 'malha',       icon: SearchX,          label: 'Malha Fina',       path: '/malha-fina/nfe-entradas' },
 ]
 
 export function AppRail() {
