@@ -58,6 +58,11 @@ interface Props {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+function extractNumero(chave: string): string {
+  if (chave.length !== 44) return '—';
+  return String(parseInt(chave.slice(25, 34), 10));
+}
+
 function fmtBRL(v: number | null | undefined): string {
   if (v == null) return '—';
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -247,7 +252,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
       const params = new URLSearchParams();
       params.set('page', String(page));
       if (dataDe) params.set('data_de', dataDe);
-      if (cnpjDeb) params.set('cnpj', cnpjDeb.replace(/\D/g, ''));
+      if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
       const res = await fetch(`/api/malha-fina/${tipo}?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
       return res.json();
@@ -323,9 +328,9 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">CNPJ (emitente ou adquirente)</label>
+              <label className="text-xs text-muted-foreground">CNPJ Emitente</label>
               <Input
-                placeholder="Filtrar por CNPJ..."
+                placeholder="Filtrar por CNPJ emitente..."
                 value={filterCNPJ}
                 onChange={e => setFilterCNPJ(e.target.value)}
                 className="h-8 w-52"
@@ -393,12 +398,10 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod.</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Número</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Emissão</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Período</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Emitente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Adquirente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right">CBS Total</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right">CBS Não Extinto</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Situação</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -410,10 +413,10 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                       >
                         <TableCell className="py-1 px-2">
                           <div className="flex items-center gap-1">
-                            <span className="font-mono text-[10px] text-muted-foreground">{row.chave_dfe.slice(0, 16)}…</span>
+                            <span className="font-mono text-[10px] text-muted-foreground">{row.chave_dfe}</span>
                             <button
                               onClick={e => copyChave(row.chave_dfe, e)}
-                              className="text-muted-foreground hover:text-foreground transition-colors"
+                              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
                               title="Copiar chave"
                             >
                               <Copy className="h-2.5 w-2.5" />
@@ -421,9 +424,8 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                           </div>
                         </TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.modelo_dfe}</TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.numero_dfe || '—'}</TableCell>
+                        <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{extractNumero(row.chave_dfe)}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_dfe_emissao || '—'}</TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_apuracao || '—'}</TableCell>
                         <TableCell className="py-1 px-2 font-mono text-[11px]">{fmtCNPJ(row.ni_emitente)}</TableCell>
                         <TableCell className="py-1 px-2 font-mono text-[11px]">{fmtCNPJ(row.ni_adquirente)}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-right font-semibold text-red-700">
@@ -431,9 +433,6 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                         </TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-right font-semibold text-red-800">
                           {fmtBRL(row.valor_cbs_nao_extinto)}
-                        </TableCell>
-                        <TableCell className="py-1 px-2">
-                          <SituacaoBadge s={row.situacao_debito} />
                         </TableCell>
                       </TableRow>
                     ))}

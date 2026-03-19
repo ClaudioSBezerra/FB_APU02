@@ -69,7 +69,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	}
 
 	dataDe    := q.Get("data_de")    // YYYY-MM-DD
-	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("cnpj"))
+	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
 
 	// ── Montar WHERE ──────────────────────────────────────────────────────────
 	args := []interface{}{companyID}
@@ -91,10 +91,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	}
 	if filterCNPJ != "" {
 		args = append(args, filterCNPJ+"%")
-		idx1 := len(args)
-		args = append(args, filterCNPJ+"%")
-		idx2 := len(args)
-		where += fmt.Sprintf(" AND (rd.ni_emitente LIKE $%d OR rd.ni_adquirente LIKE $%d)", idx1, idx2)
+		where += fmt.Sprintf(" AND rd.ni_emitente LIKE $%d", len(args))
 	}
 
 	// ── COUNT ─────────────────────────────────────────────────────────────────
