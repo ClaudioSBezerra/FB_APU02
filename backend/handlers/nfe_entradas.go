@@ -85,7 +85,6 @@ type nfeEntradaRow struct {
 
 func NfeEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodOptions {
@@ -266,7 +265,6 @@ func NfeEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 
 func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodOptions {

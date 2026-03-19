@@ -542,7 +542,6 @@ func DanfeHandler(db *sql.DB) http.HandlerFunc {
 	tmpl := template.Must(template.New("danfe").Parse(danfeHTMLTemplate))
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)

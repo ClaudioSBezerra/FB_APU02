@@ -21,7 +21,6 @@ type FilialApelido struct {
 // FilialApelidosHandler handles GET (list) and DELETE (clear all) for filial apelidos.
 func FilialApelidosHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
@@ -81,7 +80,6 @@ func FilialApelidosHandler(db *sql.DB) http.HandlerFunc {
 // CSV format: CNPJ;APELIDO (header optional)
 func ImportFilialApelidosHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method != http.MethodPost {

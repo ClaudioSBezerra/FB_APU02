@@ -684,12 +684,22 @@ func ForgotPasswordHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Rate limiting by email to prevent abuse
+		if !ForgotPasswordRL.Allow(req.Email) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode("Muitas solicitações de recuperação. Tente novamente mais tarde.")
+			return
+		}
+
 		var userID string
 		err := db.QueryRow("SELECT id FROM users WHERE email = $1", req.Email).Scan(&userID)
 		if err == sql.ErrNoRows {
+			// Return vague success to prevent email enumeration
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode("E-mail não encontrado")
+			json.NewEncoder(w).Encode(map[string]string{
+				"message": "Se o e-mail estiver cadastrado, você receberá um link de recuperação em instantes",
+			})
 			return
 		} else if err != nil {
 			w.Header().Set("Content-Type", "application/json")

@@ -238,13 +238,16 @@ func main() {
 	initDBAsync()
 	go services.StartRFBScheduler(getDB)
 
+	if os.Getenv("ENCRYPTION_KEY") == "" && os.Getenv("DATABASE_URL") != "" {
+		log.Println("WARNING: ENCRYPTION_KEY not set — RFB credentials use JWT_SECRET as fallback. Set ENCRYPTION_KEY for proper secret separation.")
+	}
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8081"
 	}
 
 	http.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		dbStatus := "connecting..."
@@ -330,9 +333,9 @@ func main() {
 	http.HandleFunc("/api/admin/users/reassign", withAuth(handlers.ReassignUserHandler, "admin"))
 
 	// Configuration Endpoints
-	http.HandleFunc("/api/config/aliquotas", withDB(handlers.GetTaxRatesHandler))
-	http.HandleFunc("/api/config/cfop", withDB(handlers.ListCFOPsHandler))
-	http.HandleFunc("/api/config/cfop/import", withDB(handlers.ImportCFOPsHandler))
+	http.HandleFunc("/api/config/aliquotas", withAuth(handlers.GetTaxRatesHandler, ""))
+	http.HandleFunc("/api/config/cfop", withAuth(handlers.ListCFOPsHandler, ""))
+	http.HandleFunc("/api/config/cfop/import", withAuth(handlers.ImportCFOPsHandler, ""))
 
 	http.HandleFunc("/api/config/forn-simples", func(w http.ResponseWriter, r *http.Request) {
 		database := getDB()
@@ -342,16 +345,16 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			handlers.ListFornSimplesHandler(database)(w, r)
+			handlers.AuthMiddleware(handlers.ListFornSimplesHandler(database), "")(w, r)
 		case http.MethodPost:
-			handlers.CreateFornSimplesHandler(database)(w, r)
+			handlers.AuthMiddleware(handlers.CreateFornSimplesHandler(database), "")(w, r)
 		case http.MethodDelete:
-			handlers.DeleteFornSimplesHandler(database)(w, r)
+			handlers.AuthMiddleware(handlers.DeleteFornSimplesHandler(database), "")(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-	http.HandleFunc("/api/config/forn-simples/import", withDB(handlers.ImportFornSimplesHandler))
+	http.HandleFunc("/api/config/forn-simples/import", withAuth(handlers.ImportFornSimplesHandler, ""))
 
 	http.HandleFunc("/api/config/filial-apelidos", withAuth(handlers.FilialApelidosHandler, ""))
 	http.HandleFunc("/api/config/filial-apelidos/import", withAuth(handlers.ImportFilialApelidosHandler, ""))
@@ -520,9 +523,10 @@ func main() {
 	fmt.Printf("   FB_APU02 BACKEND - %s\n", BackendVersion)
 	fmt.Println("==================================================")
 
+	allowedOrigins := handlers.GetAllowedOrigins()
 	server := &http.Server{
 		Addr:         ":" + port,
-		Handler:      nil,
+		Handler:      handlers.SecurityMiddleware(http.DefaultServeMux, allowedOrigins),
 		ReadTimeout:  300 * time.Second,
 		WriteTimeout: 300 * time.Second,
 		IdleTimeout:  60 * time.Second,

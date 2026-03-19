@@ -15,7 +15,6 @@ type FornSimples struct {
 
 func ListFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		rows, err := db.Query("SELECT cnpj FROM forn_simples ORDER BY cnpj")
@@ -45,7 +44,6 @@ func ListFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 
 func CreateFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method != "POST" {
@@ -85,7 +83,6 @@ func CreateFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 
 func DeleteFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method != "DELETE" {
@@ -126,7 +123,6 @@ func DeleteFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 
 func ImportFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method != "POST" {

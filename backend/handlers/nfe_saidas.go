@@ -247,7 +247,6 @@ type nfeSaidaUploadResult struct {
 
 func NfeSaidasUploadHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodOptions {
@@ -483,7 +482,6 @@ type nfeSaidaRow struct {
 
 func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodOptions {

@@ -17,7 +17,6 @@ type CFOP struct {
 
 func ListCFOPsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		rows, err := db.Query("SELECT cfop, descricao_cfop, tipo FROM cfop ORDER BY cfop")
@@ -47,7 +46,6 @@ func ListCFOPsHandler(db *sql.DB) http.HandlerFunc {
 
 func ImportCFOPsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)

@@ -232,7 +232,6 @@ type cteRow struct {
 
 func CteEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodOptions {
@@ -417,7 +416,6 @@ func CteEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 
 func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
 
 		if r.Method == http.MethodOptions {
