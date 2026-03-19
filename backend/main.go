@@ -487,6 +487,11 @@ func main() {
 		}
 	})
 
+	// Malha Fina — documentos na RFB não importados
+	http.HandleFunc("/api/malha-fina/nfe-entradas", withAuth(handlers.MalhaFinaNFeEntradasHandler, ""))
+	http.HandleFunc("/api/malha-fina/nfe-saidas", withAuth(handlers.MalhaFinaNFeSaidasHandler, ""))
+	http.HandleFunc("/api/malha-fina/cte", withAuth(handlers.MalhaFinaCTeHandler, ""))
+
 	// DANFE generation
 	http.HandleFunc("/api/danfe/", withAuth(handlers.DanfeHandler, ""))
 

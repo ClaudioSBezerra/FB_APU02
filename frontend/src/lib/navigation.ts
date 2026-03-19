@@ -47,6 +47,16 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Concluir apuração',   path: '/rfb/concluir-apuracao',       disabled: true },
     ],
   },
+  malha: {
+    label: 'Malha Fina',
+    tabs: [
+      { label: 'NF-e Entradas', path: '/malha-fina/nfe-entradas' },
+      { label: 'NF-e Saídas',   path: '/malha-fina/nfe-saidas' },
+      { label: 'CT-e',          path: '/malha-fina/cte' },
+      { label: 'NFS-e Entradas', path: '#', disabled: true },
+      { label: 'NFS-e Saídas',   path: '#', disabled: true },
+    ],
+  },
   config: {
     label: 'Configurações',
     tabs: [
@@ -74,6 +84,8 @@ export function getActiveModule(pathname: string): string {
 
   const rfbExclude = ['/rfb/credenciais', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
   if (pathname.startsWith('/rfb/') && !rfbExclude.includes(pathname)) return 'rfb'
+
+  if (pathname.startsWith('/malha-fina/')) return 'malha'
 
   if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais') return 'config'
 

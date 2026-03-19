@@ -20,6 +20,7 @@ import {
   Calculator,
   Landmark,
   KeyRound,
+  SearchX,
 } from "lucide-react"
 import {
   Sidebar,
@@ -120,6 +121,19 @@ const sections: NavSection[] = [
     ],
   },
   {
+    id: "malha",
+    title: "Malha Fina",
+    sectionIcon: SearchX,
+    adminOnly: true,
+    items: [
+      { title: "NF-e Entradas",  url: "/malha-fina/nfe-entradas", icon: FileText },
+      { title: "NF-e Saídas",    url: "/malha-fina/nfe-saidas",   icon: FileText },
+      { title: "CT-e",           url: "/malha-fina/cte",          icon: Truck },
+      { title: "NFS-e Entradas", url: "#",                        icon: FileText, disabled: true },
+      { title: "NFS-e Saídas",   url: "#",                        icon: FileText, disabled: true },
+    ],
+  },
+  {
     id: "rfb",
     title: "Receita Federal",
     sectionIcon: Landmark,
@@ -146,7 +160,7 @@ export function AppSidebar() {
 
   // Estado de expansão de cada seção (todas abertas por padrão)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(sections.map((s) => [s.id, false]))
+    () => Object.fromEntries(sections.map((s) => [s.id, s.id === 'malha' ? true : false]))
   )
 
   // Estado do dialog de troca de senha

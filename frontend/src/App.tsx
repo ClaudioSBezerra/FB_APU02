@@ -20,6 +20,9 @@ import ConsultaNFesEntradas from './pages/ConsultaNFesEntradas'
 import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import ConsultaCTesEntradas from './pages/ConsultaCTesEntradas'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
+import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
+import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
+import MalhaFinaCTe from './pages/MalhaFinaCTe'
 import AdminUsers from './pages/AdminUsers'
 import LimparDadosApuracao from './pages/LimparDadosApuracao'
 import Login from './pages/Login'
@@ -160,6 +163,11 @@ function AppLayout() {
               <Route path="/apuracao/creditos-perdidos" element={<ApuracaoCredPerdidos />} />
               <Route path="/rfb/apuracao-ibs"           element={<PainelApuracaoIBS />} />
               <Route path="/rfb/apuracao-cbs"           element={<PainelApuracaoCBS />} />
+
+              {/* Malha Fina */}
+              <Route path="/malha-fina/nfe-entradas" element={<MalhaFinaNFeEntradas />} />
+              <Route path="/malha-fina/nfe-saidas"   element={<MalhaFinaNFeSaidas />} />
+              <Route path="/malha-fina/cte"          element={<MalhaFinaCTe />} />
 
               {/* Receita Federal */}
               <Route path="/rfb/gestao-creditos"        element={<GestaoCredIBSCBS />} />
