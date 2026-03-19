@@ -131,13 +131,14 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 		// Exclui transferências internas: mesma raiz CNPJ (8 primeiros dígitos)
 		// cobre transferências entre filiais, uso e consumo e ativo imobilizado.
 
-		// Total de notas de terceiros (excluindo intra-grupo)
+		// Total de notas de terceiros (excluindo intra-grupo e filiais)
 		var totalUniverse int
 		db.QueryRow(`
 			SELECT COUNT(*)
 			FROM nfe_entradas
 			WHERE company_id = $1
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
+			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
 		`, companyID).Scan(&totalUniverse)
 
 		// Notas sem IBS/CBS de terceiros, agrupadas por fornecedor
@@ -152,6 +153,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			  AND v_ibs = 0
 			  AND v_cbs = 0
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
+			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
 			GROUP BY forn_cnpj, forn_nome
 			ORDER BY valor_total DESC
 			LIMIT 50
@@ -210,6 +212,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 				SUM(total_valor) AS valor_total
 			FROM mv_operacoes_simples
 			WHERE company_id = $1
+			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = fornecedor_cnpj)
 			GROUP BY fornecedor_cnpj, fornecedor_nome
 			ORDER BY valor_total DESC
 			LIMIT 50
@@ -253,7 +256,11 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 
 		// ── 3. CT-e sem IBS/CBS ──────────────────────────────────────────────
 		var cteTotalUniverse int
-		db.QueryRow(`SELECT COUNT(*) FROM cte_entradas WHERE company_id = $1`, companyID).Scan(&cteTotalUniverse)
+		db.QueryRow(`
+			SELECT COUNT(*) FROM cte_entradas
+			WHERE company_id = $1
+			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = emit_cnpj)
+		`, companyID).Scan(&cteTotalUniverse)
 
 		cteRows, err := db.Query(`
 			SELECT
@@ -265,6 +272,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			WHERE company_id = $1
 			  AND (v_ibs IS NULL OR v_ibs = 0)
 			  AND (v_cbs IS NULL OR v_cbs = 0)
+			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = emit_cnpj)
 			GROUP BY emit_cnpj, emit_nome
 			ORDER BY valor_total DESC
 			LIMIT 50
