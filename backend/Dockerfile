@@ -20,9 +20,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -v -ldflags="-w -s" -o server 
 
 # Run Stage
 FROM alpine:latest
+RUN apk --no-cache add tzdata ca-certificates && \
+    ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime
 WORKDIR /root/
 COPY --from=builder /app/server .
 COPY --from=builder /app/migrations ./migrations
 EXPOSE 8081
 CMD ["./server"]
-# Force Rebuild v5.5.0 - Z.AI Migration
+# Force Rebuild v1.0.3 - tzdata para RFB Scheduler
