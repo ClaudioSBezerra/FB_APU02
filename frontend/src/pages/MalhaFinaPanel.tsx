@@ -6,13 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
   Table,
   TableBody,
   TableCell,
@@ -26,23 +19,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { AlertTriangle, ChevronLeft, ChevronRight, Copy, FileText, X } from 'lucide-react';
+import { AlertTriangle, Telescope, ChevronLeft, ChevronRight, Copy, FileText, X } from 'lucide-react';
 import { toast } from 'sonner';
-
-const PAGE_SIZE = 100;
-
-function buildMesAnoOptions() {
-  const opts: { value: string; label: string }[] = [{ value: '', label: 'Todos os períodos' }];
-  const now = new Date();
-  for (let i = 0; i < 24; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = String(d.getFullYear());
-    opts.push({ value: `${mm}/${yyyy}`, label: `${mm}/${yyyy}` });
-  }
-  return opts;
-}
-const MES_ANO_OPTIONS = buildMesAnoOptions();
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface MalhaFinaRow {
@@ -76,6 +54,7 @@ interface Props {
   tipo: MalhaFinaTipo;
   title: string;
   description: string;
+  rfbDisponivel?: boolean; // false = RFB ainda não liberou este tipo
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -99,10 +78,9 @@ const SITUACAO_COLOR: Record<string, string> = {
 
 function SituacaoBadge({ s }: { s: string }) {
   const cls = SITUACAO_COLOR[s] || 'bg-gray-100 text-gray-600 border-gray-200';
-  const label = s.replace(/_/g, ' ') || '—';
   return (
     <Badge variant="outline" className={`text-[10px] px-1 py-0 ${cls}`}>
-      {label}
+      {s.replace(/_/g, ' ') || '—'}
     </Badge>
   );
 }
@@ -140,7 +118,7 @@ function Pagination({ page, pageCount, onChange }: { page: number; pageCount: nu
 }
 
 // ── Detalhe ───────────────────────────────────────────────────────────────────
-function DetalheRow({ label, value }: { label: string; value: string | number | null | undefined }) {
+function DR({ label, value }: { label: string; value: string | number | null | undefined }) {
   return (
     <div className="flex justify-between py-0.5 border-b border-dashed last:border-0">
       <span className="text-[11px] text-muted-foreground w-40 shrink-0">{label}</span>
@@ -148,7 +126,7 @@ function DetalheRow({ label, value }: { label: string; value: string | number | 
     </div>
   );
 }
-function DetalheRowBRL({ label, value }: { label: string; value: number | null | undefined }) {
+function DRBRL({ label, value }: { label: string; value: number | null | undefined }) {
   return (
     <div className="flex justify-between py-0.5 border-b border-dashed last:border-0">
       <span className="text-[11px] text-muted-foreground w-40 shrink-0">{label}</span>
@@ -156,7 +134,7 @@ function DetalheRowBRL({ label, value }: { label: string; value: number | null |
     </div>
   );
 }
-function DetalheSecao({ title, children }: { title: string; children: React.ReactNode }) {
+function DS({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-2">
       <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 pb-0.5 border-b">{title}</h3>
@@ -186,8 +164,7 @@ function DetalheMalhaFina({ row, onClose, token, companyId }: {
         return;
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      window.open(URL.createObjectURL(blob), '_blank');
     } catch {
       toast.error('Erro de conexão ao gerar DANFE');
     } finally {
@@ -207,28 +184,28 @@ function DetalheMalhaFina({ row, onClose, token, companyId }: {
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-1 mt-1">
-          <DetalheSecao title="Identificação">
-            <DetalheRow label="Modelo DFe" value={row.modelo_dfe} />
-            <DetalheRow label="Número" value={row.numero_dfe} />
-            <DetalheRow label="Data Emissão" value={row.data_dfe_emissao} />
-            <DetalheRow label="Período Apuração" value={row.data_apuracao} />
-          </DetalheSecao>
-          <DetalheSecao title="Receita Federal">
-            <DetalheRow label="Tipo Apuração" value={row.tipo_apuracao} />
+          <DS title="Identificação">
+            <DR label="Modelo DFe" value={row.modelo_dfe} />
+            <DR label="Número" value={row.numero_dfe} />
+            <DR label="Data Emissão" value={row.data_dfe_emissao} />
+            <DR label="Período Apuração" value={row.data_apuracao} />
+          </DS>
+          <DS title="Receita Federal">
+            <DR label="Tipo Apuração" value={row.tipo_apuracao} />
             <div className="flex justify-between py-0.5 border-b border-dashed last:border-0">
               <span className="text-[11px] text-muted-foreground w-40 shrink-0">Situação Débito</span>
               <SituacaoBadge s={row.situacao_debito} />
             </div>
-          </DetalheSecao>
-          <DetalheSecao title="Partes">
-            <DetalheRow label="CNPJ Emitente" value={fmtCNPJ(row.ni_emitente)} />
-            <DetalheRow label="CNPJ Adquirente" value={fmtCNPJ(row.ni_adquirente)} />
-          </DetalheSecao>
-          <DetalheSecao title="Valores CBS">
-            <DetalheRowBRL label="CBS Total" value={row.valor_cbs_total} />
-            <DetalheRowBRL label="CBS Extinto" value={row.valor_cbs_extinto} />
-            <DetalheRowBRL label="CBS Não Extinto" value={row.valor_cbs_nao_extinto} />
-          </DetalheSecao>
+          </DS>
+          <DS title="Partes">
+            <DR label="CNPJ Emitente" value={fmtCNPJ(row.ni_emitente)} />
+            <DR label="CNPJ Adquirente" value={fmtCNPJ(row.ni_adquirente)} />
+          </DS>
+          <DS title="Valores CBS">
+            <DRBRL label="CBS Total" value={row.valor_cbs_total} />
+            <DRBRL label="CBS Extinto" value={row.valor_cbs_extinto} />
+            <DRBRL label="CBS Não Extinto" value={row.valor_cbs_nao_extinto} />
+          </DS>
         </div>
         <div className="flex justify-end pt-2 border-t">
           <Button size="sm" variant="outline" onClick={openDanfe} disabled={danfeLoading} className="text-xs gap-1.5">
@@ -242,37 +219,41 @@ function DetalheMalhaFina({ row, onClose, token, companyId }: {
 }
 
 // ── Painel principal ───────────────────────────────────────────────────────────
-export default function MalhaFinaPanel({ tipo, title, description }: Props) {
+export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel = true }: Props) {
   const { token, companyId } = useAuth();
 
-  const [dataApuracao, setDataApuracao] = useState('');
+  // Data início — default: primeiro dia do mês atual
+  const hoje = new Date();
+  const defaultDataDe = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
+
+  const [dataDe,     setDataDe]     = useState(defaultDataDe);
   const [filterCNPJ, setFilterCNPJ] = useState('');
-  const [page, setPage] = useState(1);
-  const [cnpjDebounced, setCnpjDebounced] = useState('');
-  const [selected, setSelected] = useState<MalhaFinaRow | null>(null);
+  const [page,       setPage]       = useState(1);
+  const [cnpjDeb,    setCnpjDeb]    = useState('');
+  const [selected,   setSelected]   = useState<MalhaFinaRow | null>(null);
 
   useEffect(() => {
-    const t = setTimeout(() => setCnpjDebounced(filterCNPJ), 400);
+    const t = setTimeout(() => setCnpjDeb(filterCNPJ), 400);
     return () => clearTimeout(t);
   }, [filterCNPJ]);
 
-  useEffect(() => { setPage(1); }, [dataApuracao, cnpjDebounced]);
+  useEffect(() => { setPage(1); }, [dataDe, cnpjDeb]);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
 
   const { data, isFetching, isError } = useQuery<MalhaFinaApiResponse>({
-    queryKey: ['malha-fina', tipo, companyId, { page, dataApuracao, cnpjDebounced }],
+    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, cnpjDeb }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
-      if (dataApuracao) params.set('data_apuracao', dataApuracao);
-      if (cnpjDebounced) params.set('cnpj', cnpjDebounced.replace(/\D/g, ''));
+      if (dataDe) params.set('data_de', dataDe);
+      if (cnpjDeb) params.set('cnpj', cnpjDeb.replace(/\D/g, ''));
       const res = await fetch(`/api/malha-fina/${tipo}?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
       return res.json();
     },
     placeholderData: keepPreviousData,
-    enabled: !!token && !!companyId,
+    enabled: !!token && !!companyId && rfbDisponivel,
   });
 
   const items      = data?.items      ?? [];
@@ -280,12 +261,34 @@ export default function MalhaFinaPanel({ tipo, title, description }: Props) {
   const totalPages = data?.total_pages ?? 1;
   const totals     = data?.totals     ?? { valor_cbs_total: 0, valor_cbs_nao_extinto: 0 };
 
-  const hasFilters = !!(dataApuracao || filterCNPJ);
-  function clearFilters() { setDataApuracao(''); setFilterCNPJ(''); setPage(1); }
+  const hasFilters = !!filterCNPJ;
+  function clearFilters() { setFilterCNPJ(''); setPage(1); }
 
   function copyChave(chave: string, e: React.MouseEvent) {
     e.stopPropagation();
     navigator.clipboard.writeText(chave).then(() => toast.success('Chave copiada'));
+  }
+
+  // ── RFB não disponível ────────────────────────────────────────────────────
+  if (!rfbDisponivel) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{description}</p>
+        </div>
+        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-800">
+          <Telescope className="h-5 w-5 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">A Receita Federal ainda não disponibilizou este tipo de movimento</p>
+            <p className="text-xs mt-1 text-amber-700">
+              Quando a RFB liberar a consulta para este tipo de documento, basta ativar o painel
+              definindo <code className="bg-amber-100 px-1 rounded">rfbDisponivel&#123;true&#125;</code> na página correspondente.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -296,7 +299,7 @@ export default function MalhaFinaPanel({ tipo, title, description }: Props) {
         <p className="text-sm text-muted-foreground mt-1">{description}</p>
       </div>
 
-      {/* Aviso de Malha Fina */}
+      {/* Aviso */}
       <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
         <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
         <span>
@@ -307,18 +310,16 @@ export default function MalhaFinaPanel({ tipo, title, description }: Props) {
 
       {/* Filtros */}
       <Card>
-        <CardContent className="pt-4 space-y-3">
+        <CardContent className="pt-4">
           <div className="flex flex-wrap gap-3 items-end">
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Período Apuração</label>
-              <Select value={dataApuracao} onValueChange={v => { setDataApuracao(v); setPage(1); }}>
-                <SelectTrigger className="h-8 w-44 text-[11px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {MES_ANO_OPTIONS.map(o => (
-                    <SelectItem key={o.value || '__all'} value={o.value} className="text-xs">{o.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <label className="text-xs text-muted-foreground">Data Início</label>
+              <Input
+                type="date"
+                value={dataDe}
+                onChange={e => { setDataDe(e.target.value); setPage(1); }}
+                className="h-8 w-40"
+              />
             </div>
 
             <div className="flex flex-col gap-1">
@@ -377,9 +378,7 @@ export default function MalhaFinaPanel({ tipo, title, description }: Props) {
                 <>
                   <p className="text-sm font-medium text-green-700">Nenhum documento na malha fina</p>
                   <p className="text-xs text-muted-foreground">
-                    {total === 0 && !dataApuracao
-                      ? 'Certifique-se de que os débitos da RFB foram importados na seção Receita Federal.'
-                      : 'Todos os documentos da RFB estão presentes nos seus registros importados.'}
+                    Todos os documentos da RFB estão presentes nos seus registros importados para o período selecionado.
                   </p>
                 </>
               )}

@@ -68,7 +68,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		page = 1
 	}
 
-	dataApuracao := q.Get("data_apuracao") // MM/YYYY
+	dataDe    := q.Get("data_de")    // YYYY-MM-DD
 	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("cnpj"))
 
 	// ── Montar WHERE ──────────────────────────────────────────────────────────
@@ -85,9 +85,9 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		strings.Join(modeloPlaceholders, ","), excludeTable, excludeChaveCol,
 	)
 
-	if dataApuracao != "" {
-		args = append(args, dataApuracao)
-		where += fmt.Sprintf(" AND rd.data_apuracao = $%d", len(args))
+	if dataDe != "" {
+		args = append(args, dataDe)
+		where += fmt.Sprintf(" AND rd.data_dfe_emissao >= $%d::date", len(args))
 	}
 	if filterCNPJ != "" {
 		args = append(args, filterCNPJ+"%")
