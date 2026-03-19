@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	BackendVersion = "1.0.2"
-	FeatureSet     = "Apuração Assistida NF-e/CT-e, Receita Federal CBS/IBS, Créditos em Risco, Apelidos de Filiais"
+	BackendVersion = "1.0.3"
+	FeatureSet     = "Apuração Assistida NF-e/CT-e, Receita Federal CBS/IBS, Créditos em Risco, Apelidos de Filiais, Malha Fina"
 )
 
 func GetVersionInfo() string {
