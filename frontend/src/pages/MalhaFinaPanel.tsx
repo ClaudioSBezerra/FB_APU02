@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react'; // useMemo: emitenteOptions
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { AlertTriangle, Telescope, ChevronLeft, ChevronRight, Copy, FileText, X, BarChart2 } from 'lucide-react';
+import { AlertTriangle, Telescope, ChevronLeft, ChevronRight, Copy, FileText, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCnpjComApelido } from '@/lib/formatFilial';
 
@@ -92,11 +92,7 @@ function fmtCNPJ(v: string): string {
   if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
   return v;
 }
-function fmtData(iso: string): string {
-  if (!iso) return '—';
-  const [y, m, d] = iso.split('-');
-  return `${d}/${m}/${y}`;
-}
+
 
 const SITUACAO_COLOR: Record<string, string> = {
   'EXTINTO': 'bg-green-100 text-green-700 border-green-200',
@@ -246,87 +242,6 @@ function DetalheMalhaFina({ row, onClose, token, companyId }: {
   );
 }
 
-// ── Resumo por emitente ────────────────────────────────────────────────────────
-function ResumoEmitentes({
-  items,
-  apelidos,
-}: {
-  items: MalhaFinaResumoRow[];
-  apelidos: Record<string, string>;
-}) {
-  // Agrupar por ni_emitente → lista de { data, quantidade }
-  const grupos = useMemo(() => {
-    const map = new Map<string, { data: string; qtd: number }[]>();
-    for (const row of items) {
-      const cnpj = row.ni_emitente.replace(/\D/g, '');
-      if (!map.has(cnpj)) map.set(cnpj, []);
-      map.get(cnpj)!.push({ data: row.data_emissao, qtd: row.quantidade });
-    }
-    return map;
-  }, [items]);
-
-  if (grupos.size === 0) return null;
-
-  return (
-    <Card>
-      <CardHeader className="py-2 px-4">
-        <CardTitle className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-          <BarChart2 className="h-3.5 w-3.5" />
-          Resumo por CNPJ Emitente — documentos por dia
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="py-1.5 px-3 text-[11px]">CNPJ Emitente</TableHead>
-                <TableHead className="py-1.5 px-3 text-[11px]">Apelido Filial</TableHead>
-                <TableHead className="py-1.5 px-3 text-[11px]">Data Emissão</TableHead>
-                <TableHead className="py-1.5 px-3 text-[11px] text-right">Qtd Docs</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {Array.from(grupos.entries()).flatMap(([cnpj, datas]) => {
-                const apelido = apelidos[cnpj] || '';
-                const totalGrupo = datas.reduce((s, d) => s + d.qtd, 0);
-                return datas.map((d, idx) => (
-                  <TableRow
-                    key={`${cnpj}-${d.data}`}
-                    className={idx === 0 ? 'border-t-2 border-t-muted' : ''}
-                  >
-                    <TableCell className="py-1 px-3 font-mono text-[11px]">
-                      {idx === 0 ? fmtCNPJ(cnpj) : ''}
-                    </TableCell>
-                    <TableCell className="py-1 px-3 text-[11px]">
-                      {idx === 0
-                        ? (apelido
-                          ? <Badge variant="outline" className="text-[10px] px-1.5 py-0">{apelido}</Badge>
-                          : <span className="text-muted-foreground">—</span>)
-                        : ''}
-                    </TableCell>
-                    <TableCell className="py-1 px-3 text-[11px] whitespace-nowrap">
-                      {fmtData(d.data)}
-                    </TableCell>
-                    <TableCell className="py-1 px-3 text-[11px] text-right font-semibold">
-                      {d.qtd}
-                      {idx === 0 && datas.length > 1 && (
-                        <span className="ml-1.5 text-[10px] text-muted-foreground font-normal">
-                          ({totalGrupo} total)
-                        </span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ));
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ── Painel principal ───────────────────────────────────────────────────────────
 export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel = true }: Props) {
   const { token, companyId } = useAuth();
@@ -379,12 +294,12 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     enabled: !!token && !!companyId && rfbDisponivel,
   });
 
-  const { data: resumoData, isError: resumoError } = useQuery<MalhaFinaResumoResponse>({
-    queryKey: ['malha-fina-resumo', tipo, companyId, { dataDe, cnpjDeb }],
+  // Resumo por tipo (da MV) — apenas data_de, sem filtro de emitente para sempre mostrar todas as opções
+  const { data: resumoData } = useQuery<MalhaFinaResumoResponse>({
+    queryKey: ['malha-fina-resumo', tipo, companyId, dataDe],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (dataDe) params.set('data_de', dataDe);
-      if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
       const res = await fetch(`/api/malha-fina/${tipo}/resumo?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
       return res.json();
@@ -519,12 +434,6 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
         </div>
       )}
 
-      {/* Resumo por emitente */}
-      {resumoError ? (
-        <p className="text-xs text-red-500 text-center">Erro ao carregar resumo por emitente.</p>
-      ) : resumoItems.length > 0 ? (
-        <ResumoEmitentes items={resumoItems} apelidos={apelidos} />
-      ) : null}
 
       {/* Tabela principal */}
       <Card>

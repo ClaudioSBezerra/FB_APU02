@@ -449,7 +449,10 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			rfbClient := services.NewRFBClient()
 			if err := services.ProcessarDownloadRFB(db, rfbClient, requestID); err != nil {
 				log.Printf("[RFB Webhook] Error processing download for request %s: %v", requestID, err)
+				return
 			}
+			// Atualiza a MV de resumo após novos débitos serem processados
+			RefreshMalhaFinaMV(db)
 		}()
 
 		w.WriteHeader(http.StatusOK)

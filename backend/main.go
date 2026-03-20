@@ -494,6 +494,8 @@ func main() {
 	http.HandleFunc("/api/malha-fina/nfe-entradas/resumo", withAuth(handlers.MalhaFinaNFeEntradasResumoHandler, ""))
 	http.HandleFunc("/api/malha-fina/nfe-saidas/resumo", withAuth(handlers.MalhaFinaNFeSaidasResumoHandler, ""))
 	http.HandleFunc("/api/malha-fina/cte/resumo", withAuth(handlers.MalhaFinaCTeResumoHandler, ""))
+	http.HandleFunc("/api/malha-fina/resumo-geral", withAuth(handlers.MalhaFinaResumoGeralHandler, ""))
+	http.HandleFunc("/api/malha-fina/resumo-geral/refresh", withAuth(handlers.MalhaFinaResumoRefreshHandler, ""))
 
 	// DANFE generation
 	http.HandleFunc("/api/danfe/", withAuth(handlers.DanfeHandler, ""))

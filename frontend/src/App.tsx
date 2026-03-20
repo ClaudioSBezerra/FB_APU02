@@ -23,6 +23,7 @@ import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
 import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
 import MalhaFinaCTe from './pages/MalhaFinaCTe'
+import MalhaFinaResumoGeral from './pages/MalhaFinaResumoGeral'
 import AdminUsers from './pages/AdminUsers'
 import LimparDadosApuracao from './pages/LimparDadosApuracao'
 import Login from './pages/Login'
@@ -165,9 +166,10 @@ function AppLayout() {
               <Route path="/rfb/apuracao-cbs"           element={<PainelApuracaoCBS />} />
 
               {/* Malha Fina */}
-              <Route path="/malha-fina/nfe-entradas" element={<MalhaFinaNFeEntradas />} />
-              <Route path="/malha-fina/nfe-saidas"   element={<MalhaFinaNFeSaidas />} />
-              <Route path="/malha-fina/cte"          element={<MalhaFinaCTe />} />
+              <Route path="/malha-fina/resumo-geral"  element={<MalhaFinaResumoGeral />} />
+              <Route path="/malha-fina/nfe-entradas"  element={<MalhaFinaNFeEntradas />} />
+              <Route path="/malha-fina/nfe-saidas"    element={<MalhaFinaNFeSaidas />} />
+              <Route path="/malha-fina/cte"           element={<MalhaFinaCTe />} />
 
               {/* Receita Federal */}
               <Route path="/rfb/gestao-creditos"        element={<GestaoCredIBSCBS />} />

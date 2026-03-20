@@ -176,16 +176,35 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	})
 }
 
-// MalhaFinaResumoRow — agrupamento por emitente + dia para a aba de resumo.
+// MalhaFinaResumoRow — linha do resumo por emitente + dia (da MV).
 type MalhaFinaResumoRow struct {
-	NiEmitente  string `json:"ni_emitente"`
-	DataEmissao string `json:"data_emissao"` // YYYY-MM-DD
-	Quantidade  int    `json:"quantidade"`
+	NiEmitente          string  `json:"ni_emitente"`
+	DataEmissao         string  `json:"data_emissao"` // YYYY-MM-DD
+	Quantidade          int     `json:"quantidade"`
+	ValorCBSNaoExtinto  float64 `json:"valor_cbs_nao_extinto"`
 }
 
-// malhaFinaResumo agrega por emitente × dia sem paginação.
-// Aceita os mesmos filtros (data_de, emit_cnpj) que malhaFinaList.
-func malhaFinaResumo(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDFe []string, excludeTable, excludeChaveCol string) {
+// MalhaFinaResumoGeralRow — linha do resumo geral (inclui tipo).
+type MalhaFinaResumoGeralRow struct {
+	Tipo                string  `json:"tipo"`
+	NiEmitente          string  `json:"ni_emitente"`
+	DataEmissao         string  `json:"data_emissao"`
+	Quantidade          int     `json:"quantidade"`
+	ValorCBSNaoExtinto  float64 `json:"valor_cbs_nao_extinto"`
+}
+
+// RefreshMalhaFinaMV dispara REFRESH CONCURRENTLY na mv_malha_fina_resumo.
+// Deve ser chamado em goroutine após downloads de rfb_debitos.
+func RefreshMalhaFinaMV(db *sql.DB) {
+	if _, err := db.Exec(`REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo`); err != nil {
+		log.Printf("[MalhaFina MV] Erro no REFRESH: %v", err)
+	} else {
+		log.Printf("[MalhaFina MV] REFRESH concluído")
+	}
+}
+
+// malhaFinaResumoFromMV consulta a MV pré-computada — O(1) em vez de O(n²).
+func malhaFinaResumoFromMV(db *sql.DB, w http.ResponseWriter, r *http.Request, tipo string) {
 	claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
 	if !ok {
 		jsonErr(w, http.StatusUnauthorized, "Unauthorized")
@@ -198,41 +217,28 @@ func malhaFinaResumo(db *sql.DB, w http.ResponseWriter, r *http.Request, modelos
 		return
 	}
 
-	q := r.URL.Query()
-	dataDe     := q.Get("data_de")
-	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
+	q       := r.URL.Query()
+	dataDe  := q.Get("data_de")
 
-	args := []interface{}{companyID}
-	modeloPlaceholders := make([]string, len(modelosDFe))
-	for i, m := range modelosDFe {
-		args = append(args, m)
-		modeloPlaceholders[i] = fmt.Sprintf("$%d", len(args))
-	}
+	args  := []interface{}{companyID, tipo}
+	where := "company_id = $1 AND tipo = $2"
 
-	where := fmt.Sprintf(
-		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != '' AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe)",
-		strings.Join(modeloPlaceholders, ","), excludeTable, excludeChaveCol,
-	)
 	if dataDe != "" {
 		args = append(args, dataDe)
-		where += fmt.Sprintf(" AND rd.data_dfe_emissao >= $%d::date", len(args))
-	}
-	if filterCNPJ != "" {
-		args = append(args, filterCNPJ+"%")
-		where += fmt.Sprintf(" AND rd.ni_emitente LIKE $%d", len(args))
+		where += fmt.Sprintf(" AND data_emissao >= $%d::date", len(args))
 	}
 
 	rows, err := db.Query(fmt.Sprintf(`
-		SELECT COALESCE(rd.ni_emitente, ''),
-		       COALESCE(TO_CHAR(rd.data_dfe_emissao, 'YYYY-MM-DD'), ''),
-		       COUNT(*) AS quantidade
-		FROM rfb_debitos rd
+		SELECT ni_emitente,
+		       TO_CHAR(data_emissao, 'YYYY-MM-DD'),
+		       quantidade,
+		       valor_cbs_nao_extinto
+		FROM mv_malha_fina_resumo
 		WHERE %s
-		GROUP BY rd.ni_emitente, rd.data_dfe_emissao
-		ORDER BY rd.ni_emitente, rd.data_dfe_emissao DESC NULLS LAST
+		ORDER BY ni_emitente, data_emissao DESC
 	`, where), args...)
 	if err != nil {
-		log.Printf("malha_fina resumo error: %v", err)
+		log.Printf("malha_fina resumo MV error: %v", err)
 		jsonErr(w, http.StatusInternalServerError, "Erro ao buscar resumo")
 		return
 	}
@@ -241,14 +247,14 @@ func malhaFinaResumo(db *sql.DB, w http.ResponseWriter, r *http.Request, modelos
 	items := []MalhaFinaResumoRow{}
 	for rows.Next() {
 		var row MalhaFinaResumoRow
-		if err := rows.Scan(&row.NiEmitente, &row.DataEmissao, &row.Quantidade); err != nil {
+		if err := rows.Scan(&row.NiEmitente, &row.DataEmissao, &row.Quantidade, &row.ValorCBSNaoExtinto); err != nil {
 			continue
 		}
 		items = append(items, row)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"items": items})
+	json.NewEncoder(w).Encode(map[string]any{"items": items})
 }
 
 // MalhaFinaNFeEntradasHandler — GET /api/malha-fina/nfe-entradas
@@ -272,25 +278,90 @@ func MalhaFinaCTeHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// Handlers de resumo (agrupamento emitente × dia)
+// Handlers de resumo por tipo — consultam a MV (instantâneo)
 
-// MalhaFinaNFeEntradasResumoHandler — GET /api/malha-fina/nfe-entradas/resumo
 func MalhaFinaNFeEntradasResumoHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		malhaFinaResumo(db, w, r, []string{"55", "65"}, "nfe_entradas", "chave_nfe")
-	}
+	return func(w http.ResponseWriter, r *http.Request) { malhaFinaResumoFromMV(db, w, r, "nfe-entradas") }
 }
-
-// MalhaFinaNFeSaidasResumoHandler — GET /api/malha-fina/nfe-saidas/resumo
 func MalhaFinaNFeSaidasResumoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { malhaFinaResumoFromMV(db, w, r, "nfe-saidas") }
+}
+func MalhaFinaCTeResumoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { malhaFinaResumoFromMV(db, w, r, "cte") }
+}
+
+// MalhaFinaResumoGeralHandler — GET /api/malha-fina/resumo-geral
+// Retorna todos os tipos unificados da MV para a aba Resumo Geral.
+func MalhaFinaResumoGeralHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		malhaFinaResumo(db, w, r, []string{"55", "65"}, "nfe_saidas", "chave_nfe")
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			jsonErr(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		userID := claims["user_id"].(string)
+		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+		if err != nil {
+			jsonErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		q      := r.URL.Query()
+		dataDe := q.Get("data_de")
+
+		args  := []interface{}{companyID}
+		where := "company_id = $1"
+		if dataDe != "" {
+			args = append(args, dataDe)
+			where += fmt.Sprintf(" AND data_emissao >= $%d::date", len(args))
+		}
+
+		rows, err := db.Query(fmt.Sprintf(`
+			SELECT tipo,
+			       ni_emitente,
+			       TO_CHAR(data_emissao, 'YYYY-MM-DD'),
+			       quantidade,
+			       valor_cbs_nao_extinto
+			FROM mv_malha_fina_resumo
+			WHERE %s
+			ORDER BY tipo, ni_emitente, data_emissao DESC
+		`, where), args...)
+		if err != nil {
+			log.Printf("malha_fina resumo geral error: %v", err)
+			jsonErr(w, http.StatusInternalServerError, "Erro ao buscar resumo geral")
+			return
+		}
+		defer rows.Close()
+
+		items := []MalhaFinaResumoGeralRow{}
+		for rows.Next() {
+			var row MalhaFinaResumoGeralRow
+			if err := rows.Scan(&row.Tipo, &row.NiEmitente, &row.DataEmissao, &row.Quantidade, &row.ValorCBSNaoExtinto); err != nil {
+				continue
+			}
+			items = append(items, row)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"items": items})
 	}
 }
 
-// MalhaFinaCTeResumoHandler — GET /api/malha-fina/cte/resumo
-func MalhaFinaCTeResumoHandler(db *sql.DB) http.HandlerFunc {
+// MalhaFinaResumoRefreshHandler — POST /api/malha-fina/resumo-geral/refresh
+// Dispara REFRESH CONCURRENTLY manualmente.
+func MalhaFinaResumoRefreshHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		malhaFinaResumo(db, w, r, []string{"57"}, "cte_entradas", "chave_cte")
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Verifica auth (qualquer usuário autenticado pode disparar)
+		if _, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims); !ok {
+			jsonErr(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		go RefreshMalhaFinaMV(db)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "refresh_iniciado"})
 	}
 }
