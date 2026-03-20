@@ -176,6 +176,81 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	})
 }
 
+// MalhaFinaResumoRow — agrupamento por emitente + dia para a aba de resumo.
+type MalhaFinaResumoRow struct {
+	NiEmitente  string `json:"ni_emitente"`
+	DataEmissao string `json:"data_emissao"` // YYYY-MM-DD
+	Quantidade  int    `json:"quantidade"`
+}
+
+// malhaFinaResumo agrega por emitente × dia sem paginação.
+// Aceita os mesmos filtros (data_de, emit_cnpj) que malhaFinaList.
+func malhaFinaResumo(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDFe []string, excludeTable, excludeChaveCol string) {
+	claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+	if !ok {
+		jsonErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	userID := claims["user_id"].(string)
+	companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+	if err != nil {
+		jsonErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	q := r.URL.Query()
+	dataDe     := q.Get("data_de")
+	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
+
+	args := []interface{}{companyID}
+	modeloPlaceholders := make([]string, len(modelosDFe))
+	for i, m := range modelosDFe {
+		args = append(args, m)
+		modeloPlaceholders[i] = fmt.Sprintf("$%d", len(args))
+	}
+
+	where := fmt.Sprintf(
+		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != '' AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe)",
+		strings.Join(modeloPlaceholders, ","), excludeTable, excludeChaveCol,
+	)
+	if dataDe != "" {
+		args = append(args, dataDe)
+		where += fmt.Sprintf(" AND rd.data_dfe_emissao >= $%d::date", len(args))
+	}
+	if filterCNPJ != "" {
+		args = append(args, filterCNPJ+"%")
+		where += fmt.Sprintf(" AND rd.ni_emitente LIKE $%d", len(args))
+	}
+
+	rows, err := db.Query(fmt.Sprintf(`
+		SELECT COALESCE(rd.ni_emitente, ''),
+		       COALESCE(TO_CHAR(rd.data_dfe_emissao, 'YYYY-MM-DD'), ''),
+		       COUNT(*) AS quantidade
+		FROM rfb_debitos rd
+		WHERE %s
+		GROUP BY rd.ni_emitente, rd.data_dfe_emissao
+		ORDER BY rd.ni_emitente, rd.data_dfe_emissao DESC NULLS LAST
+	`, where), args...)
+	if err != nil {
+		log.Printf("malha_fina resumo error: %v", err)
+		jsonErr(w, http.StatusInternalServerError, "Erro ao buscar resumo")
+		return
+	}
+	defer rows.Close()
+
+	items := []MalhaFinaResumoRow{}
+	for rows.Next() {
+		var row MalhaFinaResumoRow
+		if err := rows.Scan(&row.NiEmitente, &row.DataEmissao, &row.Quantidade); err != nil {
+			continue
+		}
+		items = append(items, row)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"items": items})
+}
+
 // MalhaFinaNFeEntradasHandler — GET /api/malha-fina/nfe-entradas
 func MalhaFinaNFeEntradasHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -194,5 +269,28 @@ func MalhaFinaNFeSaidasHandler(db *sql.DB) http.HandlerFunc {
 func MalhaFinaCTeHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		malhaFinaList(db, w, r, []string{"57"}, "cte_entradas", "chave_cte")
+	}
+}
+
+// Handlers de resumo (agrupamento emitente × dia)
+
+// MalhaFinaNFeEntradasResumoHandler — GET /api/malha-fina/nfe-entradas/resumo
+func MalhaFinaNFeEntradasResumoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		malhaFinaResumo(db, w, r, []string{"55", "65"}, "nfe_entradas", "chave_nfe")
+	}
+}
+
+// MalhaFinaNFeSaidasResumoHandler — GET /api/malha-fina/nfe-saidas/resumo
+func MalhaFinaNFeSaidasResumoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		malhaFinaResumo(db, w, r, []string{"55", "65"}, "nfe_saidas", "chave_nfe")
+	}
+}
+
+// MalhaFinaCTeResumoHandler — GET /api/malha-fina/cte/resumo
+func MalhaFinaCTeResumoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		malhaFinaResumo(db, w, r, []string{"57"}, "cte_entradas", "chave_cte")
 	}
 }

@@ -1,10 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -19,8 +26,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { AlertTriangle, Telescope, ChevronLeft, ChevronRight, Copy, FileText, X } from 'lucide-react';
+import { AlertTriangle, Telescope, ChevronLeft, ChevronRight, Copy, FileText, X, BarChart2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatCnpjComApelido } from '@/lib/formatFilial';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 export interface MalhaFinaRow {
@@ -48,13 +56,29 @@ interface MalhaFinaApiResponse {
   items: MalhaFinaRow[];
 }
 
+interface MalhaFinaResumoRow {
+  ni_emitente: string;
+  data_emissao: string; // YYYY-MM-DD
+  quantidade: number;
+}
+
+interface MalhaFinaResumoResponse {
+  items: MalhaFinaResumoRow[];
+}
+
+interface FilialInfo {
+  cnpj: string;
+  nome: string;
+  apelido: string;
+}
+
 export type MalhaFinaTipo = 'nfe-entradas' | 'nfe-saidas' | 'cte';
 
 interface Props {
   tipo: MalhaFinaTipo;
   title: string;
   description: string;
-  rfbDisponivel?: boolean; // false = RFB ainda não liberou este tipo
+  rfbDisponivel?: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,6 +97,11 @@ function fmtCNPJ(v: string): string {
   if (d.length === 14) return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
   if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
   return v;
+}
+function fmtData(iso: string): string {
+  if (!iso) return '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
 }
 
 const SITUACAO_COLOR: Record<string, string> = {
@@ -223,11 +252,91 @@ function DetalheMalhaFina({ row, onClose, token, companyId }: {
   );
 }
 
+// ── Resumo por emitente ────────────────────────────────────────────────────────
+function ResumoEmitentes({
+  items,
+  apelidos,
+}: {
+  items: MalhaFinaResumoRow[];
+  apelidos: Record<string, string>;
+}) {
+  // Agrupar por ni_emitente → lista de { data, quantidade }
+  const grupos = useMemo(() => {
+    const map = new Map<string, { data: string; qtd: number }[]>();
+    for (const row of items) {
+      const cnpj = row.ni_emitente.replace(/\D/g, '');
+      if (!map.has(cnpj)) map.set(cnpj, []);
+      map.get(cnpj)!.push({ data: row.data_emissao, qtd: row.quantidade });
+    }
+    return map;
+  }, [items]);
+
+  if (grupos.size === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="py-2 px-4">
+        <CardTitle className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
+          <BarChart2 className="h-3.5 w-3.5" />
+          Resumo por CNPJ Emitente — documentos por dia
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="py-1.5 px-3 text-[11px]">CNPJ Emitente</TableHead>
+                <TableHead className="py-1.5 px-3 text-[11px]">Apelido Filial</TableHead>
+                <TableHead className="py-1.5 px-3 text-[11px]">Data Emissão</TableHead>
+                <TableHead className="py-1.5 px-3 text-[11px] text-right">Qtd Docs</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from(grupos.entries()).flatMap(([cnpj, datas]) => {
+                const apelido = apelidos[cnpj] || '';
+                const totalGrupo = datas.reduce((s, d) => s + d.qtd, 0);
+                return datas.map((d, idx) => (
+                  <TableRow
+                    key={`${cnpj}-${d.data}`}
+                    className={idx === 0 ? 'border-t-2 border-t-muted' : ''}
+                  >
+                    <TableCell className="py-1 px-3 font-mono text-[11px]">
+                      {idx === 0 ? fmtCNPJ(cnpj) : ''}
+                    </TableCell>
+                    <TableCell className="py-1 px-3 text-[11px]">
+                      {idx === 0
+                        ? (apelido
+                          ? <Badge variant="outline" className="text-[10px] px-1.5 py-0">{apelido}</Badge>
+                          : <span className="text-muted-foreground">—</span>)
+                        : ''}
+                    </TableCell>
+                    <TableCell className="py-1 px-3 text-[11px] whitespace-nowrap">
+                      {fmtData(d.data)}
+                    </TableCell>
+                    <TableCell className="py-1 px-3 text-[11px] text-right font-semibold">
+                      {d.qtd}
+                      {idx === 0 && datas.length > 1 && (
+                        <span className="ml-1.5 text-[10px] text-muted-foreground font-normal">
+                          ({totalGrupo} total)
+                        </span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ));
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Painel principal ───────────────────────────────────────────────────────────
 export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel = true }: Props) {
   const { token, companyId } = useAuth();
 
-  // Data início — default: primeiro dia do mês atual
   const hoje = new Date();
   const defaultDataDe = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
 
@@ -237,14 +346,34 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   const [cnpjDeb,    setCnpjDeb]    = useState('');
   const [selected,   setSelected]   = useState<MalhaFinaRow | null>(null);
 
+  // Apelidos e filiais
+  const [apelidos, setApelidos] = useState<Record<string, string>>({});
+  const [filiais,  setFiliais]  = useState<FilialInfo[]>([]);
+
+  const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/config/filial-apelidos', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((list: { cnpj: string; apelido: string }[]) => {
+        const map: Record<string, string> = {};
+        (list || []).forEach(fa => { map[fa.cnpj.replace(/\D/g, '')] = fa.apelido; });
+        setApelidos(map);
+      })
+      .catch(() => {});
+    fetch('/api/filiais', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((list: FilialInfo[]) => setFiliais(list || []))
+      .catch(() => {});
+  }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const t = setTimeout(() => setCnpjDeb(filterCNPJ), 400);
     return () => clearTimeout(t);
   }, [filterCNPJ]);
 
   useEffect(() => { setPage(1); }, [dataDe, cnpjDeb]);
-
-  const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
 
   const { data, isFetching, isError } = useQuery<MalhaFinaApiResponse>({
     queryKey: ['malha-fina', tipo, companyId, { page, dataDe, cnpjDeb }],
@@ -261,10 +390,25 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     enabled: !!token && !!companyId && rfbDisponivel,
   });
 
+  const { data: resumoData } = useQuery<MalhaFinaResumoResponse>({
+    queryKey: ['malha-fina-resumo', tipo, companyId, { dataDe, cnpjDeb }],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (dataDe) params.set('data_de', dataDe);
+      if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
+      const res = await fetch(`/api/malha-fina/${tipo}/resumo?${params}`, { headers: authHeaders });
+      if (!res.ok) throw new Error(res.statusText);
+      return res.json();
+    },
+    placeholderData: keepPreviousData,
+    enabled: !!token && !!companyId && rfbDisponivel,
+  });
+
   const items      = data?.items      ?? [];
   const total      = data?.total      ?? 0;
   const totalPages = data?.total_pages ?? 1;
   const totals     = data?.totals     ?? { valor_cbs_total: 0, valor_cbs_nao_extinto: 0 };
+  const resumoItems = resumoData?.items ?? [];
 
   const hasFilters = !!filterCNPJ;
   function clearFilters() { setFilterCNPJ(''); setPage(1); }
@@ -274,7 +418,6 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     navigator.clipboard.writeText(chave).then(() => toast.success('Chave copiada'));
   }
 
-  // ── RFB não disponível ────────────────────────────────────────────────────
   if (!rfbDisponivel) {
     return (
       <div className="space-y-6">
@@ -329,12 +472,26 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
 
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">CNPJ Emitente</label>
-              <Input
-                placeholder="Filtrar por CNPJ emitente..."
-                value={filterCNPJ}
-                onChange={e => setFilterCNPJ(e.target.value)}
-                className="h-8 w-52"
-              />
+              <Select
+                value={filterCNPJ || 'all'}
+                onValueChange={v => { setFilterCNPJ(v === 'all' ? '' : v); setPage(1); }}
+              >
+                <SelectTrigger className="h-8 w-64 text-xs">
+                  <SelectValue placeholder="Todas as filiais..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">Todas as filiais</SelectItem>
+                  {filiais.map(f => {
+                    const cnpj = f.cnpj.replace(/\D/g, '');
+                    const label = formatCnpjComApelido(cnpj, apelidos);
+                    return (
+                      <SelectItem key={cnpj} value={cnpj} className="text-xs font-mono">
+                        {label}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
             </div>
 
             {hasFilters && (
@@ -364,7 +521,12 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
         </div>
       )}
 
-      {/* Tabela */}
+      {/* Resumo por emitente */}
+      {resumoItems.length > 0 && (
+        <ResumoEmitentes items={resumoItems} apelidos={apelidos} />
+      )}
+
+      {/* Tabela principal */}
       <Card>
         <CardHeader className="py-2 px-4">
           <CardTitle className="flex items-center gap-2 text-[11px] text-muted-foreground font-normal">
@@ -426,7 +588,9 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                         <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.modelo_dfe}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{extractNumero(row.chave_dfe)}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_dfe_emissao || '—'}</TableCell>
-                        <TableCell className="py-1 px-2 font-mono text-[11px]">{fmtCNPJ(row.ni_emitente)}</TableCell>
+                        <TableCell className="py-1 px-2 text-[11px]">
+                          {formatCnpjComApelido(row.ni_emitente, apelidos)}
+                        </TableCell>
                         <TableCell className="py-1 px-2 font-mono text-[11px]">{fmtCNPJ(row.ni_adquirente)}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-right font-semibold text-red-700">
                           {fmtBRL(row.valor_cbs_total)}
