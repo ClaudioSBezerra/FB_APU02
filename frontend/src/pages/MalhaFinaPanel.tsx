@@ -66,12 +66,6 @@ interface MalhaFinaResumoResponse {
   items: MalhaFinaResumoRow[];
 }
 
-interface FilialInfo {
-  cnpj: string;
-  nome: string;
-  apelido: string;
-}
-
 export type MalhaFinaTipo = 'nfe-entradas' | 'nfe-saidas' | 'cte';
 
 interface Props {
@@ -346,9 +340,8 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   const [cnpjDeb,    setCnpjDeb]    = useState('');
   const [selected,   setSelected]   = useState<MalhaFinaRow | null>(null);
 
-  // Apelidos e filiais
+  // Apelidos de filiais
   const [apelidos, setApelidos] = useState<Record<string, string>>({});
-  const [filiais,  setFiliais]  = useState<FilialInfo[]>([]);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
 
@@ -361,10 +354,6 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
         (list || []).forEach(fa => { map[fa.cnpj.replace(/\D/g, '')] = fa.apelido; });
         setApelidos(map);
       })
-      .catch(() => {});
-    fetch('/api/filiais', { headers: authHeaders })
-      .then(r => r.ok ? r.json() : [])
-      .then((list: FilialInfo[]) => setFiliais(list || []))
       .catch(() => {});
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -390,7 +379,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     enabled: !!token && !!companyId && rfbDisponivel,
   });
 
-  const { data: resumoData } = useQuery<MalhaFinaResumoResponse>({
+  const { data: resumoData, isError: resumoError } = useQuery<MalhaFinaResumoResponse>({
     queryKey: ['malha-fina-resumo', tipo, companyId, { dataDe, cnpjDeb }],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -409,6 +398,19 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   const totalPages = data?.total_pages ?? 1;
   const totals     = data?.totals     ?? { valor_cbs_total: 0, valor_cbs_nao_extinto: 0 };
   const resumoItems = resumoData?.items ?? [];
+
+  // Opções do Select derivadas dos emitentes presentes no resumo
+  const emitenteOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const opts: { cnpj: string; label: string }[] = [];
+    for (const row of resumoItems) {
+      const cnpj = row.ni_emitente.replace(/\D/g, '');
+      if (!cnpj || seen.has(cnpj)) continue;
+      seen.add(cnpj);
+      opts.push({ cnpj, label: formatCnpjComApelido(cnpj, apelidos) });
+    }
+    return opts;
+  }, [resumoItems, apelidos]);
 
   const hasFilters = !!filterCNPJ;
   function clearFilters() { setFilterCNPJ(''); setPage(1); }
@@ -481,15 +483,11 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all" className="text-xs">Todas as filiais</SelectItem>
-                  {filiais.map(f => {
-                    const cnpj = f.cnpj.replace(/\D/g, '');
-                    const label = formatCnpjComApelido(cnpj, apelidos);
-                    return (
-                      <SelectItem key={cnpj} value={cnpj} className="text-xs font-mono">
-                        {label}
-                      </SelectItem>
-                    );
-                  })}
+                  {emitenteOptions.map(opt => (
+                    <SelectItem key={opt.cnpj} value={opt.cnpj} className="text-xs font-mono">
+                      {opt.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -522,9 +520,11 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
       )}
 
       {/* Resumo por emitente */}
-      {resumoItems.length > 0 && (
+      {resumoError ? (
+        <p className="text-xs text-red-500 text-center">Erro ao carregar resumo por emitente.</p>
+      ) : resumoItems.length > 0 ? (
         <ResumoEmitentes items={resumoItems} apelidos={apelidos} />
-      )}
+      ) : null}
 
       {/* Tabela principal */}
       <Card>
