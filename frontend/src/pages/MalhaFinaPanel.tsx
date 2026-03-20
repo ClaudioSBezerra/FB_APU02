@@ -396,7 +396,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                 <SelectTrigger className="h-8 w-64 text-xs">
                   <SelectValue placeholder="Todas as filiais..." />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" side="bottom" className="max-h-72 overflow-y-auto">
                   <SelectItem value="all" className="text-xs">Todas as filiais</SelectItem>
                   {emitenteOptions.map(opt => (
                     <SelectItem key={opt.cnpj} value={opt.cnpj} className="text-xs font-mono">
