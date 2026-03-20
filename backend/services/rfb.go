@@ -9,8 +9,22 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
+
+// rfbTokenCache caches OAuth2 tokens per client_id across goroutines.
+// The RFB API associates tiqueteDownload with the access_token that made
+// the assessment request — reusing the same token ensures the download succeeds.
+var rfbTokenCache = struct {
+	mu     sync.Mutex
+	tokens map[string]rfbCachedToken
+}{tokens: make(map[string]rfbCachedToken)}
+
+type rfbCachedToken struct {
+	token     string
+	expiresAt time.Time
+}
 
 // RFBClient wraps communication with the Receita Federal CBS API.
 type RFBClient struct {
@@ -71,8 +85,27 @@ func (c *RFBClient) SetAmbiente(ambiente string) {
 	}
 }
 
-// GetToken obtains an OAuth2 access token using client_credentials grant.
+// GetToken returns a valid OAuth2 access token for the given client credentials.
+// Tokens are cached per client_id (with a 5-minute safety margin before expiry) so
+// that the assessment request and subsequent download use the SAME token — required
+// by the RFB API which associates tiqueteDownload with the issuing access_token.
 func (c *RFBClient) GetToken(clientID, clientSecret string) (string, error) {
+	rfbTokenCache.mu.Lock()
+	if ct, ok := rfbTokenCache.tokens[clientID]; ok && time.Now().Before(ct.expiresAt) {
+		rfbTokenCache.mu.Unlock()
+		log.Printf("[RFB] Reusing cached token for clientID ...%s (expires in %.0fs)",
+			func() string {
+				if len(clientID) >= 6 {
+					return clientID[len(clientID)-6:]
+				}
+				return clientID
+			}(),
+			time.Until(ct.expiresAt).Seconds(),
+		)
+		return ct.token, nil
+	}
+	rfbTokenCache.mu.Unlock()
+
 	log.Printf("[RFB] Requesting OAuth2 token from %s", c.tokenURL)
 
 	data := url.Values{}
@@ -117,6 +150,19 @@ func (c *RFBClient) GetToken(clientID, clientSecret string) (string, error) {
 			return t
 		}(),
 	)
+
+	// Cache the token so that assessment and download use the same access_token.
+	// Safety margin: expire cache 5 minutes before the real expiry.
+	safetyMargin := 300
+	if tokenResp.ExpiresIn > safetyMargin {
+		rfbTokenCache.mu.Lock()
+		rfbTokenCache.tokens[clientID] = rfbCachedToken{
+			token:     tokenResp.AccessToken,
+			expiresAt: time.Now().Add(time.Duration(tokenResp.ExpiresIn-safetyMargin) * time.Second),
+		}
+		rfbTokenCache.mu.Unlock()
+	}
+
 	return tokenResp.AccessToken, nil
 }
 
