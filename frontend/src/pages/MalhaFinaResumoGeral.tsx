@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -64,15 +64,16 @@ export default function MalhaFinaResumoGeral() {
   const defaultDataDe = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
   const [dataDe, setDataDe] = useState(defaultDataDe);
   const [refreshing, setRefreshing] = useState(false);
-  const [apelidos] = useState<Record<string, string>>({});
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
 
   // Carrega apelidos de filiais
   const [apelidosMap, setApelidosMap] = useState<Record<string, string>>({});
-  useState(() => {
-    if (!token) return;
-    fetch('/api/config/filial-apelidos', { headers: authHeaders })
+  useEffect(() => {
+    if (!token || !companyId) return;
+    fetch('/api/config/filial-apelidos', {
+      headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId },
+    })
       .then(r => r.ok ? r.json() : [])
       .then((list: { cnpj: string; apelido: string }[]) => {
         const map: Record<string, string> = {};
@@ -80,7 +81,7 @@ export default function MalhaFinaResumoGeral() {
         setApelidosMap(map);
       })
       .catch(() => {});
-  });
+  }, [token, companyId]);
 
   const { data, isFetching, isError, refetch } = useQuery<ResumoGeralResponse>({
     queryKey: ['malha-fina-resumo-geral', companyId, dataDe],

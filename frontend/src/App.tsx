@@ -190,7 +190,7 @@ function AppLayout() {
 
 // ── App root ─────────────────────────────────────────────────────────────────
 function App() {
-  console.log('App Version: 1.0.3 — FB_APU02 Apuração Assistida')
+  console.log('App Version: 1.0.4 — FB_APU02 Apuração Assistida')
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
