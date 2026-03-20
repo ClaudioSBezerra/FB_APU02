@@ -21,7 +21,7 @@ WHERE rd.modelo_dfe IN ('55','65')
     SELECT 1 FROM nfe_saidas ns
     WHERE ns.company_id = rd.company_id AND ns.chave_nfe = rd.chave_dfe
   )
-GROUP BY rd.company_id, rd.ni_emitente, rd.data_dfe_emissao
+GROUP BY rd.company_id, rd.ni_emitente, rd.data_dfe_emissao::DATE
 
 UNION ALL
 
@@ -39,7 +39,7 @@ WHERE rd.modelo_dfe IN ('55','65')
     SELECT 1 FROM nfe_entradas ne
     WHERE ne.company_id = rd.company_id AND ne.chave_nfe = rd.chave_dfe
   )
-GROUP BY rd.company_id, rd.ni_emitente, rd.data_dfe_emissao
+GROUP BY rd.company_id, rd.ni_emitente, rd.data_dfe_emissao::DATE
 
 UNION ALL
 
@@ -57,7 +57,7 @@ WHERE rd.modelo_dfe IN ('57')
     SELECT 1 FROM cte_entradas ce
     WHERE ce.company_id = rd.company_id AND ce.chave_cte = rd.chave_dfe
   )
-GROUP BY rd.company_id, rd.ni_emitente, rd.data_dfe_emissao;
+GROUP BY rd.company_id, rd.ni_emitente, rd.data_dfe_emissao::DATE;
 
 -- Índice único — obrigatório para REFRESH CONCURRENTLY (non-blocking)
 CREATE UNIQUE INDEX mv_malha_fina_resumo_pk
