@@ -17,6 +17,7 @@ interface RFBRequest {
   id: string;
   cnpj_base: string;
   tiquete: string;
+  tiquete_download?: string;
   status: string;
   ambiente: string;
   error_code?: string;
@@ -292,7 +293,7 @@ export default function RFBApuracao() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {req.status === 'webhook_received' && (
+                        {(req.status === 'webhook_received' || (req.status === 'error' && req.tiquete_download)) && (
                           <Button size="sm" variant="outline"
                             onClick={() => handleDownloadManual(req.id)}>
                             <Download className="mr-1 h-3 w-3" /> Download Manual
@@ -301,10 +302,12 @@ export default function RFBApuracao() {
                         {req.status === 'error' && (
                           <>
                             <Badge variant="destructive" className="text-xs">{req.error_code}</Badge>
-                            <Button size="sm" variant="outline" className="text-purple-600 hover:bg-purple-50"
-                              onClick={() => handleReprocess(req.id)}>
-                              <RotateCcw className="mr-1 h-3 w-3" /> Reprocessar
-                            </Button>
+                            {!req.tiquete_download && (
+                              <Button size="sm" variant="outline" className="text-purple-600 hover:bg-purple-50"
+                                onClick={() => handleReprocess(req.id)}>
+                                <RotateCcw className="mr-1 h-3 w-3" /> Reprocessar
+                              </Button>
+                            )}
                             <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-700 hover:bg-red-50 px-2"
                               onClick={() => handleDelete(req.id)}>
                               <Trash2 className="h-3.5 w-3.5" />

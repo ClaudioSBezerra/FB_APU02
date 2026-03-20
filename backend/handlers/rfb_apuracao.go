@@ -22,17 +22,18 @@ import (
 
 // RFBRequest represents a request to the RFB API
 type RFBRequest struct {
-	ID           string      `json:"id"`
-	CompanyID    string      `json:"company_id"`
-	CNPJBase     string      `json:"cnpj_base"`
-	Tiquete      string      `json:"tiquete,omitempty"`
-	Status       string      `json:"status"`
-	Ambiente     string      `json:"ambiente"`
-	ErrorCode    *string     `json:"error_code,omitempty"`
-	ErrorMessage *string     `json:"error_message,omitempty"`
-	CreatedAt    time.Time   `json:"created_at"`
-	UpdatedAt    time.Time   `json:"updated_at"`
-	Resumo       *RFBResumo  `json:"resumo,omitempty"`
+	ID               string      `json:"id"`
+	CompanyID        string      `json:"company_id"`
+	CNPJBase         string      `json:"cnpj_base"`
+	Tiquete          string      `json:"tiquete,omitempty"`
+	TiqueteDownload  *string     `json:"tiquete_download,omitempty"`
+	Status           string      `json:"status"`
+	Ambiente         string      `json:"ambiente"`
+	ErrorCode        *string     `json:"error_code,omitempty"`
+	ErrorMessage     *string     `json:"error_message,omitempty"`
+	CreatedAt        time.Time   `json:"created_at"`
+	UpdatedAt        time.Time   `json:"updated_at"`
+	Resumo           *RFBResumo  `json:"resumo,omitempty"`
 }
 
 // RFBResumo represents the summary of a CBS assessment
@@ -479,7 +480,8 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		rows, err := db.Query(`
-			SELECT r.id, r.company_id, r.cnpj_base, COALESCE(r.tiquete, ''), r.status, r.ambiente,
+			SELECT r.id, r.company_id, r.cnpj_base, COALESCE(r.tiquete, ''), r.tiquete_download,
+				r.status, r.ambiente,
 				r.error_code, r.error_message, r.created_at, r.updated_at,
 				res.id, res.request_id, COALESCE(res.data_apuracao, ''), res.total_debitos,
 				res.valor_cbs_total, res.valor_cbs_extinto, res.valor_cbs_nao_extinto,
@@ -504,7 +506,8 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			var resCBSTotal, resCBSExtinto, resCBSNaoExtinto sql.NullFloat64
 
 			if err := rows.Scan(
-				&req.ID, &req.CompanyID, &req.CNPJBase, &req.Tiquete, &req.Status, &req.Ambiente,
+				&req.ID, &req.CompanyID, &req.CNPJBase, &req.Tiquete, &req.TiqueteDownload,
+				&req.Status, &req.Ambiente,
 				&req.ErrorCode, &req.ErrorMessage, &req.CreatedAt, &req.UpdatedAt,
 				&resID, &resReqID, &resData, &resTotalDebitos,
 				&resCBSTotal, &resCBSExtinto, &resCBSNaoExtinto,
