@@ -136,9 +136,38 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64
 
+  # Deploy no servidor do cliente AWS (roda no self-hosted runner)
+  deploy-cliente-aws:
+    needs: build-installer-images
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, cliente-aws]
+
+    steps:
+      - name: Pull latest images
+        working-directory: /opt/apps/fbtax/cliente-aws
+        run: docker compose pull
+
+      - name: Restart containers
+        working-directory: /opt/apps/fbtax/cliente-aws
+        run: docker compose up -d --force-recreate
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3006/api/health > /dev/null 2>&1; then
+              echo "Deploy cliente-aws OK!"
+              exit 0
+            fi
+            echo "Tentativa $i/20..."
+            sleep 5
+          done
+          echo "Health check falhou."
+          docker compose --project-directory /opt/apps/fbtax/cliente-aws logs api --tail 50
+          exit 1
+
   # Notificação (Coolify deploya automaticamente via webhook próprio)
   notify:
-    needs: [build-and-push, build-installer-images]
+    needs: [build-and-push, build-installer-images, deploy-cliente-aws]
     runs-on: ubuntu-latest
     if: always()
 
