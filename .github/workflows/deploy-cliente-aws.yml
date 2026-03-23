@@ -1,0 +1,49 @@
+name: Deploy to Cliente AWS (172.16.249.77:3006)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-cliente-aws:
+    runs-on: [self-hosted, cliente-aws]
+
+    steps:
+      - name: Pull latest images from GHCR
+        working-directory: /opt/apps/fbtax/cliente-aws
+        run: |
+          echo "Pulling latest images..."
+          docker compose pull
+
+      - name: Restart containers
+        working-directory: /opt/apps/fbtax/cliente-aws
+        run: |
+          docker compose up -d --force-recreate
+
+      - name: Health check
+        run: |
+          echo "Aguardando sistema iniciar..."
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3006/api/health > /dev/null 2>&1; then
+              echo "Deploy OK!"
+              curl -s http://localhost:3006/api/health
+              exit 0
+            fi
+            echo "Tentativa $i/20..."
+            sleep 5
+          done
+          echo "Deploy falhou - health check nao respondeu."
+          docker compose --project-directory /opt/apps/fbtax/cliente-aws logs api --tail 50
+          exit 1
+
+      - name: Notify result
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "Deploy concluido com sucesso!"
+            echo "Commit: ${{ github.sha }}"
+            echo "URL: http://172.16.249.77:3006"
+          else
+            echo "Deploy falhou. Verifique os logs acima."
+          fi
