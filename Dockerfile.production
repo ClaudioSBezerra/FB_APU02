@@ -65,6 +65,6 @@ ENV APP_MODULE=apuracao
 CMD ["./fb_apu02-api"]
 
 LABEL maintainer="FB_APU02 Team"
-LABEL version="1.0.2"
+LABEL version="1.0.5"
 LABEL description="FB_APU02 — Apuração Assistida + Receita Federal"
 LABEL com.coolify.image=true
