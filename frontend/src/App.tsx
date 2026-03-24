@@ -19,6 +19,8 @@ import ImportarXMLsEntrada from './pages/ImportarXMLsEntrada'
 import ConsultaNFesEntradas from './pages/ConsultaNFesEntradas'
 import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import ConsultaCTesEntradas from './pages/ConsultaCTesEntradas'
+import ERPBridgeConfig from './pages/ERPBridgeConfig'
+import ERPBridgeLogs from './pages/ERPBridgeLogs'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
 import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
@@ -153,9 +155,11 @@ function AppLayout() {
               <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
 
               {/* Importações */}
-              <Route path="/apuracao/saida"         element={<ImportarXMLsSaida />} />
-              <Route path="/apuracao/entrada"       element={<ImportarXMLsEntrada />} />
-              <Route path="/apuracao/cte-entrada"   element={<ImportarXMLsCTe />} />
+              <Route path="/apuracao/saida"              element={<ImportarXMLsSaida />} />
+              <Route path="/apuracao/entrada"            element={<ImportarXMLsEntrada />} />
+              <Route path="/apuracao/cte-entrada"        element={<ImportarXMLsCTe />} />
+              <Route path="/importacoes/erp-bridge"      element={<ERPBridgeConfig />} />
+              <Route path="/importacoes/erp-bridge/logs" element={<ERPBridgeLogs />} />
 
               {/* Apuração */}
               <Route path="/apuracao/saida/notas"       element={<ConsultaNFeSaidas />} />

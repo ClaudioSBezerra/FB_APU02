@@ -22,6 +22,8 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'NF-e Entradas',  path: '/apuracao/entrada' },
       { label: 'CT-e Entradas',  path: '/apuracao/cte-entrada' },
       { label: 'NFS-e',          path: '#', disabled: true },
+      { label: 'ERP Bridge',     path: '/importacoes/erp-bridge' },
+      { label: 'Logs Bridge',    path: '/importacoes/erp-bridge/logs' },
     ],
   },
   apuracao: {
@@ -78,7 +80,7 @@ export function getActiveModule(pathname: string): string {
   if (pathname === '/') return 'painel'
 
   const importPaths = ['/apuracao/saida', '/apuracao/entrada', '/apuracao/cte-entrada']
-  if (importPaths.includes(pathname)) return 'importacoes'
+  if (importPaths.includes(pathname) || pathname.startsWith('/importacoes/')) return 'importacoes'
 
   const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
   if (pathname.includes('/notas') || apuracaoPaths.includes(pathname)) return 'apuracao'

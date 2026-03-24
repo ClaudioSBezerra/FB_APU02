@@ -11,6 +11,7 @@ Uso:
   python bridge.py --data 2026-03-01 --data-fim 2026-03-19
   python bridge.py --mes 2026-03                 # mês inteiro
   python bridge.py --servidor "FC - Recife"      # só um servidor
+  python bridge.py --daemon                      # modo daemon (roda no horário configurado via UI)
 """
 
 import argparse
@@ -19,8 +20,10 @@ import logging
 import re
 import sqlite3
 import sys
-from datetime import date, datetime, timedelta
+import time as _time
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 import yaml
@@ -201,6 +204,114 @@ class FBTaxClient:
             resp = self._post_xml(endpoint, chave, xml_bytes)
         return {"status": resp.status_code, "body": resp.text[:300]}
 
+    # ── Métodos de reporte de execução via API ─────────────────────────────────
+
+    def get_bridge_config(self) -> dict | None:
+        """Busca a configuração de agendamento do bridge na API."""
+        try:
+            resp = self.session.get(f"{self.base_url}/api/erp-bridge/config", timeout=10)
+            if resp.status_code == 401:
+                self.login()
+                resp = self.session.get(f"{self.base_url}/api/erp-bridge/config", timeout=10)
+            if resp.ok:
+                return resp.json()
+        except Exception as exc:
+            log.warning("Nao foi possivel obter config bridge: %s", exc)
+        return None
+
+    def create_run(self, data_ini: date, data_fim: date, origem: str = "scheduler") -> str | None:
+        """Cria um novo registro de execução na API. Retorna o run_id ou None."""
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/api/erp-bridge/runs",
+                json={
+                    "data_ini": str(data_ini),
+                    "data_fim": str(data_fim - timedelta(days=1)),
+                    "origem": origem,
+                },
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                self.login()
+                resp = self.session.post(
+                    f"{self.base_url}/api/erp-bridge/runs",
+                    json={
+                        "data_ini": str(data_ini),
+                        "data_fim": str(data_fim - timedelta(days=1)),
+                        "origem": origem,
+                    },
+                    timeout=10,
+                )
+            if resp.status_code in (200, 201):
+                return resp.json().get("id")
+        except Exception as exc:
+            log.warning("Nao foi possivel criar run na API: %s", exc)
+        return None
+
+    def report_items(self, run_id: str, totais: dict) -> None:
+        """Envia os totais por servidor/tipo à API."""
+        items = []
+        for servidor, tipos in totais.items():
+            for tipo, s in tipos.items():
+                status = "ok"
+                if s.get("erro_conexao"):
+                    status = "erro_conexao"
+                elif s["erros"] > 0 and s["enviados"] == 0:
+                    status = "erro_parcial"
+                items.append({
+                    "servidor": servidor,
+                    "tipo": tipo,
+                    "enviados": s["enviados"],
+                    "ignorados": s["ignorados"],
+                    "erros": s["erros"],
+                    "status": status,
+                    "erro_msg": s.get("erro_msg"),
+                })
+        if not items:
+            return
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/api/erp-bridge/runs/{run_id}/items",
+                json=items,
+                timeout=15,
+            )
+            if resp.status_code == 401:
+                self.login()
+                self.session.post(
+                    f"{self.base_url}/api/erp-bridge/runs/{run_id}/items",
+                    json=items,
+                    timeout=15,
+                )
+        except Exception as exc:
+            log.warning("Nao foi possivel reportar items na API: %s", exc)
+
+    def finalize_run(self, run_id: str, grand: dict, erro_msg: str | None = None) -> None:
+        """Finaliza o run na API com os totais consolidados."""
+        total_erros = grand["erros"]
+        total_env   = grand["enviados"]
+        if erro_msg:
+            status = "error"
+        elif total_erros > 0 and total_env > 0:
+            status = "partial"
+        elif total_erros > 0:
+            status = "error"
+        else:
+            status = "success"
+        try:
+            self.session.patch(
+                f"{self.base_url}/api/erp-bridge/runs/{run_id}",
+                json={
+                    "status": status,
+                    "total_enviados": total_env,
+                    "total_ignorados": grand["ignorados"],
+                    "total_erros": total_erros,
+                    "erro_msg": erro_msg,
+                },
+                timeout=10,
+            )
+        except Exception as exc:
+            log.warning("Nao foi possivel finalizar run na API: %s", exc)
+
 # ─── Processamento de um servidor Oracle ─────────────────────────────────────
 
 def processar_servidor(
@@ -323,7 +434,131 @@ def parse_args():
     p.add_argument("--mes",       metavar="YYYY-MM",    help="Mes completo")
     p.add_argument("--servidor",  metavar="NOME",       help="Processa apenas este servidor")
     p.add_argument("--dry-run",   action="store_true",  help="Consulta Oracle mas nao envia")
+    p.add_argument("--daemon",    action="store_true",  help="Modo daemon: executa no horario configurado via UI")
+    p.add_argument("--origin",    metavar="ORIGEM",     default="manual", help="Origem do run (manual|scheduler)")
     return p.parse_args()
+
+# ─── Execução de um ciclo de importação ──────────────────────────────────────
+
+def executar_importacao(
+    cfg: dict,
+    fbtax: FBTaxClient,
+    data_ini: date,
+    data_fim: date,
+    origem: str = "manual",
+    filtro_servidor: str | None = None,
+    dry_run: bool = False,
+) -> int:
+    """Executa um ciclo completo de importação e reporta via API. Retorna 0 (ok) ou 1 (erros)."""
+    log.info("=" * 60)
+    log.info("ERP Bridge v1.3 Linux — FBTax Apuracao Assistida")
+    log.info("Periodo : %s ate %s", data_ini, data_fim - timedelta(days=1))
+    log.info("Origem  : %s", origem)
+    if dry_run:
+        log.info("MODO DRY-RUN: apenas consultas, sem envio")
+    log.info("=" * 60)
+
+    # Abre run na API
+    run_id = None
+    if not dry_run:
+        run_id = fbtax.create_run(data_ini, data_fim, origem=origem)
+        if run_id:
+            log.info("Run API criado: %s", run_id)
+
+    tracker = init_tracker()
+
+    servidores = cfg["servidores"]
+    if filtro_servidor:
+        servidores = [s for s in servidores if s["nome"] == filtro_servidor]
+        if not servidores:
+            log.error("Servidor '%s' nao encontrado no config.yaml", filtro_servidor)
+            return 1
+
+    totais: dict = {}
+    for srv in servidores:
+        if dry_run:
+            log.info("DRY-RUN: pulando envio para %s", srv["nome"])
+            continue
+        stats = processar_servidor(srv, data_ini, data_fim, fbtax, tracker)
+        totais[srv["nome"]] = stats
+
+    tracker.close()
+
+    grand = {"enviados": 0, "ignorados": 0, "erros": 0}
+    log.info("=" * 60)
+    log.info("RELATORIO FINAL")
+    log.info("=" * 60)
+    for servidor, stats in totais.items():
+        log.info("Servidor: %s", servidor)
+        for tipo, s in stats.items():
+            log.info("  %-20s  enviados: %4d  ignorados: %4d  erros: %4d",
+                     tipo, s["enviados"], s["ignorados"], s["erros"])
+            for k in grand:
+                grand[k] += s[k]
+    log.info("-" * 60)
+    log.info("TOTAL: enviados=%d  ignorados=%d  erros=%d",
+             grand["enviados"], grand["ignorados"], grand["erros"])
+    log.info("Log: %s", log_file)
+
+    # Reporta resultados na API
+    if run_id and not dry_run:
+        fbtax.report_items(run_id, totais)
+        fbtax.finalize_run(run_id, grand)
+        log.info("Run API finalizado: %s", run_id)
+
+    return 0 if grand["erros"] == 0 else 1
+
+
+# ─── Modo Daemon ──────────────────────────────────────────────────────────────
+
+def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
+    """Loop infinito: verifica a cada minuto se deve executar a importação."""
+    BRASILIA = ZoneInfo("America/Sao_Paulo")
+    log.info("=" * 60)
+    log.info("ERP Bridge v1.3 — MODO DAEMON iniciado")
+    log.info("Aguardando horario configurado na UI...")
+    log.info("=" * 60)
+
+    ultimo_run_data: date | None = None  # evita rodar mais de uma vez por dia
+
+    while True:
+        try:
+            now = datetime.now(tz=BRASILIA)
+            agora_hhmm = now.strftime("%H:%M")
+            hoje = now.date()
+
+            # Busca configuração atual da API
+            bridge_cfg = fbtax.get_bridge_config()
+            if bridge_cfg and bridge_cfg.get("ativo") and bridge_cfg.get("horario") == agora_hhmm:
+                # Evita rodar duas vezes no mesmo dia
+                if ultimo_run_data == hoje:
+                    _time.sleep(60)
+                    continue
+
+                dias_retro = bridge_cfg.get("dias_retroativos", 1)
+                data_ini = hoje - timedelta(days=dias_retro)
+                data_fim = hoje + timedelta(days=1)
+
+                log.info("[Daemon] Horario %s atingido — iniciando importacao (%d dia(s) retroativo(s))",
+                         agora_hhmm, dias_retro)
+
+                try:
+                    executar_importacao(
+                        cfg=cfg,
+                        fbtax=fbtax,
+                        data_ini=data_ini,
+                        data_fim=data_fim,
+                        origem="scheduler",
+                    )
+                    ultimo_run_data = hoje
+                except Exception as exc:
+                    log.error("[Daemon] Erro durante importacao: %s", exc)
+
+        except Exception as exc:
+            log.warning("[Daemon] Erro no loop: %s", exc)
+
+        _time.sleep(60)
+
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -337,6 +572,18 @@ def main() -> int:
 
     args = parse_args()
 
+    fbtax = FBTaxClient(cfg["fbtax"])
+
+    # Modo daemon — não precisa de datas, as busca da API a cada ciclo
+    if args.daemon:
+        try:
+            fbtax.login()
+        except Exception as exc:
+            log.error("Falha ao autenticar no FBTax: %s", exc)
+            return 1
+        return run_daemon(cfg, fbtax)
+
+    # Modo normal (importação pontual)
     if args.mes:
         ano, mes = map(int, args.mes.split("-"))
         data_ini = date(ano, mes, 1)
@@ -346,14 +593,6 @@ def main() -> int:
         data_ini = date.fromisoformat(args.data)     if args.data     else date.today() - timedelta(days=dias)
         data_fim = date.fromisoformat(args.data_fim) if args.data_fim else date.today() + timedelta(days=1)
 
-    log.info("=" * 60)
-    log.info("ERP Bridge v1.2 Linux — FBTax Apuracao Assistida")
-    log.info("Periodo : %s ate %s", data_ini, data_fim - timedelta(days=1))
-    if args.dry_run:
-        log.info("MODO DRY-RUN: apenas consultas, sem envio")
-    log.info("=" * 60)
-
-    fbtax = FBTaxClient(cfg["fbtax"])
     if not args.dry_run:
         try:
             fbtax.login()
@@ -361,41 +600,15 @@ def main() -> int:
             log.error("Falha ao autenticar no FBTax: %s", exc)
             return 1
 
-    tracker = init_tracker()
-
-    servidores = cfg["servidores"]
-    if args.servidor:
-        servidores = [s for s in servidores if s["nome"] == args.servidor]
-        if not servidores:
-            log.error("Servidor '%s' nao encontrado no config.yaml", args.servidor)
-            return 1
-
-    totais: dict = {}
-    for srv in servidores:
-        if args.dry_run:
-            log.info("DRY-RUN: pulando envio para %s", srv["nome"])
-            continue
-        totais[srv["nome"]] = processar_servidor(srv, data_ini, data_fim, fbtax, tracker)
-
-    tracker.close()
-
-    log.info("=" * 60)
-    log.info("RELATORIO FINAL")
-    log.info("=" * 60)
-    grand = {"enviados": 0, "ignorados": 0, "erros": 0}
-    for servidor, stats in totais.items():
-        log.info("Servidor: %s", servidor)
-        for tipo, s in stats.items():
-            log.info("  %-20s  enviados: %4d  ignorados: %4d  erros: %4d",
-                     tipo, s["enviados"], s["ignorados"], s["erros"])
-            for k in grand:
-                grand[k] += s[k]
-    log.info("-" * 60)
-    log.info("TOTAL: enviados=%d  ignorados=%d  erros=%d",
-             grand["enviados"], grand["ignorados"], grand["erros"])
-    log.info("Log: %s", log_file)
-
-    return 0 if grand["erros"] == 0 else 1
+    return executar_importacao(
+        cfg=cfg,
+        fbtax=fbtax,
+        data_ini=data_ini,
+        data_fim=data_fim,
+        origem=args.origin,
+        filtro_servidor=args.servidor,
+        dry_run=args.dry_run,
+    )
 
 
 if __name__ == "__main__":

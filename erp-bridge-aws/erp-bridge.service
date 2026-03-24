@@ -1,0 +1,17 @@
+[Unit]
+Description=FBTax ERP Bridge — Oracle ERP → FBTax Apuração Assistida
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=claudio
+WorkingDirectory=/opt/apps/fbtax/erp-bridge
+ExecStart=/opt/apps/fbtax/erp-bridge/venv/bin/python bridge.py --daemon
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
