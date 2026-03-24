@@ -219,6 +219,26 @@ class FBTaxClient:
             log.warning("Nao foi possivel obter config bridge: %s", exc)
         return None
 
+    def reset_tracker_ack(self) -> bool:
+        """Confirma para a API que o tracker.db foi limpo (reset_tracker = false)."""
+        try:
+            resp = self.session.patch(
+                f"{self.base_url}/api/erp-bridge/config",
+                json={"reset_tracker": False},
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                self.login()
+                resp = self.session.patch(
+                    f"{self.base_url}/api/erp-bridge/config",
+                    json={"reset_tracker": False},
+                    timeout=10,
+                )
+            return resp.status_code in (200, 204)
+        except Exception as exc:
+            log.warning("Nao foi possivel confirmar reset_tracker_ack: %s", exc)
+        return False
+
     def create_run(self, data_ini: date, data_fim: date, origem: str = "scheduler") -> str | None:
         """Cria um novo registro de execução na API. Retorna o run_id ou None."""
         try:
@@ -601,6 +621,20 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
             now = datetime.now(tz=BRASILIA)
             agora_hhmm = now.strftime("%H:%M")
             hoje = now.date()
+
+            # ── 0. Verifica se a base foi limpa e o tracker.db deve ser resetado ─
+            bridge_cfg_check = fbtax.get_bridge_config()
+            if bridge_cfg_check and bridge_cfg_check.get("reset_tracker"):
+                log.info("[Daemon] reset_tracker detectado — limpando tracker.db...")
+                try:
+                    conn_t = sqlite3.connect(TRACKER_DB)
+                    deleted = conn_t.execute("DELETE FROM enviados").rowcount
+                    conn_t.commit()
+                    conn_t.close()
+                    log.info("[Daemon] tracker.db limpo: %d registros removidos.", deleted)
+                except Exception as exc:
+                    log.error("[Daemon] Erro ao limpar tracker.db: %s", exc)
+                fbtax.reset_tracker_ack()
 
             # ── 1. Verifica runs pendentes criados pela UI ─────────────────────
             pending = fbtax.get_pending_runs()

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap, Ban } from 'lucide-react';
+import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap, Ban, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BridgeConfig {
@@ -205,6 +205,19 @@ export default function ERPBridgeConfig() {
       qc.invalidateQueries({ queryKey: ['erp-bridge-config', companyId] });
     },
     onError: (e: Error) => toast.error(`Erro ao salvar: ${e.message}`),
+  });
+
+  const resetTrackerMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/erp-bridge/config', {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset_tracker: true }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+    onSuccess: () => toast.success('Tracker sinalizado para limpeza. O daemon Bridge limpará o tracker.db na próxima varredura.'),
+    onError: (e: Error) => toast.error(`Erro: ${e.message}`),
   });
 
   const lastRun = runs?.items?.[0] ?? null;
@@ -567,7 +580,21 @@ export default function ERPBridgeConfig() {
             </p>
           )}
 
-          <div className="flex justify-end pt-1">
+          <div className="flex justify-between items-center pt-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-xs text-muted-foreground hover:text-red-600"
+              onClick={() => resetTrackerMutation.mutate()}
+              disabled={resetTrackerMutation.isPending || !!activeRun}
+              title="Sinaliza ao daemon Bridge para limpar o histórico de notas já enviadas (tracker.db), permitindo reimportação completa."
+            >
+              {resetTrackerMutation.isPending
+                ? <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                : <Trash2 className="h-3 w-3 mr-1.5" />
+              }
+              Limpar tracker
+            </Button>
             <Button
               size="sm"
               onClick={() => saveMutation.mutate()}
