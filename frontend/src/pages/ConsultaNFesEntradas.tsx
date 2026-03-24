@@ -32,18 +32,6 @@ import { toast } from 'sonner';
 
 const PAGE_SIZE = 100;
 
-function buildMesAnoOptions() {
-  const opts: { value: string; label: string }[] = [];
-  const now = new Date();
-  for (let i = 0; i < 24; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = String(d.getFullYear());
-    opts.push({ value: `${mm}/${yyyy}`, label: `${mm}/${yyyy}` });
-  }
-  return opts;
-}
-const MES_ANO_OPTIONS = buildMesAnoOptions();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface NfeEntradaRow {
@@ -200,8 +188,8 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeEntradaRow; onClose: () => void 
 export default function ConsultaNFesEntradas() {
   const { token, companyId } = useAuth();
 
-  const defaultMes = MES_ANO_OPTIONS[0]?.value ?? '';
-  const [mesAno,       setMesAno]       = useState(defaultMes);
+  const [mesAnoOptions, setMesAnoOptions] = useState<string[]>([]);
+  const [mesAno,        setMesAno]        = useState('');
   const [filterFilial, setFilterFilial] = useState('');
   const [filterFornec, setFilterFornec] = useState('');
   const [filterDataDe, setFilterDataDe] = useState('');
@@ -223,13 +211,21 @@ export default function ConsultaNFesEntradas() {
   const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !companyId) return;
     fetch('/api/config/filial-apelidos', { headers: authHeaders })
       .then(r => r.ok ? r.json() : [])
       .then((list: { cnpj: string; apelido: string }[]) => {
         const map: Record<string, string> = {};
         (list || []).forEach(fa => { map[fa.cnpj] = fa.apelido; });
         setApelidos(map);
+      })
+      .catch(() => {});
+    fetch('/api/apuracao/painel', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : { meses_disponiveis: [] })
+      .then((d: { meses_disponiveis?: string[] }) => {
+        const meses = d.meses_disponiveis || [];
+        setMesAnoOptions(meses);
+        setMesAno(prev => prev || meses[0] || '');
       })
       .catch(() => {});
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -258,7 +254,7 @@ export default function ConsultaNFesEntradas() {
       return res.json();
     },
     placeholderData: keepPreviousData,
-    enabled: !!token && !!companyId,
+    enabled: !!token && !!companyId && !!mesAno,
   });
 
   const items      = data?.items      ?? [];
@@ -290,19 +286,31 @@ export default function ConsultaNFesEntradas() {
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">Mês/Ano</label>
               <Select value={mesAno} onValueChange={v => { setMesAno(v); setPage(1); }}>
-                <SelectTrigger className="h-8 w-32 text-[11px]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-8 w-32 text-[11px]">
+                  <SelectValue placeholder={mesAnoOptions.length === 0 ? 'Carregando...' : 'Selecione...'} />
+                </SelectTrigger>
                 <SelectContent>
-                  {MES_ANO_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}
+                  {mesAnoOptions.map(m => <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
 
             {/* Filial (dest) */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Filial (CNPJ destino)</label>
-              <Input placeholder="CNPJ da filial..." value={filterFilial}
-                onChange={e => { setFilterFilial(e.target.value.replace(/\D/g, '')); setPage(1); }}
-                className="h-8 w-40 font-mono text-xs" />
+              <label className="text-xs text-muted-foreground">Filial</label>
+              <Select value={filterFilial || 'all'} onValueChange={v => { setFilterFilial(v === 'all' ? '' : v); setPage(1); }}>
+                <SelectTrigger className="h-8 w-52 text-[11px]">
+                  <SelectValue placeholder="Todas as filiais" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">Todas as filiais</SelectItem>
+                  {Object.keys(apelidos).map(cnpj => (
+                    <SelectItem key={cnpj} value={cnpj} className="text-xs">
+                      {formatCnpjComApelido(cnpj, apelidos)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Fornecedor */}
