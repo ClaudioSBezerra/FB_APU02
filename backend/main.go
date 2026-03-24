@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	BackendVersion = "1.0.6"
+	BackendVersion = "1.0.9"
 	FeatureSet     = "Apuração Assistida NF-e/CT-e, Receita Federal CBS/IBS, Créditos em Risco, Apelidos de Filiais, Malha Fina"
 )
 
