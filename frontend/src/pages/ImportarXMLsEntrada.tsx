@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,7 +12,26 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Upload, FolderOpen, FileText, CheckCircle, AlertCircle, SkipForward } from 'lucide-react';
+
+function buildMesAnoOptions() {
+  const opts: { value: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    opts.push({ value: `${mm}/${d.getFullYear()}`, label: `${mm}/${d.getFullYear()}` });
+  }
+  return opts;
+}
+const MES_ANO_OPTIONS = buildMesAnoOptions();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,7 +99,7 @@ export default function ImportarXMLsEntrada() {
   const [result, setResult] = useState<UploadResult | null>(null);
   const [nfeList, setNfeList] = useState<NfeEntradaRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
-  const [filterMes, setFilterMes] = useState('');
+  const [filterMes, setFilterMes] = useState(MES_ANO_OPTIONS[0]?.value ?? '');
 
   const authHeaders = {
     Authorization: `Bearer ${token}`,
@@ -158,11 +177,7 @@ export default function ImportarXMLsEntrada() {
     }
   };
 
-  const handleFilterMes = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFilterMes(e.target.value);
-  };
-
-  const handleFilterSearch = () => fetchList(filterMes);
+  useEffect(() => { if (token && companyId) fetchList(filterMes); }, [filterMes, token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">
@@ -263,16 +278,15 @@ export default function ImportarXMLsEntrada() {
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <CardTitle className="text-base">NF-e Entradas Importadas</CardTitle>
             <div className="flex items-center gap-2">
-              <input
-                type="text"
-                placeholder="MM/YYYY"
-                value={filterMes}
-                onChange={handleFilterMes}
-                className="h-8 w-28 rounded-md border border-input bg-background px-3 py-1 text-sm"
-              />
-              <Button size="sm" variant="outline" onClick={handleFilterSearch} disabled={loadingList}>
-                {loadingList ? 'Buscando...' : 'Buscar'}
-              </Button>
+              <Select value={filterMes} onValueChange={setFilterMes}>
+                <SelectTrigger className="h-8 w-32 text-[11px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {MES_ANO_OPTIONS.map(o => (
+                    <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {loadingList && <span className="text-xs text-muted-foreground">Carregando...</span>}
             </div>
           </div>
         </CardHeader>
