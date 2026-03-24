@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle } from 'lucide-react';
+import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BridgeConfig {
@@ -16,6 +16,16 @@ interface BridgeConfig {
   dias_retroativos: number;
   ultimo_run_em: string | null;
   updated_at: string;
+}
+
+interface BridgeRunItem {
+  id: string;
+  servidor: string;
+  tipo: string;
+  enviados: number;
+  ignorados: number;
+  erros: number;
+  status: string;
 }
 
 interface BridgeRun {
@@ -29,7 +39,14 @@ interface BridgeRun {
   total_ignorados: number;
   total_erros: number;
   origem: string;
+  items?: BridgeRunItem[];
 }
+
+const TIPO_LABELS: Record<string, string> = {
+  nfe_saidas:   'NF-e Saídas',
+  nfe_entradas: 'NF-e Entradas',
+  cte_entradas: 'CT-e Entradas',
+};
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
@@ -64,7 +81,7 @@ export default function ERPBridgeConfig() {
     enabled: !!token && !!companyId,
   });
 
-  const { data: runs } = useQuery<{ items: BridgeRun[] }>({
+  const { data: runs, dataUpdatedAt } = useQuery<{ items: BridgeRun[] }>({
     queryKey: ['erp-bridge-runs', companyId],
     queryFn: async () => {
       const res = await fetch('/api/erp-bridge/runs', { headers: authHeaders });
@@ -72,8 +89,23 @@ export default function ERPBridgeConfig() {
       return res.json();
     },
     enabled: !!token && !!companyId,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
   });
+
+  const runningRun = runs?.items?.find(r => r.status === 'running') ?? null;
+
+  // Detalhe do run ativo — atualiza a cada 60s para mostrar progresso por filial
+  const { data: runDetail, dataUpdatedAt: detailUpdatedAt, refetch: refetchDetail } =
+    useQuery<BridgeRun>({
+      queryKey: ['erp-bridge-run-detail', runningRun?.id],
+      queryFn: async () => {
+        const res = await fetch(`/api/erp-bridge/runs/${runningRun!.id}`, { headers: authHeaders });
+        if (!res.ok) throw new Error(res.statusText);
+        return res.json();
+      },
+      enabled: !!runningRun,
+      refetchInterval: 60_000,
+    });
 
   const [ativo, setAtivo] = useState(false);
   const [horario, setHorario] = useState('02:00');
@@ -104,7 +136,6 @@ export default function ERPBridgeConfig() {
   });
 
   const lastRun = runs?.items?.[0] ?? null;
-  const runningRun = runs?.items?.find(r => r.status === 'running') ?? null;
 
   if (isLoading) {
     return <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>;
@@ -119,18 +150,110 @@ export default function ERPBridgeConfig() {
         </p>
       </div>
 
-      {/* Status do último run */}
-      {lastRun && (
-        <Card className={`border ${runningRun ? 'border-blue-200 bg-blue-50/40' : ''}`}>
+      {/* Status do run ativo — com progresso por filial */}
+      {runningRun && (
+        <Card className="border border-blue-200 bg-blue-50/40">
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-sm flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                Importação em andamento...
+              </span>
+              <span className="flex items-center gap-2 text-[11px] font-normal text-muted-foreground">
+                Atualiza a cada 60s
+                <button
+                  onClick={() => refetchDetail()}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  title="Atualizar agora"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3 space-y-3">
+            <div className="flex flex-wrap gap-4 text-xs">
+              <div>
+                <span className="text-muted-foreground">Início: </span>
+                <span className="font-medium">{fmtDateTime(runningRun.iniciado_em)}</span>
+              </div>
+              {runningRun.data_ini && (
+                <div>
+                  <span className="text-muted-foreground">Período: </span>
+                  <span className="font-medium">{runningRun.data_ini} → {runningRun.data_fim}</span>
+                </div>
+              )}
+              {detailUpdatedAt > 0 && (
+                <div className="text-muted-foreground ml-auto">
+                  Atualizado: {new Date(detailUpdatedAt).toLocaleTimeString('pt-BR')}
+                </div>
+              )}
+            </div>
+
+            {/* Tabela de progresso por filial */}
+            {(runDetail?.items?.length ?? 0) > 0 ? (
+              <div className="overflow-x-auto rounded border bg-white">
+                <table className="w-full text-[11px]">
+                  <thead>
+                    <tr className="border-b bg-muted/40">
+                      <th className="py-1 px-2 text-left font-medium text-muted-foreground">Filial</th>
+                      <th className="py-1 px-2 text-left font-medium text-muted-foreground">Tipo</th>
+                      <th className="py-1 px-2 text-right font-medium text-green-700">Enviados</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Ignorados</th>
+                      <th className="py-1 px-2 text-right font-medium text-red-600">Erros</th>
+                      <th className="py-1 px-2 text-left font-medium text-muted-foreground">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {runDetail!.items!.map(item => (
+                      <tr key={item.id} className="border-t hover:bg-muted/20">
+                        <td className="py-0.5 px-2 font-medium">{item.servidor}</td>
+                        <td className="py-0.5 px-2 text-muted-foreground">{TIPO_LABELS[item.tipo] ?? item.tipo}</td>
+                        <td className="py-0.5 px-2 text-right text-green-600 font-medium">{item.enviados.toLocaleString('pt-BR')}</td>
+                        <td className="py-0.5 px-2 text-right text-muted-foreground">{item.ignorados.toLocaleString('pt-BR')}</td>
+                        <td className="py-0.5 px-2 text-right text-red-500">{item.erros > 0 ? item.erros : '—'}</td>
+                        <td className="py-0.5 px-2"><StatusBadge status={item.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t bg-muted/20 font-semibold">
+                    <tr>
+                      <td className="py-1 px-2 text-[10px] text-muted-foreground" colSpan={2}>
+                        Total parcial ({runDetail!.items!.length} filial/tipo processado{runDetail!.items!.length !== 1 ? 's' : ''})
+                      </td>
+                      <td className="py-1 px-2 text-right text-green-600 text-[11px]">
+                        {runDetail!.items!.reduce((s, i) => s + i.enviados, 0).toLocaleString('pt-BR')}
+                      </td>
+                      <td className="py-1 px-2 text-right text-muted-foreground text-[11px]">
+                        {runDetail!.items!.reduce((s, i) => s + i.ignorados, 0).toLocaleString('pt-BR')}
+                      </td>
+                      <td className="py-1 px-2 text-right text-red-500 text-[11px]">
+                        {runDetail!.items!.reduce((s, i) => s + i.erros, 0) || '—'}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground italic">
+                Aguardando conclusão da primeira filial...
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Status do último run finalizado */}
+      {lastRun && lastRun.status !== 'running' && (
+        <Card>
           <CardHeader className="py-3 px-4">
             <CardTitle className="text-sm flex items-center gap-2">
-              {runningRun
-                ? <><Loader2 className="h-4 w-4 animate-spin text-blue-500" /> Importação em andamento...</>
-                : lastRun.status === 'success'
-                  ? <><CheckCircle2 className="h-4 w-4 text-green-500" /> Última execução</>
-                  : lastRun.status === 'error'
-                    ? <><XCircle className="h-4 w-4 text-red-500" /> Última execução (com erros)</>
-                    : <><AlertTriangle className="h-4 w-4 text-yellow-500" /> Última execução (parcial)</>
+              {lastRun.status === 'success'
+                ? <><CheckCircle2 className="h-4 w-4 text-green-500" /> Última execução</>
+                : lastRun.status === 'error'
+                  ? <><XCircle className="h-4 w-4 text-red-500" /> Última execução (com erros)</>
+                  : <><AlertTriangle className="h-4 w-4 text-yellow-500" /> Última execução (parcial)</>
               }
             </CardTitle>
           </CardHeader>
@@ -157,8 +280,8 @@ export default function ERPBridgeConfig() {
                 </div>
               )}
               <div className="flex gap-3">
-                <span className="text-green-600 font-medium">↑ {lastRun.total_enviados} enviados</span>
-                <span className="text-muted-foreground">/ {lastRun.total_ignorados} ignorados</span>
+                <span className="text-green-600 font-medium">↑ {lastRun.total_enviados.toLocaleString('pt-BR')} enviados</span>
+                <span className="text-muted-foreground">/ {lastRun.total_ignorados.toLocaleString('pt-BR')} ignorados</span>
                 {lastRun.total_erros > 0 && <span className="text-red-500 font-medium">{lastRun.total_erros} erros</span>}
               </div>
             </div>

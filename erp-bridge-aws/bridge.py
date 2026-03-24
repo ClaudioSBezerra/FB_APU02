@@ -475,6 +475,8 @@ def executar_importacao(
             return 1
 
     totais: dict = {}
+    grand = {"enviados": 0, "ignorados": 0, "erros": 0}
+
     for srv in servidores:
         if dry_run:
             log.info("DRY-RUN: pulando envio para %s", srv["nome"])
@@ -482,9 +484,16 @@ def executar_importacao(
         stats = processar_servidor(srv, data_ini, data_fim, fbtax, tracker)
         totais[srv["nome"]] = stats
 
+        # Reporta esta filial imediatamente para o acompanhamento em tempo real
+        if run_id:
+            fbtax.report_items(run_id, {srv["nome"]: stats})
+
+        for tipo, s in stats.items():
+            for k in grand:
+                grand[k] += s[k]
+
     tracker.close()
 
-    grand = {"enviados": 0, "ignorados": 0, "erros": 0}
     log.info("=" * 60)
     log.info("RELATORIO FINAL")
     log.info("=" * 60)
@@ -493,16 +502,13 @@ def executar_importacao(
         for tipo, s in stats.items():
             log.info("  %-20s  enviados: %4d  ignorados: %4d  erros: %4d",
                      tipo, s["enviados"], s["ignorados"], s["erros"])
-            for k in grand:
-                grand[k] += s[k]
     log.info("-" * 60)
     log.info("TOTAL: enviados=%d  ignorados=%d  erros=%d",
              grand["enviados"], grand["ignorados"], grand["erros"])
     log.info("Log: %s", log_file)
 
-    # Reporta resultados na API
+    # Finaliza o run na API com os totais consolidados
     if run_id and not dry_run:
-        fbtax.report_items(run_id, totais)
         fbtax.finalize_run(run_id, grand)
         log.info("Run API finalizado: %s", run_id)
 
