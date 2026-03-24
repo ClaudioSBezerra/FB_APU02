@@ -26,8 +26,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, AlertTriangle, ChevronLeft, ChevronRight, FileText, Copy, Check } from 'lucide-react';
 import { formatCnpjComApelido } from '@/lib/formatFilial';
+import { toast } from 'sonner';
 
 const PAGE_SIZE = 100;
 
@@ -75,6 +76,30 @@ function fmtCNPJ(v: string): string {
   if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
   if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
   return v;
+}
+
+// ── DANFE ─────────────────────────────────────────────────────────────────────
+async function openDanfe(chave: string, token: string | null, companyId: string | null) {
+  const res = await fetch(`/api/danfe/${chave}`, {
+    headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' },
+  });
+  if (res.status === 404) { toast.error('XML desta NF-e não encontrado. Importe o XML primeiro.'); return; }
+  if (!res.ok) { toast.error('Erro ao gerar DANFE.'); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  if (!win) toast.warning('Permita popups para visualizar o DANFE.');
+}
+
+function CopyChaveButton({ chave }: { chave: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button title="Copiar chave" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(chave); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      className="text-muted-foreground hover:text-foreground transition-colors">
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
 }
 
 // ── Paginação ─────────────────────────────────────────────────────────────────
@@ -345,7 +370,7 @@ export default function ConsultaNFesEntradas() {
       <Card>
         <CardHeader className="py-2 px-4">
           <CardTitle className="text-[11px] text-muted-foreground font-normal">
-            Clique em uma linha para ver todos os dados da nota
+            Clique em uma linha para ver detalhes · Botão DANFE abre o documento fiscal
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -369,26 +394,41 @@ export default function ConsultaNFesEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Nº Nota</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right">Valor Total</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] font-mono">Chave Eletrônica</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center">DANFE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {items.map(row => (
                       <TableRow key={row.id} className="cursor-pointer hover:bg-muted/50 h-8" onClick={() => setSelected(row)}>
-                        <TableCell className="py-1 px-2 font-mono text-[11px]">{fmtCNPJ(row.forn_cnpj)}</TableCell>
-                        <TableCell className="py-1 px-2">
+                        <TableCell className="py-0.5 px-2 font-mono text-[11px]">{fmtCNPJ(row.forn_cnpj)}</TableCell>
+                        <TableCell className="py-0.5 px-2">
                           <div className="text-[11px] font-medium leading-tight">{row.forn_nome || '—'}</div>
                           <div className="text-[10px] text-muted-foreground leading-tight">{row.forn_uf}</div>
                         </TableCell>
-                        <TableCell className="py-1 px-2">
+                        <TableCell className="py-0.5 px-2">
                           <div className="text-[11px] font-medium leading-tight">{formatCnpjComApelido(row.dest_cnpj_cpf, apelidos)}</div>
                         </TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-center">{row.serie}</TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
-                        <TableCell className="py-1 px-2 text-center">
+                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-center">{row.serie}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-center">
                           <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
                         </TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-right font-semibold">{fmtBRL(row.v_nf)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold">{fmtBRL(row.v_nf)}</TableCell>
+                        <TableCell className="py-0.5 px-2 font-mono text-[10px] max-w-[160px]" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-1">
+                            <span className="truncate">{row.chave_nfe}</span>
+                            <CopyChaveButton chave={row.chave_nfe} />
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
+                          <button title="Gerar DANFE"
+                            onClick={() => openDanfe(row.chave_nfe, token, companyId)}
+                            className="text-muted-foreground hover:text-foreground transition-colors">
+                            <FileText className="h-3.5 w-3.5" />
+                          </button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

@@ -26,7 +26,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, FileText, Copy, Check } from 'lucide-react';
+import { toast } from 'sonner';
 
 const PAGE_SIZE = 100;
 
@@ -74,6 +75,30 @@ function fmtCNPJ(v: string): string {
 }
 const MODAL_LABELS: Record<string, string> = { '01':'Rodoviário','02':'Aéreo','03':'Aquaviário','04':'Ferroviário','05':'Dutoviário','06':'Multimodal' };
 function fmtModal(m: string): string { return MODAL_LABELS[m] || m || '—'; }
+
+// ── DANFE / DACTE ─────────────────────────────────────────────────────────────
+async function openDanfe(chave: string, token: string | null, companyId: string | null) {
+  const res = await fetch(`/api/danfe/${chave}`, {
+    headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' },
+  });
+  if (res.status === 404) { toast.error('XML deste CT-e não encontrado. Importe o XML primeiro.'); return; }
+  if (!res.ok) { toast.error('Erro ao gerar DACTE.'); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  if (!win) toast.warning('Permita popups para visualizar o DACTE.');
+}
+
+function CopyChaveButton({ chave }: { chave: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button title="Copiar chave" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(chave); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      className="text-muted-foreground hover:text-foreground transition-colors">
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
+}
 
 // ── Paginação ─────────────────────────────────────────────────────────────────
 function Pagination({ page, pageCount, onChange }: { page: number; pageCount: number; onChange: (p: number) => void }) {
@@ -326,7 +351,7 @@ export default function ConsultaCTesEntradas() {
         <CardHeader className="py-2 px-4">
           <CardTitle className="flex items-center gap-2 text-[11px] text-muted-foreground font-normal">
             <Truck className="h-3.5 w-3.5" />
-            Clique em uma linha para ver todos os dados do CT-e
+            Clique em uma linha para ver detalhes · Botão DACTE abre o documento fiscal
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -353,6 +378,8 @@ export default function ConsultaCTesEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px] text-right">vPrest</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] font-mono">Chave Eletrônica</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center">DACTE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -362,31 +389,44 @@ export default function ConsultaCTesEntradas() {
                         <TableRow key={row.id}
                           className={`cursor-pointer hover:bg-muted/50 h-8 ${semCredito ? 'bg-orange-50/50 dark:bg-orange-950/10' : ''}`}
                           onClick={() => setSelected(row)}>
-                          <TableCell className="py-1 px-2 font-mono text-[11px]">{fmtCNPJ(row.emit_cnpj)}</TableCell>
-                          <TableCell className="py-1 px-2">
+                          <TableCell className="py-0.5 px-2 font-mono text-[11px]">{fmtCNPJ(row.emit_cnpj)}</TableCell>
+                          <TableCell className="py-0.5 px-2">
                             <div className="text-[11px] font-medium leading-tight">{row.emit_nome || '—'}</div>
                             <div className="text-[10px] text-muted-foreground leading-tight">{row.emit_uf}</div>
                           </TableCell>
-                          <TableCell className="py-1 px-2">
+                          <TableCell className="py-0.5 px-2">
                             <div className="text-[11px] leading-tight">{row.rem_nome || '—'}</div>
                             <div className="text-[10px] text-muted-foreground font-mono leading-tight">{row.rem_uf}</div>
                           </TableCell>
-                          <TableCell className="py-1 px-2">
+                          <TableCell className="py-0.5 px-2">
                             <div className="text-[11px] leading-tight">{row.dest_nome || '—'}</div>
                             <div className="text-[10px] text-muted-foreground font-mono leading-tight">{row.dest_uf}</div>
                           </TableCell>
-                          <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                          <TableCell className="py-1 px-2 text-[11px] text-center">{row.serie}</TableCell>
-                          <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.numero_cte}</TableCell>
-                          <TableCell className="py-1 px-2">
+                          <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-center">{row.serie}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{row.numero_cte}</TableCell>
+                          <TableCell className="py-0.5 px-2">
                             <Badge variant="outline" className="text-[10px] px-1 py-0">{fmtModal(row.modal)}</Badge>
                           </TableCell>
-                          <TableCell className="py-1 px-2 text-[11px] text-right font-semibold">{fmtBRL(row.v_prest)}</TableCell>
-                          <TableCell className="py-1 px-2 text-[11px] text-right">
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold">{fmtBRL(row.v_prest)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right">
                             {row.v_ibs != null ? fmtBRL(row.v_ibs) : <span className="text-orange-500 font-medium">—</span>}
                           </TableCell>
-                          <TableCell className="py-1 px-2 text-[11px] text-right">
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right">
                             {row.v_cbs != null ? fmtBRL(row.v_cbs) : <span className="text-orange-500 font-medium">—</span>}
+                          </TableCell>
+                          <TableCell className="py-0.5 px-2 font-mono text-[10px] max-w-[160px]" onClick={e => e.stopPropagation()}>
+                            <div className="flex items-center gap-1">
+                              <span className="truncate">{row.chave_cte}</span>
+                              <CopyChaveButton chave={row.chave_cte} />
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
+                            <button title="Gerar DACTE"
+                              onClick={() => openDanfe(row.chave_cte, token, companyId)}
+                              className="text-muted-foreground hover:text-foreground transition-colors">
+                              <FileText className="h-3.5 w-3.5" />
+                            </button>
                           </TableCell>
                         </TableRow>
                       );
