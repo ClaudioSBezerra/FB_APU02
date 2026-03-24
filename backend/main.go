@@ -503,9 +503,12 @@ func main() {
 	http.HandleFunc("/api/malha-fina/resumo-geral/refresh", withAuth(handlers.MalhaFinaResumoRefreshHandler, ""))
 
 	// ERP Bridge — agendamento e histórico de execuções
-	http.HandleFunc("/api/erp-bridge/config", withAuth(handlers.ERPBridgeConfigHandler, ""))
-	http.HandleFunc("/api/erp-bridge/runs", withAuth(handlers.ERPBridgeRunsHandler, ""))
-	http.HandleFunc("/api/erp-bridge/runs/", withAuth(handlers.ERPBridgeRunHandler, ""))
+	http.HandleFunc("/api/erp-bridge/config",      withAuth(handlers.ERPBridgeConfigHandler, ""))
+	http.HandleFunc("/api/erp-bridge/servidores",  withAuth(handlers.ERPBridgeServidoresHandler, ""))
+	http.HandleFunc("/api/erp-bridge/trigger",     withAuth(handlers.ERPBridgeTriggerHandler, ""))
+	http.HandleFunc("/api/erp-bridge/pending",     withAuth(handlers.ERPBridgePendingHandler, ""))
+	http.HandleFunc("/api/erp-bridge/runs",        withAuth(handlers.ERPBridgeRunsHandler, ""))
+	http.HandleFunc("/api/erp-bridge/runs/",       withAuth(handlers.ERPBridgeRunHandler, ""))
 
 	// DANFE generation
 	http.HandleFunc("/api/danfe/", withAuth(handlers.DanfeHandler, ""))
