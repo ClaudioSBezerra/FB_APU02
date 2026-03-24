@@ -160,12 +160,14 @@ function AppLayout() {
               <Route path="/apuracao/cte-entrada"        element={<ImportarXMLsCTe />} />
               <Route path="/importacoes/erp-bridge"      element={<ERPBridgeConfig />} />
               <Route path="/importacoes/erp-bridge/logs" element={<ERPBridgeLogs />} />
+              <Route path="/importacoes/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
 
               {/* Apuração */}
               <Route path="/apuracao/saida/notas"       element={<ConsultaNFeSaidas />} />
               <Route path="/apuracao/entrada/notas"     element={<ConsultaNFesEntradas />} />
               <Route path="/apuracao/cte-entrada/notas" element={<ConsultaCTesEntradas />} />
               <Route path="/apuracao/creditos-perdidos" element={<ApuracaoCredPerdidos />} />
+              <Route path="/apuracao/limpar-dados"     element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
               <Route path="/rfb/apuracao-ibs"           element={<PainelApuracaoIBS />} />
               <Route path="/rfb/apuracao-cbs"           element={<PainelApuracaoCBS />} />
 
@@ -194,7 +196,7 @@ function AppLayout() {
 
 // ── App root ─────────────────────────────────────────────────────────────────
 function App() {
-  console.log('App Version: 1.0.6 — FB_APU02 Apuração Assistida')
+  console.log('App Version: 1.0.7 — FB_APU02 Apuração Assistida')
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

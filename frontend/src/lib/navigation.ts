@@ -24,6 +24,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'NFS-e',          path: '#', disabled: true },
       { label: 'ERP Bridge',     path: '/importacoes/erp-bridge' },
       { label: 'Logs Bridge',    path: '/importacoes/erp-bridge/logs' },
+      { label: 'Limpar Dados',   path: '/importacoes/limpar-dados', danger: true },
     ],
   },
   apuracao: {
@@ -35,6 +36,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Créditos em Risco',  path: '/apuracao/creditos-perdidos', danger: true },
       { label: 'Apuração IBS',       path: '/rfb/apuracao-ibs' },
       { label: 'Apuração CBS',       path: '/rfb/apuracao-cbs' },
+      { label: 'Limpar Dados',       path: '/apuracao/limpar-dados', danger: true },
     ],
   },
   rfb: {
@@ -82,7 +84,7 @@ export function getActiveModule(pathname: string): string {
   const importPaths = ['/apuracao/saida', '/apuracao/entrada', '/apuracao/cte-entrada']
   if (importPaths.includes(pathname) || pathname.startsWith('/importacoes/')) return 'importacoes'
 
-  const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
+  const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs', '/apuracao/limpar-dados']
   if (pathname.includes('/notas') || apuracaoPaths.includes(pathname)) return 'apuracao'
 
   const rfbExclude = ['/rfb/credenciais', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
