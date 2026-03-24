@@ -312,7 +312,7 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 		if modelo != "" { where += fmt.Sprintf(" AND modelo = $%d", idx); args = append(args, modelo); idx++ }
 		if dataDe != "" { where += fmt.Sprintf(" AND data_emissao >= $%d", idx); args = append(args, dataDe); idx++ }
 		if dataAte != "" { where += fmt.Sprintf(" AND data_emissao <= $%d", idx); args = append(args, dataAte); idx++ }
-		if destCNPJ != "" { where += fmt.Sprintf(" AND dest_cnpj_cpf LIKE $%d", idx); args = append(args, destCNPJ+"%"); idx++ }
+		if destCNPJ != "" { where += fmt.Sprintf(" AND dest_cnpj_cpf = $%d", idx); args = append(args, destCNPJ); idx++ }
 		if destNome := q.Get("dest_nome"); destNome != "" { where += fmt.Sprintf(" AND dest_nome ILIKE $%d", idx); args = append(args, "%"+destNome+"%"); idx++ }
 		if fornNome := q.Get("forn_nome"); fornNome != "" { where += fmt.Sprintf(" AND forn_nome ILIKE $%d", idx); args = append(args, "%"+fornNome+"%"); idx++ }
 		if fornCNPJSearch := q.Get("forn_cnpj_search"); fornCNPJSearch != "" { where += fmt.Sprintf(" AND forn_cnpj LIKE $%d", idx); args = append(args, fornCNPJSearch+"%"); idx++ }

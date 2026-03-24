@@ -1,7 +1,7 @@
 {
   "name": "fb_apu01-frontend",
   "private": true,
-  "version": "1.0.7",
+  "version": "1.0.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
