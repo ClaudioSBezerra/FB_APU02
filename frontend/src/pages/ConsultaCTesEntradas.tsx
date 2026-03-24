@@ -28,21 +28,10 @@ import {
 } from '@/components/ui/dialog';
 import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, FileText, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatCnpjComApelido } from '@/lib/formatFilial';
 
 const PAGE_SIZE = 100;
 
-function buildMesAnoOptions() {
-  const opts: { value: string; label: string }[] = [];
-  const now = new Date();
-  for (let i = 0; i < 24; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = String(d.getFullYear());
-    opts.push({ value: `${mm}/${yyyy}`, label: `${mm}/${yyyy}` });
-  }
-  return opts;
-}
-const MES_ANO_OPTIONS = buildMesAnoOptions();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface CteEntradaRow {
@@ -205,13 +194,15 @@ function DetalheCTe({ cte, onClose }: { cte: CteEntradaRow; onClose: () => void 
 export default function ConsultaCTesEntradas() {
   const { token, companyId } = useAuth();
 
-  const defaultMes = MES_ANO_OPTIONS[0]?.value ?? '';
-  const [mesAno,       setMesAno]       = useState(defaultMes);
-  const [filterTransp, setFilterTransp] = useState('');
-  const [filterDataDe, setFilterDataDe] = useState('');
+  const [mesAnoOptions, setMesAnoOptions] = useState<string[]>([]);
+  const [mesAno,        setMesAno]        = useState('');
+  const [filterFilial,  setFilterFilial]  = useState('');
+  const [filterTransp,  setFilterTransp]  = useState('');
+  const [filterDataDe,  setFilterDataDe]  = useState('');
   const [filterDataAte, setFilterDataAte] = useState('');
-  const [filterSemIBS, setFilterSemIBS] = useState(false);
-  const [page, setPage] = useState(1);
+  const [filterSemIBS,  setFilterSemIBS]  = useState(false);
+  const [page,          setPage]          = useState(1);
+  const [apelidos,      setApelidos]      = useState<Record<string, string>>({});
 
   const [transpDebounced, setTranspDebounced] = useState('');
   useEffect(() => {
@@ -219,21 +210,42 @@ export default function ConsultaCTesEntradas() {
     return () => clearTimeout(t);
   }, [filterTransp]);
 
-  useEffect(() => { setPage(1); }, [mesAno, transpDebounced, filterDataDe, filterDataAte, filterSemIBS]);
+  useEffect(() => { setPage(1); }, [mesAno, filterFilial, transpDebounced, filterDataDe, filterDataAte, filterSemIBS]);
 
   const [selected, setSelected] = useState<CteEntradaRow | null>(null);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
 
+  useEffect(() => {
+    if (!token || !companyId) return;
+    fetch('/api/config/filial-apelidos', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((list: { cnpj: string; apelido: string }[]) => {
+        const map: Record<string, string> = {};
+        (list || []).forEach(fa => { map[fa.cnpj] = fa.apelido; });
+        setApelidos(map);
+      })
+      .catch(() => {});
+    fetch('/api/apuracao/painel', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : { meses_disponiveis: [] })
+      .then((d: { meses_disponiveis?: string[] }) => {
+        const meses = d.meses_disponiveis || [];
+        setMesAnoOptions(meses);
+        setMesAno(prev => prev || meses[0] || '');
+      })
+      .catch(() => {});
+  }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const { data, isFetching, isError } = useQuery<CteEntradaResponse>({
-    queryKey: ['cte-entradas', companyId, { page, mesAno, transpDebounced, filterDataDe, filterDataAte, filterSemIBS }],
+    queryKey: ['cte-entradas', companyId, { page, mesAno, filterFilial, transpDebounced, filterDataDe, filterDataAte, filterSemIBS }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
       params.set('page_size', String(PAGE_SIZE));
-      if (mesAno)       params.set('mes_ano',    mesAno);
-      if (filterDataDe) params.set('data_de',    filterDataDe);
-      if (filterDataAte) params.set('data_ate',  filterDataAte);
+      if (mesAno)        params.set('mes_ano',    mesAno);
+      if (filterFilial)  params.set('dest_cnpj',  filterFilial);
+      if (filterDataDe)  params.set('data_de',    filterDataDe);
+      if (filterDataAte) params.set('data_ate',   filterDataAte);
       if (filterSemIBS)  params.set('sem_ibs_cbs', 'true');
       if (transpDebounced) {
         const digits = transpDebounced.replace(/\D/g, '');
@@ -248,7 +260,7 @@ export default function ConsultaCTesEntradas() {
       return res.json();
     },
     placeholderData: keepPreviousData,
-    enabled: !!token && !!companyId,
+    enabled: !!token && !!companyId && !!mesAno,
   });
 
   const items      = data?.items      ?? [];
@@ -256,10 +268,10 @@ export default function ConsultaCTesEntradas() {
   const totalPages = data?.total_pages ?? 1;
   const totals     = data?.totals     ?? { v_prest: 0, v_ibs: 0, v_cbs: 0 };
 
-  const hasFilters = !!(filterTransp || filterDataDe || filterDataAte || filterSemIBS);
+  const hasFilters = !!(filterFilial || filterTransp || filterDataDe || filterDataAte || filterSemIBS);
 
   function clearFilters() {
-    setFilterTransp(''); setFilterDataDe(''); setFilterDataAte(''); setFilterSemIBS(false);
+    setFilterFilial(''); setFilterTransp(''); setFilterDataDe(''); setFilterDataAte(''); setFilterSemIBS(false);
     setPage(1);
   }
 
@@ -279,9 +291,29 @@ export default function ConsultaCTesEntradas() {
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">Mês/Ano</label>
               <Select value={mesAno} onValueChange={v => { setMesAno(v); setPage(1); }}>
-                <SelectTrigger className="h-8 w-32 text-[11px]"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-8 w-32 text-[11px]">
+                  <SelectValue placeholder={mesAnoOptions.length === 0 ? 'Carregando...' : 'Selecione...'} />
+                </SelectTrigger>
                 <SelectContent>
-                  {MES_ANO_OPTIONS.map(o => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}
+                  {mesAnoOptions.map(m => <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Filial (destinatário) */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Filial</label>
+              <Select value={filterFilial || 'all'} onValueChange={v => { setFilterFilial(v === 'all' ? '' : v); setPage(1); }}>
+                <SelectTrigger className="h-8 w-52 text-[11px]">
+                  <SelectValue placeholder="Todas as filiais" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs">Todas as filiais</SelectItem>
+                  {Object.keys(apelidos).map(cnpj => (
+                    <SelectItem key={cnpj} value={cnpj} className="text-xs">
+                      {formatCnpjComApelido(cnpj, apelidos)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
