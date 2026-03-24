@@ -6,7 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BridgeConfig {
@@ -66,6 +67,17 @@ function fmtDateTime(iso: string | null): string {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+// ── Helpers de data ───────────────────────────────────────────────────────────
+function firstDayOfPrevMonth(): string {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
+  return d.toISOString().slice(0, 10);
+}
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export default function ERPBridgeConfig() {
   const { token, companyId } = useAuth();
   const qc = useQueryClient();
@@ -107,9 +119,17 @@ export default function ERPBridgeConfig() {
       refetchInterval: 60_000,
     });
 
+  // ── Estado: agendamento ───────────────────────────────────────────────────
   const [ativo, setAtivo] = useState(false);
   const [horario, setHorario] = useState('02:00');
   const [diasRetro, setDiasRetro] = useState(1);
+
+  // ── Estado: trigger manual ────────────────────────────────────────────────
+  const [triggerIni, setTriggerIni]               = useState(firstDayOfPrevMonth);
+  const [triggerFim, setTriggerFim]               = useState(today);
+  const [triggerFiliais, setTriggerFiliais]       = useState<string[]>([]);   // selecionadas
+  const [servidoresDisp, setServidoresDisp]       = useState<string[]>([]);   // disponíveis
+  const [triggerQueued, setTriggerQueued]         = useState(false);
 
   useEffect(() => {
     if (cfg) {
@@ -118,6 +138,37 @@ export default function ERPBridgeConfig() {
       setDiasRetro(cfg.dias_retroativos);
     }
   }, [cfg]);
+
+  // Carrega lista de servidores conhecidos (do histórico de runs)
+  useEffect(() => {
+    if (!token || !companyId) return;
+    fetch('/api/erp-bridge/servidores', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : { items: [] })
+      .then((d: { items: string[] }) => setServidoresDisp(d.items || []))
+      .catch(() => {});
+  }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const triggerMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/erp-bridge/trigger', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          data_ini: triggerIni,
+          data_fim: triggerFim,
+          filiais_filter: triggerFiliais,
+        }),
+      });
+      if (res.status === 409) throw new Error('Já existe uma importação em andamento. Aguarde a conclusão.');
+      if (!res.ok) throw new Error(await res.text());
+    },
+    onSuccess: () => {
+      setTriggerQueued(true);
+      toast.success('Importação agendada! O daemon Bridge executará em até 1 minuto.');
+      qc.invalidateQueries({ queryKey: ['erp-bridge-runs', companyId] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -288,6 +339,96 @@ export default function ERPBridgeConfig() {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Importação Manual ── */}
+      <Card className={triggerQueued ? 'border-green-200 bg-green-50/30' : ''}>
+        <CardHeader className="py-3 px-4">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Zap className="h-4 w-4 text-amber-500" /> Importação Manual
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4 space-y-4">
+          <p className="text-[11px] text-muted-foreground">
+            Dispara uma importação imediatamente. O daemon Bridge a executará na próxima varredura (em até 1 minuto).
+          </p>
+
+          {/* Período */}
+          <div className="flex flex-wrap gap-4 items-end">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">De</label>
+              <Input type="date" value={triggerIni}
+                onChange={e => { setTriggerIni(e.target.value); setTriggerQueued(false); }}
+                className="h-8 w-36 text-sm"
+                disabled={triggerMutation.isPending || !!runningRun} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Até</label>
+              <Input type="date" value={triggerFim}
+                onChange={e => { setTriggerFim(e.target.value); setTriggerQueued(false); }}
+                className="h-8 w-36 text-sm"
+                disabled={triggerMutation.isPending || !!runningRun} />
+            </div>
+          </div>
+
+          {/* Filtro de filiais */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs text-muted-foreground">
+              Filiais / Servidores
+              <span className="ml-1 text-[10px] text-muted-foreground/60">(vazio = todas)</span>
+            </label>
+            {servidoresDisp.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground italic">
+                Nenhum servidor registrado ainda. Execute uma importação para registrar os servidores disponíveis.
+                A próxima importação processará <strong>todos os servidores</strong> configurados no bridge.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-3">
+                {servidoresDisp.map(srv => {
+                  const checked = triggerFiliais.includes(srv);
+                  return (
+                    <label key={srv}
+                      className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={v => {
+                          setTriggerQueued(false);
+                          setTriggerFiliais(prev =>
+                            v ? [...prev, srv] : prev.filter(s => s !== srv)
+                          );
+                        }}
+                        disabled={triggerMutation.isPending || !!runningRun}
+                      />
+                      {srv}
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Botão + status */}
+          <div className="flex items-center gap-3 pt-1">
+            <Button
+              size="sm"
+              onClick={() => triggerMutation.mutate()}
+              disabled={triggerMutation.isPending || !!runningRun || triggerQueued || !triggerIni || !triggerFim}
+            >
+              {triggerMutation.isPending
+                ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Agendando...</>
+                : <><Zap className="h-3 w-3 mr-1.5" />Importar agora</>
+              }
+            </Button>
+            {runningRun && (
+              <span className="text-[11px] text-blue-600">Aguarde: há uma importação em andamento.</span>
+            )}
+            {triggerQueued && !runningRun && (
+              <span className="text-[11px] text-green-600 font-medium">
+                ✓ Importação agendada — aguardando o daemon Bridge...
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Configuração */}
       <Card>

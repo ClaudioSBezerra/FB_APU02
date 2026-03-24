@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -273,7 +274,7 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 			}
 			w.WriteHeader(http.StatusCreated)
 
-		// PATCH /api/erp-bridge/runs/{id} — bridge finaliza o run
+		// PATCH /api/erp-bridge/runs/{id} — bridge atualiza status do run
 		case subPath == "" && r.Method == http.MethodPatch:
 			var req struct {
 				Status         string  `json:"status"`
@@ -286,22 +287,30 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 				http.Error(w, "JSON inválido", http.StatusBadRequest)
 				return
 			}
-			if req.Status == "" {
-				req.Status = "success"
+			var execErr error
+			if req.Status == "running" {
+				// Início de execução: apenas marca como running, sem finalizado_em
+				_, execErr = db.Exec(`
+					UPDATE erp_bridge_runs SET status = 'running' WHERE id = $1
+				`, runID)
+			} else {
+				if req.Status == "" {
+					req.Status = "success"
+				}
+				_, execErr = db.Exec(`
+					UPDATE erp_bridge_runs SET
+					    status          = $2,
+					    finalizado_em   = NOW(),
+					    total_enviados  = $3,
+					    total_ignorados = $4,
+					    total_erros     = $5,
+					    erro_msg        = $6
+					WHERE id = $1
+				`, runID, req.Status, req.TotalEnviados, req.TotalIgnorados,
+					req.TotalErros, req.ErroMsg)
 			}
-			_, err := db.Exec(`
-				UPDATE erp_bridge_runs SET
-				    status          = $2,
-				    finalizado_em   = NOW(),
-				    total_enviados  = $3,
-				    total_ignorados = $4,
-				    total_erros     = $5,
-				    erro_msg        = $6
-				WHERE id = $1
-			`, runID, req.Status, req.TotalEnviados, req.TotalIgnorados,
-				req.TotalErros, req.ErroMsg)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			if execErr != nil {
+				http.Error(w, execErr.Error(), http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
@@ -346,5 +355,143 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+	}
+}
+
+// ── GET /api/erp-bridge/servidores ────────────────────────────────────────────
+// Retorna os nomes distintos de servidor vistos no histórico de run_items.
+
+func ERPBridgeServidoresHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		companyID, err := erpBridgeGetCompany(db, r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		rows, err := db.Query(`
+			SELECT DISTINCT i.servidor
+			FROM erp_bridge_run_items i
+			JOIN erp_bridge_runs r ON r.id = i.run_id
+			WHERE r.company_id = $1
+			ORDER BY i.servidor
+		`, companyID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		var servidores []string
+		for rows.Next() {
+			var s string
+			if rows.Scan(&s) == nil {
+				servidores = append(servidores, s)
+			}
+		}
+		if servidores == nil {
+			servidores = []string{}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"items": servidores})
+	}
+}
+
+// ── POST /api/erp-bridge/trigger ──────────────────────────────────────────────
+// Cria um run com status='pending' para o daemon Bridge executar na próxima varredura.
+// Body: { "data_ini": "YYYY-MM-DD", "data_fim": "YYYY-MM-DD", "filiais_filter": ["nome"] }
+
+func ERPBridgeTriggerHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		companyID, err := erpBridgeGetCompany(db, r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var req struct {
+			DataIni       string   `json:"data_ini"`
+			DataFim       string   `json:"data_fim"`
+			FiliaisFilter []string `json:"filiais_filter"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DataIni == "" || req.DataFim == "" {
+			http.Error(w, "data_ini e data_fim são obrigatórios", http.StatusBadRequest)
+			return
+		}
+		var running bool
+		db.QueryRow(`
+			SELECT EXISTS(
+				SELECT 1 FROM erp_bridge_runs
+				WHERE company_id = $1 AND status IN ('running','pending')
+			)
+		`, companyID).Scan(&running)
+		if running {
+			http.Error(w, "Já existe uma importação em andamento ou aguardando execução.", http.StatusConflict)
+			return
+		}
+		var filiaisJSON *string
+		if len(req.FiliaisFilter) > 0 {
+			b, _ := json.Marshal(req.FiliaisFilter)
+			s := string(b)
+			filiaisJSON = &s
+		}
+		var id string
+		err = db.QueryRow(`
+			INSERT INTO erp_bridge_runs
+			    (company_id, data_ini, data_fim, origem, status, filiais_filter)
+			VALUES ($1, $2::DATE, $3::DATE, 'manual', 'pending', $4)
+			RETURNING id
+		`, companyID, req.DataIni, req.DataFim, filiaisJSON).Scan(&id)
+		if err != nil {
+			log.Printf("ERPBridgeTrigger insert error: %v", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"id": id, "status": "pending"})
+	}
+}
+
+// ── GET /api/erp-bridge/pending ───────────────────────────────────────────────
+// Usado pelo daemon Bridge para buscar runs pendentes criados pela UI.
+
+func ERPBridgePendingHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		companyID, err := erpBridgeGetCompany(db, r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		rows, err := db.Query(`
+			SELECT id, data_ini, data_fim, filiais_filter
+			FROM erp_bridge_runs
+			WHERE company_id = $1 AND status = 'pending'
+			ORDER BY iniciado_em ASC
+		`, companyID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+		type PendingRun struct {
+			ID            string  `json:"id"`
+			DataIni       *string `json:"data_ini"`
+			DataFim       *string `json:"data_fim"`
+			FiliaisFilter *string `json:"filiais_filter"`
+		}
+		var items []PendingRun
+		for rows.Next() {
+			var p PendingRun
+			if rows.Scan(&p.ID, &p.DataIni, &p.DataFim, &p.FiliaisFilter) == nil {
+				items = append(items, p)
+			}
+		}
+		if items == nil {
+			items = []PendingRun{}
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"items": items})
 	}
 }

@@ -248,6 +248,39 @@ class FBTaxClient:
             log.warning("Nao foi possivel criar run na API: %s", exc)
         return None
 
+    def get_pending_runs(self) -> list:
+        """Busca runs com status='pending' criados pela UI para execução manual."""
+        try:
+            resp = self.session.get(f"{self.base_url}/api/erp-bridge/pending", timeout=10)
+            if resp.status_code == 401:
+                self.login()
+                resp = self.session.get(f"{self.base_url}/api/erp-bridge/pending", timeout=10)
+            if resp.ok:
+                return resp.json().get("items", [])
+        except Exception as exc:
+            log.warning("Nao foi possivel buscar runs pendentes: %s", exc)
+        return []
+
+    def start_run(self, run_id: str) -> bool:
+        """Marca um run pendente como 'running' antes de iniciar a execução."""
+        try:
+            resp = self.session.patch(
+                f"{self.base_url}/api/erp-bridge/runs/{run_id}",
+                json={"status": "running"},
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                self.login()
+                resp = self.session.patch(
+                    f"{self.base_url}/api/erp-bridge/runs/{run_id}",
+                    json={"status": "running"},
+                    timeout=10,
+                )
+            return resp.status_code in (200, 204)
+        except Exception as exc:
+            log.warning("Nao foi possivel iniciar run %s: %s", run_id, exc)
+        return False
+
     def report_items(self, run_id: str, totais: dict) -> None:
         """Envia os totais por servidor/tipo à API."""
         items = []
@@ -447,28 +480,38 @@ def executar_importacao(
     data_fim: date,
     origem: str = "manual",
     filtro_servidor: str | None = None,
+    filtro_servidores: list | None = None,
     dry_run: bool = False,
+    existing_run_id: str | None = None,
 ) -> int:
     """Executa um ciclo completo de importação e reporta via API. Retorna 0 (ok) ou 1 (erros)."""
     log.info("=" * 60)
-    log.info("ERP Bridge v1.3 Linux — FBTax Apuracao Assistida")
+    log.info("ERP Bridge v1.4 Linux — FBTax Apuracao Assistida")
     log.info("Periodo : %s ate %s", data_ini, data_fim - timedelta(days=1))
     log.info("Origem  : %s", origem)
     if dry_run:
         log.info("MODO DRY-RUN: apenas consultas, sem envio")
     log.info("=" * 60)
 
-    # Abre run na API
-    run_id = None
-    if not dry_run:
+    # Usa run existente (criado pela UI) ou abre um novo
+    run_id = existing_run_id
+    if run_id is None and not dry_run:
         run_id = fbtax.create_run(data_ini, data_fim, origem=origem)
         if run_id:
             log.info("Run API criado: %s", run_id)
+    elif run_id:
+        log.info("Usando run existente: %s", run_id)
 
     tracker = init_tracker()
 
     servidores = cfg["servidores"]
-    if filtro_servidor:
+    # filtro_servidores (lista, da UI) tem precedência sobre filtro_servidor (CLI)
+    if filtro_servidores:
+        servidores = [s for s in servidores if s["nome"] in filtro_servidores]
+        if not servidores:
+            log.error("Nenhum dos servidores %s encontrado no config.yaml", filtro_servidores)
+            return 1
+    elif filtro_servidor:
         servidores = [s for s in servidores if s["nome"] == filtro_servidor]
         if not servidores:
             log.error("Servidor '%s' nao encontrado no config.yaml", filtro_servidor)
@@ -518,14 +561,14 @@ def executar_importacao(
 # ─── Modo Daemon ──────────────────────────────────────────────────────────────
 
 def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
-    """Loop infinito: verifica a cada minuto se deve executar a importação."""
+    """Loop infinito: verifica a cada minuto runs pendentes (manual) e o horário agendado."""
     BRASILIA = ZoneInfo("America/Sao_Paulo")
     log.info("=" * 60)
-    log.info("ERP Bridge v1.3 — MODO DAEMON iniciado")
-    log.info("Aguardando horario configurado na UI...")
+    log.info("ERP Bridge v1.4 — MODO DAEMON iniciado")
+    log.info("Aguardando horario configurado na UI ou trigger manual...")
     log.info("=" * 60)
 
-    ultimo_run_data: date | None = None  # evita rodar mais de uma vez por dia
+    ultimo_run_data: date | None = None  # evita rodar agendamento mais de uma vez por dia
 
     while True:
         try:
@@ -533,10 +576,58 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
             agora_hhmm = now.strftime("%H:%M")
             hoje = now.date()
 
-            # Busca configuração atual da API
+            # ── 1. Verifica runs pendentes criados pela UI ─────────────────────
+            pending = fbtax.get_pending_runs()
+            for run in pending:
+                run_id    = run["id"]
+                data_ini_s = run.get("data_ini")
+                data_fim_s = run.get("data_fim")
+                filiais_json = run.get("filiais_filter")  # string JSON ou None
+
+                if not data_ini_s or not data_fim_s:
+                    log.warning("[Daemon] Run pendente %s sem datas — ignorado", run_id)
+                    continue
+
+                # Parseia o filtro de filiais
+                filtro_servidores = None
+                if filiais_json:
+                    import json as _json
+                    try:
+                        filtro_servidores = _json.loads(filiais_json)
+                        if not isinstance(filtro_servidores, list) or len(filtro_servidores) == 0:
+                            filtro_servidores = None
+                    except Exception:
+                        filtro_servidores = None
+
+                data_ini_run = date.fromisoformat(data_ini_s)
+                # data_fim armazenado é inclusivo; a query Oracle usa < data_fim (exclusivo)
+                data_fim_run = date.fromisoformat(data_fim_s) + timedelta(days=1)
+
+                filiais_desc = ", ".join(filtro_servidores) if filtro_servidores else "todas"
+                log.info("[Daemon] Run manual %s: %s → %s | filiais: %s",
+                         run_id, data_ini_s, data_fim_s, filiais_desc)
+
+                # Marca como 'running' antes de iniciar
+                fbtax.start_run(run_id)
+
+                try:
+                    executar_importacao(
+                        cfg=cfg,
+                        fbtax=fbtax,
+                        data_ini=data_ini_run,
+                        data_fim=data_fim_run,
+                        origem="manual",
+                        filtro_servidores=filtro_servidores,
+                        existing_run_id=run_id,
+                    )
+                except Exception as exc:
+                    log.error("[Daemon] Erro no run manual %s: %s", run_id, exc)
+                    fbtax.finalize_run(run_id, {"enviados": 0, "ignorados": 0, "erros": 1},
+                                       erro_msg=str(exc))
+
+            # ── 2. Verifica horário agendado ───────────────────────────────────
             bridge_cfg = fbtax.get_bridge_config()
             if bridge_cfg and bridge_cfg.get("ativo") and bridge_cfg.get("horario") == agora_hhmm:
-                # Evita rodar duas vezes no mesmo dia
                 if ultimo_run_data == hoje:
                     _time.sleep(60)
                     continue
@@ -558,7 +649,7 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                     )
                     ultimo_run_data = hoje
                 except Exception as exc:
-                    log.error("[Daemon] Erro durante importacao: %s", exc)
+                    log.error("[Daemon] Erro durante importacao agendada: %s", exc)
 
         except Exception as exc:
             log.warning("[Daemon] Erro no loop: %s", exc)
