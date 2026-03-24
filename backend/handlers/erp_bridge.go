@@ -20,6 +20,7 @@ type ERPBridgeConfig struct {
 	DiasRetroativos int        `json:"dias_retroativos"`
 	UltimoRunEm     *time.Time `json:"ultimo_run_em"`
 	UpdatedAt       time.Time  `json:"updated_at"`
+	ResetTracker    bool       `json:"reset_tracker"`
 }
 
 type ERPBridgeRun struct {
@@ -79,10 +80,10 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 			var horario string
 			err := db.QueryRow(`
 				SELECT company_id, ativo, TO_CHAR(horario, 'HH24:MI'), dias_retroativos,
-				       ultimo_run_em, updated_at
+				       ultimo_run_em, updated_at, reset_tracker
 				FROM erp_bridge_config WHERE company_id = $1
 			`, companyID).Scan(&cfg.CompanyID, &cfg.Ativo, &horario,
-				&cfg.DiasRetroativos, &cfg.UltimoRunEm, &cfg.UpdatedAt)
+				&cfg.DiasRetroativos, &cfg.UltimoRunEm, &cfg.UpdatedAt, &cfg.ResetTracker)
 			if err == sql.ErrNoRows {
 				cfg = ERPBridgeConfig{
 					CompanyID:       companyID,
@@ -90,6 +91,7 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 					Horario:         "02:00",
 					DiasRetroativos: 1,
 					UpdatedAt:       time.Now(),
+					ResetTracker:    false,
 				}
 			} else if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -104,6 +106,7 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				Ativo           *bool   `json:"ativo"`
 				Horario         *string `json:"horario"`
 				DiasRetroativos *int    `json:"dias_retroativos"`
+				ResetTracker    *bool   `json:"reset_tracker"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "JSON inválido", http.StatusBadRequest)
@@ -116,8 +119,9 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				    ativo            = COALESCE($2, erp_bridge_config.ativo),
 				    horario          = COALESCE($3::TIME, erp_bridge_config.horario),
 				    dias_retroativos = COALESCE($4, erp_bridge_config.dias_retroativos),
+				    reset_tracker    = COALESCE($5, erp_bridge_config.reset_tracker),
 				    updated_at       = NOW()
-			`, companyID, req.Ativo, req.Horario, req.DiasRetroativos)
+			`, companyID, req.Ativo, req.Horario, req.DiasRetroativos, req.ResetTracker)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return

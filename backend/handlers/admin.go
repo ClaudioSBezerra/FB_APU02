@@ -66,13 +66,26 @@ func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("[LimparApuracao] %s: %d registros removidos", t, n)
 		}
 
+		// Sinaliza ao daemon Bridge para limpar o tracker.db na próxima varredura
+		_, resetErr := db.Exec(`
+			INSERT INTO erp_bridge_config (company_id, ativo, horario, dias_retroativos, reset_tracker, updated_at)
+			VALUES ($1, false, '02:00', 1, true, NOW())
+			ON CONFLICT (company_id) DO UPDATE SET reset_tracker = true, updated_at = NOW()
+		`, companyID)
+		if resetErr != nil {
+			log.Printf("[LimparApuracao] Aviso: nao foi possivel sinalizar reset_tracker: %v", resetErr)
+		} else {
+			log.Printf("[LimparApuracao] reset_tracker sinalizado para empresa %s", companyID)
+		}
+
 		totals := map[string]int64{}
 		for _, r := range results {
 			totals[r.table] = r.deleted
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "Dados de apuração removidos com sucesso",
-			"totals":  totals,
+			"message":       "Dados de apuração removidos com sucesso",
+			"totals":        totals,
+			"reset_tracker": true,
 		})
 	}
 }
