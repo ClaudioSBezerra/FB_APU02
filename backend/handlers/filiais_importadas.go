@@ -58,7 +58,7 @@ func NfeSaidasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 			LEFT JOIN filial_apelidos fa
 			  ON fa.company_id = n.company_id AND fa.cnpj = n.emit_cnpj
 			WHERE n.company_id = $1
-			ORDER BY COALESCE(NULLIF(fa.apelido,''), n.emit_nome)`
+			ORDER BY COALESCE(NULLIF(COALESCE(fa.apelido,''),''), COALESCE(n.emit_nome,''))`
 		queryFiliaisImportadas(db, w, r, q)
 	}
 }
@@ -73,7 +73,7 @@ func NfeEntradasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 			LEFT JOIN filial_apelidos fa
 			  ON fa.company_id = n.company_id AND fa.cnpj = n.dest_cnpj_cpf
 			WHERE n.company_id = $1
-			ORDER BY COALESCE(NULLIF(fa.apelido,''), n.dest_nome)`
+			ORDER BY COALESCE(NULLIF(COALESCE(fa.apelido,''),''), COALESCE(n.dest_nome,''))`
 		queryFiliaisImportadas(db, w, r, q)
 	}
 }
@@ -88,7 +88,7 @@ func CteEntradasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 			LEFT JOIN filial_apelidos fa
 			  ON fa.company_id = c.company_id AND fa.cnpj = c.dest_cnpj_cpf
 			WHERE c.company_id = $1
-			ORDER BY COALESCE(NULLIF(fa.apelido,''), c.dest_nome)`
+			ORDER BY COALESCE(NULLIF(COALESCE(fa.apelido,''),''), COALESCE(c.dest_nome,''))`
 		queryFiliaisImportadas(db, w, r, q)
 	}
 }
