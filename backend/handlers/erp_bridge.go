@@ -293,6 +293,12 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 				_, execErr = db.Exec(`
 					UPDATE erp_bridge_runs SET status = 'running' WHERE id = $1
 				`, runID)
+			} else if req.Status == "cancelled" {
+				// Cancelamento: finaliza imediatamente sem totais
+				_, execErr = db.Exec(`
+					UPDATE erp_bridge_runs SET status = 'cancelled', finalizado_em = NOW()
+					WHERE id = $1 AND status IN ('pending','running')
+				`, runID)
 			} else {
 				if req.Status == "" {
 					req.Status = "success"

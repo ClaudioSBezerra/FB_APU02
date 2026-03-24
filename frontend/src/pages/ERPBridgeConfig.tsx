@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
+import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap, Ban } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BridgeConfig {
@@ -51,10 +51,12 @@ const TIPO_LABELS: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
-    running:  { label: 'Em andamento', className: 'bg-blue-100 text-blue-700 border-blue-200' },
-    success:  { label: 'Sucesso',      className: 'bg-green-100 text-green-700 border-green-200' },
-    partial:  { label: 'Parcial',      className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-    error:    { label: 'Erro',         className: 'bg-red-100 text-red-700 border-red-200' },
+    pending:   { label: 'Aguardando',   className: 'bg-amber-100 text-amber-700 border-amber-200' },
+    running:   { label: 'Em andamento', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+    success:   { label: 'Sucesso',      className: 'bg-green-100 text-green-700 border-green-200' },
+    partial:   { label: 'Parcial',      className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+    error:     { label: 'Erro',         className: 'bg-red-100 text-red-700 border-red-200' },
+    cancelled: { label: 'Cancelado',    className: 'bg-gray-100 text-gray-500 border-gray-200' },
   };
   const s = map[status] ?? { label: status, className: 'bg-gray-100 text-gray-600' };
   return (
@@ -105,6 +107,8 @@ export default function ERPBridgeConfig() {
   });
 
   const runningRun = runs?.items?.find(r => r.status === 'running') ?? null;
+  const pendingRun = runs?.items?.find(r => r.status === 'pending')  ?? null;
+  const activeRun  = runningRun ?? pendingRun;
 
   // Detalhe do run ativo — atualiza a cada 60s para mostrar progresso por filial
   const { data: runDetail, dataUpdatedAt: detailUpdatedAt, refetch: refetchDetail } =
@@ -147,6 +151,23 @@ export default function ERPBridgeConfig() {
       .then((d: { items: string[] }) => setServidoresDisp(d.items || []))
       .catch(() => {});
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const abortMutation = useMutation({
+    mutationFn: async (runId: string) => {
+      const res = await fetch(`/api/erp-bridge/runs/${runId}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+    onSuccess: () => {
+      setTriggerQueued(false);
+      toast.success('Importação cancelada.');
+      qc.invalidateQueries({ queryKey: ['erp-bridge-runs', companyId] });
+    },
+    onError: (e: Error) => toast.error(`Erro ao cancelar: ${e.message}`),
+  });
 
   const triggerMutation = useMutation({
     mutationFn: async () => {
@@ -201,6 +222,46 @@ export default function ERPBridgeConfig() {
         </p>
       </div>
 
+      {/* Run pendente aguardando daemon */}
+      {pendingRun && !runningRun && (
+        <Card className="border border-amber-200 bg-amber-50/40">
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-sm flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+                Aguardando o daemon Bridge...
+              </span>
+              <Button
+                size="sm" variant="ghost"
+                className="h-7 px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                onClick={() => abortMutation.mutate(pendingRun.id)}
+                disabled={abortMutation.isPending}
+                title="Cancelar importação antes de o daemon iniciar"
+              >
+                {abortMutation.isPending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <><Ban className="h-3.5 w-3.5 mr-1" />Cancelar</>
+                }
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-3">
+            <div className="flex flex-wrap gap-4 text-xs">
+              <div>
+                <span className="text-muted-foreground">Criado em: </span>
+                <span className="font-medium">{fmtDateTime(pendingRun.iniciado_em)}</span>
+              </div>
+              {pendingRun.data_ini && (
+                <div>
+                  <span className="text-muted-foreground">Período: </span>
+                  <span className="font-medium">{pendingRun.data_ini} → {pendingRun.data_fim}</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Status do run ativo — com progresso por filial */}
       {runningRun && (
         <Card className="border border-blue-200 bg-blue-50/40">
@@ -211,7 +272,19 @@ export default function ERPBridgeConfig() {
                 Importação em andamento...
               </span>
               <span className="flex items-center gap-2 text-[11px] font-normal text-muted-foreground">
-                Atualiza a cada 60s
+                <Button
+                  size="sm" variant="ghost"
+                  className="h-7 px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                  onClick={() => abortMutation.mutate(runningRun.id)}
+                  disabled={abortMutation.isPending}
+                  title="Interrompe após concluir o servidor atual"
+                >
+                  {abortMutation.isPending
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <><Ban className="h-3.5 w-3.5 mr-1" />Abortar</>
+                  }
+                </Button>
+                <span className="border-l pl-2">Atualiza a cada 60s</span>
                 <button
                   onClick={() => refetchDetail()}
                   className="text-muted-foreground hover:text-foreground transition-colors"
@@ -359,14 +432,14 @@ export default function ERPBridgeConfig() {
               <Input type="date" value={triggerIni}
                 onChange={e => { setTriggerIni(e.target.value); setTriggerQueued(false); }}
                 className="h-8 w-36 text-sm"
-                disabled={triggerMutation.isPending || !!runningRun} />
+                disabled={triggerMutation.isPending || !!activeRun} />
             </div>
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">Até</label>
               <Input type="date" value={triggerFim}
                 onChange={e => { setTriggerFim(e.target.value); setTriggerQueued(false); }}
                 className="h-8 w-36 text-sm"
-                disabled={triggerMutation.isPending || !!runningRun} />
+                disabled={triggerMutation.isPending || !!activeRun} />
             </div>
           </div>
 
@@ -411,15 +484,19 @@ export default function ERPBridgeConfig() {
             <Button
               size="sm"
               onClick={() => triggerMutation.mutate()}
-              disabled={triggerMutation.isPending || !!runningRun || triggerQueued || !triggerIni || !triggerFim}
+              disabled={triggerMutation.isPending || !!activeRun || triggerQueued || !triggerIni || !triggerFim}
             >
               {triggerMutation.isPending
                 ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin" />Agendando...</>
                 : <><Zap className="h-3 w-3 mr-1.5" />Importar agora</>
               }
             </Button>
-            {runningRun && (
-              <span className="text-[11px] text-blue-600">Aguarde: há uma importação em andamento.</span>
+            {activeRun && (
+              <span className="text-[11px] text-blue-600">
+                {activeRun.status === 'pending'
+                  ? 'Aguardando daemon — cancele acima se precisar alterar.'
+                  : 'Aguarde: há uma importação em andamento.'}
+              </span>
             )}
             {triggerQueued && !runningRun && (
               <span className="text-[11px] text-green-600 font-medium">
