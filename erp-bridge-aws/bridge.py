@@ -281,6 +281,22 @@ class FBTaxClient:
             log.warning("Nao foi possivel iniciar run %s: %s", run_id, exc)
         return False
 
+    def is_run_cancelled(self, run_id: str) -> bool:
+        """Verifica se o run foi cancelado pela UI durante a execução."""
+        try:
+            resp = self.session.get(
+                f"{self.base_url}/api/erp-bridge/runs/{run_id}",
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                self.login()
+                resp = self.session.get(f"{self.base_url}/api/erp-bridge/runs/{run_id}", timeout=10)
+            if resp.ok:
+                return resp.json().get("status") == "cancelled"
+        except Exception as exc:
+            log.warning("Nao foi possivel verificar status do run %s: %s", run_id, exc)
+        return False
+
     def report_items(self, run_id: str, totais: dict) -> None:
         """Envia os totais por servidor/tipo à API."""
         items = []
@@ -524,6 +540,13 @@ def executar_importacao(
         if dry_run:
             log.info("DRY-RUN: pulando envio para %s", srv["nome"])
             continue
+
+        # Verifica cancelamento antes de cada servidor (a UI pode ter abortado)
+        if run_id and fbtax.is_run_cancelled(run_id):
+            log.warning("[Cancelado] Run %s foi cancelado pela UI — interrompendo.", run_id)
+            tracker.close()
+            return 1
+
         stats = processar_servidor(srv, data_ini, data_fim, fbtax, tracker)
         totais[srv["nome"]] = stats
 
