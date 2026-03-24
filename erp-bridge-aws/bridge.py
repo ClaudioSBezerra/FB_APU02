@@ -622,9 +622,9 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                     except Exception:
                         filtro_servidores = None
 
-                data_ini_run = date.fromisoformat(data_ini_s)
+                data_ini_run = date.fromisoformat(data_ini_s[:10])
                 # data_fim armazenado é inclusivo; a query Oracle usa < data_fim (exclusivo)
-                data_fim_run = date.fromisoformat(data_fim_s) + timedelta(days=1)
+                data_fim_run = date.fromisoformat(data_fim_s[:10]) + timedelta(days=1)
 
                 filiais_desc = ", ".join(filtro_servidores) if filtro_servidores else "todas"
                 log.info("[Daemon] Run manual %s: %s → %s | filiais: %s",
