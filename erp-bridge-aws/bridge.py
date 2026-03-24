@@ -401,10 +401,18 @@ def processar_servidor(
             log.info("-" * 40)
             log.info("Consultando %s...", fonte["descricao"])
 
+            # Lê o conteúdo do CLOB/BLOB durante a iteração do cursor (locator ainda válido).
+            # fetchall() retorna apenas ponteiros (LOB locators); após cur.close() eles
+            # ficam inválidos. Ler inline evita XMLs inválidos e dispensa I/O de disco.
             try:
                 cur = conn_ora.cursor()
                 cur.execute(fonte["sql"], data_ini=data_ini, data_fim=data_fim)
-                rows = cur.fetchall()
+                rows = []
+                for raw_row in cur:
+                    rows.append((
+                        str(raw_row[fonte["chave_col"]]).strip(),
+                        clob_para_str(raw_row[fonte["xml_col"]]),
+                    ))
                 cur.close()
             except Exception as exc:
                 log.error("Erro na query %s: %s", tipo, exc)
@@ -413,11 +421,8 @@ def processar_servidor(
             total_rows = len(rows)
             log.info("%d registros encontrados", total_rows)
 
-            for row in rows:
-                chave   = str(row[fonte["chave_col"]]).strip()
-                xml_raw = row[fonte["xml_col"]]
-
-                if not xml_raw:
+            for chave, xml_str in rows:
+                if not xml_str:
                     log.debug("  XML nulo para %s — ignorado", chave)
                     stats[tipo]["ignorados"] += 1
                     continue
@@ -425,8 +430,6 @@ def processar_servidor(
                 if ja_enviado(tracker, nome, tipo, chave):
                     stats[tipo]["ignorados"] += 1
                     continue
-
-                xml_str = clob_para_str(xml_raw)
 
                 try:
                     xml_bytes = normalizar_xml(xml_str, adicionar_decl=fonte["adicionar_decl"])
