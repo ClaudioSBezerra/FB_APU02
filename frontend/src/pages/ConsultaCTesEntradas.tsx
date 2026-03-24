@@ -28,12 +28,14 @@ import {
 } from '@/components/ui/dialog';
 import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, FileText, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatCnpjComApelido } from '@/lib/formatFilial';
+import { formatCNPJMasked } from '@/lib/formatFilial';
 
 const PAGE_SIZE = 100;
 
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+interface FilialOption { cnpj: string; nome: string; apelido: string }
+
 interface CteEntradaRow {
   id: string; chave_cte: string; modelo: number; serie: string; numero_cte: string;
   data_emissao: string; mes_ano: string; nat_op: string; cfop: string; modal: string;
@@ -202,7 +204,7 @@ export default function ConsultaCTesEntradas() {
   const [filterDataAte, setFilterDataAte] = useState('');
   const [filterSemIBS,  setFilterSemIBS]  = useState(false);
   const [page,          setPage]          = useState(1);
-  const [apelidos,      setApelidos]      = useState<Record<string, string>>({});
+  const [filiaisOptions, setFiliaisOptions] = useState<FilialOption[]>([]);
 
   const [transpDebounced, setTranspDebounced] = useState('');
   useEffect(() => {
@@ -218,14 +220,6 @@ export default function ConsultaCTesEntradas() {
 
   useEffect(() => {
     if (!token || !companyId) return;
-    fetch('/api/config/filial-apelidos', { headers: authHeaders })
-      .then(r => r.ok ? r.json() : [])
-      .then((list: { cnpj: string; apelido: string }[]) => {
-        const map: Record<string, string> = {};
-        (list || []).forEach(fa => { map[fa.cnpj] = fa.apelido; });
-        setApelidos(map);
-      })
-      .catch(() => {});
     fetch('/api/apuracao/painel', { headers: authHeaders })
       .then(r => r.ok ? r.json() : { meses_disponiveis: [] })
       .then((d: { meses_disponiveis?: string[] }) => {
@@ -233,6 +227,10 @@ export default function ConsultaCTesEntradas() {
         setMesAnoOptions(meses);
         setMesAno(prev => prev || meses[0] || '');
       })
+      .catch(() => {});
+    fetch('/api/cte-entradas/filiais', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((list: FilialOption[]) => setFiliaisOptions(list || []))
       .catch(() => {});
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -309,9 +307,9 @@ export default function ConsultaCTesEntradas() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all" className="text-xs">Todas as filiais</SelectItem>
-                  {Object.keys(apelidos).map(cnpj => (
-                    <SelectItem key={cnpj} value={cnpj} className="text-xs">
-                      {formatCnpjComApelido(cnpj, apelidos)}
+                  {filiaisOptions.map(f => (
+                    <SelectItem key={f.cnpj} value={f.cnpj} className="text-xs">
+                      {formatCNPJMasked(f.cnpj)}{(f.apelido || f.nome) ? ` — ${f.apelido || f.nome}` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>

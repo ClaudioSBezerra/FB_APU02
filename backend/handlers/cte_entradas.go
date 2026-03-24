@@ -463,7 +463,7 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 		if modelo != "" { where += fmt.Sprintf(" AND modelo = $%d", idx); args = append(args, modelo); idx++ }
 		if dataDe != "" { where += fmt.Sprintf(" AND data_emissao >= $%d", idx); args = append(args, dataDe); idx++ }
 		if dataAte != "" { where += fmt.Sprintf(" AND data_emissao <= $%d", idx); args = append(args, dataAte); idx++ }
-		if destCNPJ != "" { where += fmt.Sprintf(" AND dest_cnpj_cpf LIKE $%d", idx); args = append(args, destCNPJ+"%"); idx++ }
+		if destCNPJ != "" { where += fmt.Sprintf(" AND dest_cnpj_cpf = $%d", idx); args = append(args, destCNPJ); idx++ }
 		if destNome := q.Get("dest_nome"); destNome != "" { where += fmt.Sprintf(" AND dest_nome ILIKE $%d", idx); args = append(args, "%"+destNome+"%"); idx++ }
 		if emitNome := q.Get("emit_nome"); emitNome != "" { where += fmt.Sprintf(" AND emit_nome ILIKE $%d", idx); args = append(args, "%"+emitNome+"%"); idx++ }
 		if emitCNPJSearch := q.Get("emit_cnpj_search"); emitCNPJSearch != "" { where += fmt.Sprintf(" AND emit_cnpj LIKE $%d", idx); args = append(args, emitCNPJSearch+"%"); idx++ }

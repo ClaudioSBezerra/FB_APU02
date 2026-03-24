@@ -27,13 +27,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { X, AlertTriangle, ChevronLeft, ChevronRight, FileText, Copy, Check } from 'lucide-react';
-import { formatCnpjComApelido } from '@/lib/formatFilial';
+import { formatCnpjComApelido, formatCNPJMasked } from '@/lib/formatFilial';
 import { toast } from 'sonner';
 
 const PAGE_SIZE = 100;
 
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+interface FilialOption { cnpj: string; nome: string; apelido: string }
+
 interface NfeEntradaRow {
   id: string; chave_nfe: string; modelo: number; serie: string; numero_nfe: string;
   data_emissao: string; mes_ano: string; nat_op: string;
@@ -188,8 +190,9 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeEntradaRow; onClose: () => void 
 export default function ConsultaNFesEntradas() {
   const { token, companyId } = useAuth();
 
-  const [mesAnoOptions, setMesAnoOptions] = useState<string[]>([]);
-  const [mesAno,        setMesAno]        = useState('');
+  const [mesAnoOptions,  setMesAnoOptions]  = useState<string[]>([]);
+  const [mesAno,         setMesAno]         = useState('');
+  const [filiaisOptions, setFiliaisOptions] = useState<FilialOption[]>([]);
   const [filterFilial, setFilterFilial] = useState('');
   const [filterFornec, setFilterFornec] = useState('');
   const [filterDataDe, setFilterDataDe] = useState('');
@@ -227,6 +230,10 @@ export default function ConsultaNFesEntradas() {
         setMesAnoOptions(meses);
         setMesAno(prev => prev || meses[0] || '');
       })
+      .catch(() => {});
+    fetch('/api/nfe-entradas/filiais', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((list: FilialOption[]) => setFiliaisOptions(list || []))
       .catch(() => {});
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -304,9 +311,9 @@ export default function ConsultaNFesEntradas() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all" className="text-xs">Todas as filiais</SelectItem>
-                  {Object.keys(apelidos).map(cnpj => (
-                    <SelectItem key={cnpj} value={cnpj} className="text-xs">
-                      {formatCnpjComApelido(cnpj, apelidos)}
+                  {filiaisOptions.map(f => (
+                    <SelectItem key={f.cnpj} value={f.cnpj} className="text-xs">
+                      {formatCNPJMasked(f.cnpj)}{(f.apelido || f.nome) ? ` — ${f.apelido || f.nome}` : ''}
                     </SelectItem>
                   ))}
                 </SelectContent>
