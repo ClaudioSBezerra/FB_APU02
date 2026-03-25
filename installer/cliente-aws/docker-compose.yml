@@ -19,6 +19,9 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - SMTP_FROM=${SMTP_FROM}
       - APP_URL=${APP_URL:-http://localhost:3006}
+      - RFB_API_URL=${RFB_API_URL}
+      - RFB_TOKEN_URL=${RFB_TOKEN_URL}
+      - RFB_WEBHOOK_URL=${RFB_WEBHOOK_URL}
     depends_on:
       db:
         condition: service_healthy
@@ -29,7 +32,7 @@ services:
     networks:
       - cliente_net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081/api/health"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

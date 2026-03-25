@@ -369,7 +369,7 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 }
 
 // ── GET /api/erp-bridge/servidores ────────────────────────────────────────────
-// Retorna os nomes distintos de servidor vistos no histórico de run_items.
+// Retorna servidores configurados (erp_bridge_servidores) UNION histórico de run_items.
 
 func ERPBridgeServidoresHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -380,11 +380,14 @@ func ERPBridgeServidoresHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		rows, err := db.Query(`
-			SELECT DISTINCT i.servidor
-			FROM erp_bridge_run_items i
-			JOIN erp_bridge_runs r ON r.id = i.run_id
-			WHERE r.company_id = $1
-			ORDER BY i.servidor
+			SELECT DISTINCT nome FROM (
+			  SELECT nome FROM erp_bridge_servidores WHERE company_id = $1
+			  UNION
+			  SELECT DISTINCT i.servidor AS nome
+			  FROM erp_bridge_run_items i
+			  JOIN erp_bridge_runs r ON r.id = i.run_id
+			  WHERE r.company_id = $1
+			) t ORDER BY nome
 		`, companyID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -402,6 +405,39 @@ func ERPBridgeServidoresHandler(db *sql.DB) http.HandlerFunc {
 			servidores = []string{}
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"items": servidores})
+	}
+}
+
+// ── POST /api/erp-bridge/servidores ───────────────────────────────────────────
+// Chamado pelo daemon Bridge ao iniciar para registrar seus servidores configurados.
+// Body: { "nomes": ["FC - Aracaju", "FC - Salvador", ...] }
+
+func ERPBridgeRegistrarServidoresHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		companyID, err := erpBridgeGetCompany(db, r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var body struct {
+			Nomes []string `json:"nomes"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Nomes) == 0 {
+			http.Error(w, "body inválido", http.StatusBadRequest)
+			return
+		}
+		for _, nome := range body.Nomes {
+			db.Exec(`
+				INSERT INTO erp_bridge_servidores (company_id, nome, updated_at)
+				VALUES ($1, $2, NOW())
+				ON CONFLICT (company_id, nome) DO UPDATE SET updated_at = NOW()
+			`, companyID, nome)
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 

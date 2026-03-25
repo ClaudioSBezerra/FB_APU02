@@ -53,12 +53,15 @@ func queryFiliaisImportadas(db *sql.DB, w http.ResponseWriter, r *http.Request, 
 func NfeSaidasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const q = `
-			SELECT DISTINCT n.emit_cnpj, COALESCE(n.emit_nome,''), COALESCE(fa.apelido,'')
-			FROM nfe_saidas n
-			LEFT JOIN filial_apelidos fa
-			  ON fa.company_id = n.company_id AND fa.cnpj = n.emit_cnpj
-			WHERE n.company_id = $1
-			ORDER BY COALESCE(NULLIF(COALESCE(fa.apelido,''),''), COALESCE(n.emit_nome,''))`
+			SELECT cnpj, nome, apelido FROM (
+			  SELECT DISTINCT n.emit_cnpj AS cnpj, COALESCE(n.emit_nome,'') AS nome,
+			    COALESCE(fa.apelido,'') AS apelido,
+			    COALESCE(NULLIF(fa.apelido,''), n.emit_nome,'') AS sort_key
+			  FROM nfe_saidas n
+			  LEFT JOIN filial_apelidos fa
+			    ON fa.company_id = n.company_id AND fa.cnpj = n.emit_cnpj
+			  WHERE n.company_id = $1
+			) t ORDER BY sort_key`
 		queryFiliaisImportadas(db, w, r, q)
 	}
 }
@@ -68,12 +71,15 @@ func NfeSaidasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 func NfeEntradasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const q = `
-			SELECT DISTINCT n.dest_cnpj_cpf, COALESCE(n.dest_nome,''), COALESCE(fa.apelido,'')
-			FROM nfe_entradas n
-			LEFT JOIN filial_apelidos fa
-			  ON fa.company_id = n.company_id AND fa.cnpj = n.dest_cnpj_cpf
-			WHERE n.company_id = $1
-			ORDER BY COALESCE(NULLIF(COALESCE(fa.apelido,''),''), COALESCE(n.dest_nome,''))`
+			SELECT cnpj, nome, apelido FROM (
+			  SELECT DISTINCT n.dest_cnpj_cpf AS cnpj, COALESCE(n.dest_nome,'') AS nome,
+			    COALESCE(fa.apelido,'') AS apelido,
+			    COALESCE(NULLIF(fa.apelido,''), n.dest_nome,'') AS sort_key
+			  FROM nfe_entradas n
+			  LEFT JOIN filial_apelidos fa
+			    ON fa.company_id = n.company_id AND fa.cnpj = n.dest_cnpj_cpf
+			  WHERE n.company_id = $1
+			) t ORDER BY sort_key`
 		queryFiliaisImportadas(db, w, r, q)
 	}
 }
@@ -83,12 +89,15 @@ func NfeEntradasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 func CteEntradasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const q = `
-			SELECT DISTINCT c.dest_cnpj_cpf, COALESCE(c.dest_nome,''), COALESCE(fa.apelido,'')
-			FROM cte_entradas c
-			LEFT JOIN filial_apelidos fa
-			  ON fa.company_id = c.company_id AND fa.cnpj = c.dest_cnpj_cpf
-			WHERE c.company_id = $1
-			ORDER BY COALESCE(NULLIF(COALESCE(fa.apelido,''),''), COALESCE(c.dest_nome,''))`
+			SELECT cnpj, nome, apelido FROM (
+			  SELECT DISTINCT c.dest_cnpj_cpf AS cnpj, COALESCE(c.dest_nome,'') AS nome,
+			    COALESCE(fa.apelido,'') AS apelido,
+			    COALESCE(NULLIF(fa.apelido,''), c.dest_nome,'') AS sort_key
+			  FROM cte_entradas c
+			  LEFT JOIN filial_apelidos fa
+			    ON fa.company_id = c.company_id AND fa.cnpj = c.dest_cnpj_cpf
+			  WHERE c.company_id = $1
+			) t ORDER BY sort_key`
 		queryFiliaisImportadas(db, w, r, q)
 	}
 }

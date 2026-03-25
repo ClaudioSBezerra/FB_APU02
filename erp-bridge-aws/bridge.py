@@ -219,6 +219,17 @@ class FBTaxClient:
             log.warning("Nao foi possivel obter config bridge: %s", exc)
         return None
 
+    def registrar_servidores(self, nomes: list) -> None:
+        """Registra os servidores configurados na API para popular o dropdown do trigger manual."""
+        try:
+            self.session.post(
+                f"{self.base_url}/api/erp-bridge/servidores/registrar",
+                json={"nomes": nomes},
+                timeout=10,
+            )
+        except Exception as exc:
+            log.warning("Nao foi possivel registrar servidores: %s", exc)
+
     def reset_tracker_ack(self) -> bool:
         """Confirma para a API que o tracker.db foi limpo (reset_tracker = false)."""
         try:
@@ -738,6 +749,8 @@ def main() -> int:
         except Exception as exc:
             log.error("Falha ao autenticar no FBTax: %s", exc)
             return 1
+        nomes = [s["nome"] for s in cfg.get("servidores", [])]
+        fbtax.registrar_servidores(nomes)
         return run_daemon(cfg, fbtax)
 
     # Modo normal (importação pontual)
