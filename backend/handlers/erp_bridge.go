@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -14,13 +17,18 @@ import (
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ERPBridgeConfig struct {
-	CompanyID       string     `json:"company_id"`
-	Ativo           bool       `json:"ativo"`
-	Horario         string     `json:"horario"` // HH:MM
-	DiasRetroativos int        `json:"dias_retroativos"`
-	UltimoRunEm     *time.Time `json:"ultimo_run_em"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	ResetTracker    bool       `json:"reset_tracker"`
+	CompanyID          string     `json:"company_id"`
+	Ativo              bool       `json:"ativo"`
+	Horario            string     `json:"horario"` // HH:MM
+	DiasRetroativos    int        `json:"dias_retroativos"`
+	UltimoRunEm        *time.Time `json:"ultimo_run_em"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	ResetTracker       bool       `json:"reset_tracker"`
+	FBTaxEmail         string     `json:"fbtax_email"`
+	FBTaxPasswordSet   bool       `json:"fbtax_password_set"`
+	OracleUsuario      string     `json:"oracle_usuario"`
+	OracleSenhaSet     bool       `json:"oracle_senha_set"`
+	APIKey             string     `json:"api_key"`
 }
 
 type ERPBridgeRun struct {
@@ -78,12 +86,15 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 		case http.MethodGet:
 			var cfg ERPBridgeConfig
 			var horario string
+			var fbtaxEmail, fbtaxPassword, oracleUsuario, oracleSenha, apiKey sql.NullString
 			err := db.QueryRow(`
 				SELECT company_id, ativo, TO_CHAR(horario, 'HH24:MI'), dias_retroativos,
-				       ultimo_run_em, updated_at, reset_tracker
+				       ultimo_run_em, updated_at, reset_tracker,
+				       fbtax_email, fbtax_password, oracle_usuario, oracle_senha, api_key
 				FROM erp_bridge_config WHERE company_id = $1
 			`, companyID).Scan(&cfg.CompanyID, &cfg.Ativo, &horario,
-				&cfg.DiasRetroativos, &cfg.UltimoRunEm, &cfg.UpdatedAt, &cfg.ResetTracker)
+				&cfg.DiasRetroativos, &cfg.UltimoRunEm, &cfg.UpdatedAt, &cfg.ResetTracker,
+				&fbtaxEmail, &fbtaxPassword, &oracleUsuario, &oracleSenha, &apiKey)
 			if err == sql.ErrNoRows {
 				cfg = ERPBridgeConfig{
 					CompanyID:       companyID,
@@ -98,6 +109,17 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				return
 			} else {
 				cfg.Horario = horario
+				if fbtaxEmail.Valid {
+					cfg.FBTaxEmail = fbtaxEmail.String
+				}
+				cfg.FBTaxPasswordSet = fbtaxPassword.Valid && fbtaxPassword.String != ""
+				if oracleUsuario.Valid {
+					cfg.OracleUsuario = DecryptFieldWithFallback(oracleUsuario.String)
+				}
+				cfg.OracleSenhaSet = oracleSenha.Valid && oracleSenha.String != ""
+				if apiKey.Valid && apiKey.String != "" {
+					cfg.APIKey = DecryptFieldWithFallback(apiKey.String)
+				}
 			}
 			json.NewEncoder(w).Encode(cfg)
 
@@ -107,6 +129,10 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				Horario         *string `json:"horario"`
 				DiasRetroativos *int    `json:"dias_retroativos"`
 				ResetTracker    *bool   `json:"reset_tracker"`
+				FBTaxEmail      *string `json:"fbtax_email"`
+				FBTaxPassword   *string `json:"fbtax_password"`
+				OracleUsuario   *string `json:"oracle_usuario"`
+				OracleSenha     *string `json:"oracle_senha"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "JSON inválido", http.StatusBadRequest)
@@ -125,6 +151,25 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
+			}
+			// Atualiza credenciais individualmente se fornecidas
+			if req.FBTaxEmail != nil {
+				db.Exec(`UPDATE erp_bridge_config SET fbtax_email = $2 WHERE company_id = $1`, companyID, *req.FBTaxEmail)
+			}
+			if req.FBTaxPassword != nil && *req.FBTaxPassword != "" {
+				if enc, encErr := EncryptField(*req.FBTaxPassword); encErr == nil {
+					db.Exec(`UPDATE erp_bridge_config SET fbtax_password = $2 WHERE company_id = $1`, companyID, enc)
+				}
+			}
+			if req.OracleUsuario != nil {
+				if enc, encErr := EncryptField(*req.OracleUsuario); encErr == nil {
+					db.Exec(`UPDATE erp_bridge_config SET oracle_usuario = $2 WHERE company_id = $1`, companyID, enc)
+				}
+			}
+			if req.OracleSenha != nil && *req.OracleSenha != "" {
+				if enc, encErr := EncryptField(*req.OracleSenha); encErr == nil {
+					db.Exec(`UPDATE erp_bridge_config SET oracle_senha = $2 WHERE company_id = $1`, companyID, enc)
+				}
 			}
 			w.WriteHeader(http.StatusNoContent)
 
@@ -439,6 +484,98 @@ func ERPBridgeRegistrarServidoresHandler(db *sql.DB) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// ── POST /api/erp-bridge/config/generate-api-key ─────────────────────────────
+// Gera uma nova API key para o daemon Bridge e a armazena criptografada.
+// Retorna a chave em plaintext para copiar ao config.yaml — mostrada apenas uma vez.
+
+func ERPBridgeGenerateAPIKeyHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		companyID, err := erpBridgeGetCompany(db, r)
+		if err != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// Gera 32 bytes aleatórios → chave hex de 64 caracteres
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			http.Error(w, "erro ao gerar chave", http.StatusInternalServerError)
+			return
+		}
+		key := hex.EncodeToString(raw)
+		hash := sha256.Sum256([]byte(key))
+		hashHex := hex.EncodeToString(hash[:])
+		enc, encErr := EncryptField(key)
+		if encErr != nil {
+			http.Error(w, "erro ao criptografar chave", http.StatusInternalServerError)
+			return
+		}
+		db.Exec(`
+			INSERT INTO erp_bridge_config (company_id, api_key, api_key_hash)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (company_id) DO UPDATE SET api_key = $2, api_key_hash = $3, updated_at = NOW()
+		`, companyID, enc, hashHex)
+		json.NewEncoder(w).Encode(map[string]string{"api_key": key})
+	}
+}
+
+// ── GET /api/erp-bridge/credentials ──────────────────────────────────────────
+// Endpoint público (sem JWT) — autenticado via X-API-Key.
+// Usado pelo daemon Bridge para buscar credenciais criptografadas.
+
+func ERPBridgeCredentialsHandler(db *sql.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		apiKey := r.Header.Get("X-API-Key")
+		if apiKey == "" {
+			http.Error(w, "X-API-Key obrigatório", http.StatusUnauthorized)
+			return
+		}
+		hash := sha256.Sum256([]byte(apiKey))
+		hashHex := hex.EncodeToString(hash[:])
+		var fbtaxEmail, fbtaxPassword, oracleUsuario, oracleSenha sql.NullString
+		err := db.QueryRow(`
+			SELECT fbtax_email, fbtax_password, oracle_usuario, oracle_senha
+			FROM erp_bridge_config WHERE api_key_hash = $1
+		`, hashHex).Scan(&fbtaxEmail, &fbtaxPassword, &oracleUsuario, &oracleSenha)
+		if err == sql.ErrNoRows {
+			http.Error(w, "API key inválida", http.StatusUnauthorized)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result := map[string]string{
+			"fbtax_email":    "",
+			"fbtax_password": "",
+			"oracle_usuario": "",
+			"oracle_senha":   "",
+		}
+		if fbtaxEmail.Valid {
+			result["fbtax_email"] = fbtaxEmail.String
+		}
+		if fbtaxPassword.Valid && fbtaxPassword.String != "" {
+			result["fbtax_password"] = DecryptFieldWithFallback(fbtaxPassword.String)
+		}
+		if oracleUsuario.Valid && oracleUsuario.String != "" {
+			result["oracle_usuario"] = DecryptFieldWithFallback(oracleUsuario.String)
+		}
+		if oracleSenha.Valid && oracleSenha.String != "" {
+			result["oracle_senha"] = DecryptFieldWithFallback(oracleSenha.String)
+		}
+		json.NewEncoder(w).Encode(result)
+	})
 }
 
 // ── POST /api/erp-bridge/trigger ──────────────────────────────────────────────
