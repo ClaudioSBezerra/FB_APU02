@@ -83,10 +83,6 @@ function fmtBRL(v: number | null | undefined): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function fmtCNPJ(v: string): string {
-  if (!v || v.length !== 14) return v || '—';
-  return `${v.slice(0,2)}.${v.slice(2,5)}.${v.slice(5,8)}/${v.slice(8,12)}-${v.slice(12)}`;
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -307,51 +303,42 @@ export default function ImportarXMLsSaida() {
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Mod</TableHead>
-                    <TableHead>Série/Nº</TableHead>
-                    <TableHead>Data</TableHead>
-                    <TableHead>Emitente</TableHead>
-                    <TableHead>UF</TableHead>
-                    <TableHead>Destinatário</TableHead>
-                    <TableHead>Mun. IBGE</TableHead>
-                    <TableHead className="text-right">vProd</TableHead>
-                    <TableHead className="text-right">vNF</TableHead>
-                    <TableHead className="text-right">vBC / vICMS</TableHead>
-                    <TableHead className="text-right">vBCIBSCBS</TableHead>
-                    <TableHead className="text-right">vIBS</TableHead>
-                    <TableHead className="text-right">vCBS</TableHead>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="py-1.5 px-2 text-[11px] w-8">Mod</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px]">Emitente</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vNF</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {nfeList.map(row => (
                     <TableRow key={row.id}>
-                      <TableCell>
-                        <Badge variant="outline">{row.modelo}</Badge>
+                      <TableCell className="py-0.5 px-2 text-center">
+                        <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">
+                      <TableCell className="py-0.5 px-2 text-[11px] font-mono whitespace-nowrap">
                         {row.serie}/{row.numero_nfe}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap">{row.data_emissao}</TableCell>
-                      <TableCell>
-                        <div className="font-medium text-xs">{row.emit_nome}</div>
-                        <div className="text-muted-foreground text-xs">{fmtCNPJ(row.emit_cnpj)}</div>
+                      <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
+                      <TableCell className="py-0.5 px-2 max-w-[180px]">
+                        <div className="truncate text-[11px] font-medium" title={`${row.emit_uf} · ${row.emit_nome}`}>
+                          <span className="text-[10px] text-muted-foreground mr-1">{row.emit_uf}</span>
+                          {row.emit_nome}
+                        </div>
                       </TableCell>
-                      <TableCell>{row.emit_uf}</TableCell>
-                      <TableCell>
-                        <div className="text-xs">{row.dest_nome}</div>
-                        <div className="text-muted-foreground text-xs">{fmtCNPJ(row.dest_cnpj_cpf)}</div>
+                      <TableCell className="py-0.5 px-2 max-w-[180px]">
+                        <div className="truncate text-[11px]" title={`${row.dest_uf ?? ''} · ${row.dest_nome}`}>
+                          <span className="text-[10px] text-muted-foreground mr-1">{row.dest_uf}</span>
+                          {row.dest_nome}
+                        </div>
                       </TableCell>
-                      <TableCell className="text-xs">{row.dest_c_mun || '—'}</TableCell>
-                      <TableCell className="text-right text-xs">{fmtBRL(row.v_prod)}</TableCell>
-                      <TableCell className="text-right text-xs font-medium">{fmtBRL(row.v_nf)}</TableCell>
-                      <TableCell className="text-right text-xs">
-                        <div>{fmtBRL(row.v_bc)}</div>
-                        <div className="text-muted-foreground">{fmtBRL(row.v_icms)}</div>
-                      </TableCell>
-                      <TableCell className="text-right text-xs">{fmtBRL(row.v_bc_ibs_cbs)}</TableCell>
-                      <TableCell className="text-right text-xs">{fmtBRL(row.v_ibs)}</TableCell>
-                      <TableCell className="text-right text-xs">{fmtBRL(row.v_cbs)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtBRL(row.v_nf)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtBRL(row.v_ibs)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtBRL(row.v_cbs)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

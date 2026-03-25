@@ -82,10 +82,6 @@ function fmtBRL(v: number | null | undefined): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function fmtCNPJ(v: string): string {
-  if (!v || v.length !== 14) return v || '—';
-  return `${v.slice(0,2)}.${v.slice(2,5)}.${v.slice(5,8)}/${v.slice(8,12)}-${v.slice(12)}`;
-}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -302,48 +298,40 @@ export default function ImportarXMLsEntrada() {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="py-1.5 px-2 text-[11px]">Mod</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Série/Nº</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Data</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] w-8">Mod</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Fornecedor</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">UF</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vProd</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vNF</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vBC / vICMS</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vBCIBSCBS</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vNF</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {nfeList.map(row => (
-                    <TableRow key={row.id} className="h-8">
-                      <TableCell className="py-1 px-2 text-center">
+                    <TableRow key={row.id}>
+                      <TableCell className="py-0.5 px-2 text-center">
                         <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
                       </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap font-mono">
+                      <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap font-mono">
                         {row.serie}/{row.numero_nfe}
                       </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                      <TableCell className="py-1 px-2">
-                        <div className="text-[11px] font-medium leading-tight">{row.forn_nome}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono leading-tight">{fmtCNPJ(row.forn_cnpj)}</div>
+                      <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
+                      <TableCell className="py-0.5 px-2 max-w-[180px]">
+                        <div className="truncate text-[11px] font-medium" title={`${row.forn_uf} · ${row.forn_nome}`}>
+                          <span className="text-[10px] text-muted-foreground mr-1">{row.forn_uf}</span>
+                          {row.forn_nome}
+                        </div>
                       </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px]">{row.forn_uf}</TableCell>
-                      <TableCell className="py-1 px-2">
-                        <div className="text-[11px] leading-tight">{row.dest_nome}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono leading-tight">{fmtCNPJ(row.dest_cnpj_cpf)}</div>
+                      <TableCell className="py-0.5 px-2 max-w-[180px]">
+                        <div className="truncate text-[11px]" title={row.dest_nome}>
+                          {row.dest_nome}
+                        </div>
                       </TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">{fmtBRL(row.v_prod)}</TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px] font-semibold">{fmtBRL(row.v_nf)}</TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">
-                        <div>{fmtBRL(row.v_bc)}</div>
-                        <div className="text-[10px] text-muted-foreground">{fmtBRL(row.v_icms)}</div>
-                      </TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">{fmtBRL(row.v_bc_ibs_cbs)}</TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">{fmtBRL(row.v_ibs)}</TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">{fmtBRL(row.v_cbs)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtBRL(row.v_nf)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtBRL(row.v_ibs)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtBRL(row.v_cbs)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
