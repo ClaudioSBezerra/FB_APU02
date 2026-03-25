@@ -507,7 +507,14 @@ func main() {
 	http.HandleFunc("/api/erp-bridge/servidores",             withAuth(handlers.ERPBridgeServidoresHandler, ""))
 	http.HandleFunc("/api/erp-bridge/servidores/registrar",   withAuth(handlers.ERPBridgeRegistrarServidoresHandler, ""))
 	http.HandleFunc("/api/erp-bridge/config/generate-api-key", withAuth(handlers.ERPBridgeGenerateAPIKeyHandler, ""))
-	http.Handle("/api/erp-bridge/credentials",                handlers.ERPBridgeCredentialsHandler(db))
+	http.HandleFunc("/api/erp-bridge/credentials",            func(w http.ResponseWriter, r *http.Request) {
+		database := getDB()
+		if database == nil {
+			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
+			return
+		}
+		handlers.ERPBridgeCredentialsHandler(database).ServeHTTP(w, r)
+	})
 	http.HandleFunc("/api/erp-bridge/trigger",     withAuth(handlers.ERPBridgeTriggerHandler, ""))
 	http.HandleFunc("/api/erp-bridge/pending",     withAuth(handlers.ERPBridgePendingHandler, ""))
 	http.HandleFunc("/api/erp-bridge/runs",        withAuth(handlers.ERPBridgeRunsHandler, ""))
