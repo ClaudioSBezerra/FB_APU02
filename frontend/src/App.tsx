@@ -72,14 +72,18 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 // ── Barra de abas por módulo ─────────────────────────────────────────────────
 function ModuleTabs() {
   const location   = useLocation()
+  const { user }   = useAuth()
+  const isAdmin    = user?.role === 'admin'
   const moduleId   = getActiveModule(location.pathname)
   const moduleCfg  = modules[moduleId]
 
   if (!moduleCfg || moduleCfg.tabs.length === 0) return null
 
+  const visibleTabs = moduleCfg.tabs.filter(t => !t.adminOnly || isAdmin)
+
   return (
     <div className="border-b bg-white px-4 flex items-center gap-0.5 overflow-x-auto shrink-0 h-10">
-      {moduleCfg.tabs.map(tab => {
+      {visibleTabs.map(tab => {
         const isActive   = location.pathname === tab.path
         const isDisabled = tab.disabled
         return isDisabled ? (
