@@ -505,6 +505,7 @@ func main() {
 	// ERP Bridge — agendamento e histórico de execuções
 	http.HandleFunc("/api/erp-bridge/config",      withAuth(handlers.ERPBridgeConfigHandler, ""))
 	http.HandleFunc("/api/erp-bridge/servidores",  withAuth(handlers.ERPBridgeServidoresHandler, ""))
+	http.HandleFunc("/api/erp-bridge/servidores/registrar", withAuth(handlers.ERPBridgeRegistrarServidoresHandler, ""))
 	http.HandleFunc("/api/erp-bridge/trigger",     withAuth(handlers.ERPBridgeTriggerHandler, ""))
 	http.HandleFunc("/api/erp-bridge/pending",     withAuth(handlers.ERPBridgePendingHandler, ""))
 	http.HandleFunc("/api/erp-bridge/runs",        withAuth(handlers.ERPBridgeRunsHandler, ""))
