@@ -173,8 +173,9 @@ FONTES = {
 class FBTaxClient:
     def __init__(self, cfg: dict):
         self.base_url   = cfg["url"].rstrip("/")
-        self.email      = cfg["email"]
-        self.password   = cfg["password"]
+        self.email      = cfg.get("email", "")
+        self.password   = cfg.get("password", "")
+        self.api_key    = cfg.get("api_key", "")
         self.company_id = cfg.get("company_id", "")
         self.token      = None
         self.session    = requests.Session()
@@ -217,6 +218,24 @@ class FBTaxClient:
                 return resp.json()
         except Exception as exc:
             log.warning("Nao foi possivel obter config bridge: %s", exc)
+        return None
+
+    def fetch_credentials(self) -> dict | None:
+        """Busca credenciais criptografadas do servidor via api_key.
+        Retorna dict com fbtax_email, fbtax_password, oracle_usuario, oracle_senha ou None."""
+        if not self.api_key:
+            return None
+        try:
+            resp = requests.get(
+                f"{self.base_url}/api/erp-bridge/credentials",
+                headers={"X-API-Key": self.api_key},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            log.warning("fetch_credentials HTTP %d", resp.status_code)
+        except Exception as exc:
+            log.warning("Nao foi possivel buscar credenciais: %s", exc)
         return None
 
     def registrar_servidores(self, nomes: list) -> None:
@@ -744,6 +763,24 @@ def main() -> int:
 
     # Modo daemon — não precisa de datas, as busca da API a cada ciclo
     if args.daemon:
+        # Se api_key configurada, busca credenciais do banco (sem login prévio)
+        if fbtax.api_key:
+            creds = fbtax.fetch_credentials()
+            if creds:
+                if creds.get("fbtax_email"):
+                    fbtax.email = creds["fbtax_email"]
+                if creds.get("fbtax_password"):
+                    fbtax.password = creds["fbtax_password"]
+                # Propaga credenciais Oracle para todos os servidores
+                if creds.get("oracle_usuario") or creds.get("oracle_senha"):
+                    for srv in cfg.get("servidores", []):
+                        if creds.get("oracle_usuario"):
+                            srv["usuario"] = creds["oracle_usuario"]
+                        if creds.get("oracle_senha"):
+                            srv["senha"] = creds["oracle_senha"]
+                log.info("Credenciais carregadas do servidor FBTax.")
+            else:
+                log.warning("api_key configurada mas nao foi possivel buscar credenciais. Usando config.yaml.")
         try:
             fbtax.login()
         except Exception as exc:
