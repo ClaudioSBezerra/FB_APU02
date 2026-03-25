@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, FileText, Copy, Check } from 'lucide-react';
+import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCNPJMasked } from '@/lib/formatFilial';
 
@@ -81,15 +81,6 @@ async function openDanfe(chave: string, token: string | null, companyId: string 
   if (!win) toast.warning('Permita popups para visualizar o DACTE.');
 }
 
-function CopyChaveButton({ chave }: { chave: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button title="Copiar chave" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(chave); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      className="text-muted-foreground hover:text-foreground transition-colors">
-      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-    </button>
-  );
-}
 
 // ── Paginação ─────────────────────────────────────────────────────────────────
 function Pagination({ page, pageCount, onChange }: { page: number; pageCount: number; onChange: (p: number) => void }) {
@@ -397,19 +388,14 @@ export default function ConsultaCTesEntradas() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Transportadora</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Transportadora / UF</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Transportadora</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Remetente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Data</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Série</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Nº CT-e</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Modal</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right">vPrest</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] font-mono">Chave Eletrônica</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">DACTE</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Modal</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vPrest</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center w-12">DACTE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -417,40 +403,34 @@ export default function ConsultaCTesEntradas() {
                       const semCredito = (row.v_ibs == null || row.v_ibs === 0) && (row.v_cbs == null || row.v_cbs === 0);
                       return (
                         <TableRow key={row.id}
-                          className={`cursor-pointer hover:bg-muted/50 h-8 ${semCredito ? 'bg-orange-50/50 dark:bg-orange-950/10' : ''}`}
+                          className={`cursor-pointer hover:bg-muted/50 ${semCredito ? 'bg-orange-50/50 dark:bg-orange-950/10' : ''}`}
                           onClick={() => setSelected(row)}>
-                          <TableCell className="py-0.5 px-2 font-mono text-[11px]">{fmtCNPJ(row.emit_cnpj)}</TableCell>
-                          <TableCell className="py-0.5 px-2">
-                            <div className="text-[11px] font-medium leading-tight">{row.emit_nome || '—'}</div>
-                            <div className="text-[10px] text-muted-foreground leading-tight">{row.emit_uf}</div>
-                          </TableCell>
-                          <TableCell className="py-0.5 px-2">
-                            <div className="text-[11px] leading-tight">{row.rem_nome || '—'}</div>
-                            <div className="text-[10px] text-muted-foreground font-mono leading-tight">{row.rem_uf}</div>
-                          </TableCell>
-                          <TableCell className="py-0.5 px-2">
-                            <div className="text-[11px] leading-tight">{row.dest_nome || '—'}</div>
-                            <div className="text-[10px] text-muted-foreground font-mono leading-tight">{row.dest_uf}</div>
+                          <TableCell className="py-0.5 px-2 text-[11px] font-mono whitespace-nowrap">
+                            {row.serie}/{row.numero_cte}
                           </TableCell>
                           <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-center">{row.serie}</TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{row.numero_cte}</TableCell>
-                          <TableCell className="py-0.5 px-2">
-                            <Badge variant="outline" className="text-[10px] px-1 py-0">{fmtModal(row.modal)}</Badge>
-                          </TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold">{fmtBRL(row.v_prest)}</TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-right">
-                            {row.v_ibs != null ? fmtBRL(row.v_ibs) : <span className="text-orange-500 font-medium">—</span>}
-                          </TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-right">
-                            {row.v_cbs != null ? fmtBRL(row.v_cbs) : <span className="text-orange-500 font-medium">—</span>}
-                          </TableCell>
-                          <TableCell className="py-0.5 px-2 font-mono text-[10px] max-w-[160px]" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center gap-1">
-                              <span className="truncate">{row.chave_cte}</span>
-                              <CopyChaveButton chave={row.chave_cte} />
+                          <TableCell className="py-0.5 px-2 max-w-[160px]">
+                            <div className="truncate text-[11px] font-medium" title={`${fmtCNPJ(row.emit_cnpj)} · ${row.emit_nome}`}>
+                              <span className="text-[10px] text-muted-foreground mr-1">{row.emit_uf}</span>
+                              {row.emit_nome || fmtCNPJ(row.emit_cnpj)}
                             </div>
                           </TableCell>
+                          <TableCell className="py-0.5 px-2 max-w-[150px]">
+                            <div className="truncate text-[11px]" title={`${row.rem_uf} · ${row.rem_nome}`}>
+                              <span className="text-[10px] text-muted-foreground mr-1">{row.rem_uf}</span>
+                              {row.rem_nome || '—'}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-0.5 px-2 max-w-[150px]">
+                            <div className="truncate text-[11px]" title={`${row.dest_uf} · ${row.dest_nome}`}>
+                              <span className="text-[10px] text-muted-foreground mr-1">{row.dest_uf}</span>
+                              {row.dest_nome || formatCNPJMasked(row.dest_cnpj_cpf)}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-0.5 px-2 text-center">
+                            <Badge variant="outline" className="text-[10px] px-1 py-0">{fmtModal(row.modal)}</Badge>
+                          </TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">{fmtBRL(row.v_prest)}</TableCell>
                           <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
                             <button title="Gerar DACTE"
                               onClick={() => openDanfe(row.chave_cte, token, companyId)}
