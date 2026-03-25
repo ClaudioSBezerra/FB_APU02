@@ -88,6 +88,7 @@ const sections: NavSection[] = [
       { title: "Gestores de Relatórios",  url: "/config/gestores",          icon: Users },
       { title: "Gestão de Ambiente",      url: "/config/ambiente",          icon: Building },
       { title: "Credenciais API RFB",     url: "/rfb/credenciais",          icon: KeyRound, adminOnly: true },
+      { title: "Credenciais ERP Bridge",  url: "/config/erp-bridge",        icon: KeyRound, adminOnly: true },
       { title: "Gestão de Usuários",      url: "/config/usuarios",          icon: Users, adminOnly: true },
     ],
   },

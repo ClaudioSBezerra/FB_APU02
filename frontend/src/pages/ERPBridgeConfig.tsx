@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap, Ban, Trash2, KeyRound, Eye, EyeOff, Copy } from 'lucide-react';
+import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap, Ban, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BridgeConfig {
@@ -133,15 +133,6 @@ export default function ERPBridgeConfig() {
   const [horario, setHorario] = useState('02:00');
   const [diasRetro, setDiasRetro] = useState(1);
 
-  // ── Estado: credenciais ───────────────────────────────────────────────────
-  const [fbtaxEmail, setFbtaxEmail]       = useState('');
-  const [fbtaxPassword, setFbtaxPassword] = useState('');
-  const [oracleUsuario, setOracleUsuario] = useState('');
-  const [oracleSenha, setOracleSenha]     = useState('');
-  const [apiKey, setApiKey]               = useState('');
-  const [showFbtaxPwd, setShowFbtaxPwd]   = useState(false);
-  const [showOraclePwd, setShowOraclePwd] = useState(false);
-  const [showApiKey, setShowApiKey]       = useState(false);
 
   // ── Estado: trigger manual ────────────────────────────────────────────────
   const [triggerIni, setTriggerIni]               = useState(firstDayOfPrevMonth);
@@ -155,9 +146,6 @@ export default function ERPBridgeConfig() {
       setAtivo(cfg.ativo);
       setHorario(cfg.horario);
       setDiasRetro(cfg.dias_retroativos);
-      setFbtaxEmail(cfg.fbtax_email || '');
-      setOracleUsuario(cfg.oracle_usuario || '');
-      setApiKey(cfg.api_key || '');
     }
   }, [cfg]);
 
@@ -223,45 +211,6 @@ export default function ERPBridgeConfig() {
       qc.invalidateQueries({ queryKey: ['erp-bridge-config', companyId] });
     },
     onError: (e: Error) => toast.error(`Erro ao salvar: ${e.message}`),
-  });
-
-  const saveCredentialsMutation = useMutation({
-    mutationFn: async () => {
-      const body: Record<string, string> = { fbtax_email: fbtaxEmail, oracle_usuario: oracleUsuario };
-      if (fbtaxPassword)  body.fbtax_password = fbtaxPassword;
-      if (oracleSenha)    body.oracle_senha   = oracleSenha;
-      const res = await fetch('/api/erp-bridge/config', {
-        method: 'PATCH',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(await res.text());
-    },
-    onSuccess: () => {
-      setFbtaxPassword('');
-      setOracleSenha('');
-      toast.success('Credenciais salvas com segurança.');
-      qc.invalidateQueries({ queryKey: ['erp-bridge-config', companyId] });
-    },
-    onError: (e: Error) => toast.error(`Erro ao salvar credenciais: ${e.message}`),
-  });
-
-  const generateApiKeyMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch('/api/erp-bridge/config/generate-api-key', {
-        method: 'POST',
-        headers: authHeaders,
-      });
-      if (!res.ok) throw new Error(await res.text());
-      return res.json() as Promise<{ api_key: string }>;
-    },
-    onSuccess: (data) => {
-      setApiKey(data.api_key);
-      setShowApiKey(true);
-      toast.success('Nova API key gerada. Copie e atualize o config.yaml no servidor.');
-      qc.invalidateQueries({ queryKey: ['erp-bridge-config', companyId] });
-    },
-    onError: (e: Error) => toast.error(`Erro ao gerar API key: ${e.message}`),
   });
 
   const resetTrackerMutation = useMutation({
@@ -573,123 +522,6 @@ export default function ERPBridgeConfig() {
                 ✓ Importação agendada — aguardando o daemon Bridge...
               </span>
             )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Credenciais */}
-      <Card>
-        <CardHeader className="py-3 px-4">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <KeyRound className="h-4 w-4" /> Credenciais (armazenadas criptografadas)
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 pb-4 space-y-4">
-          <p className="text-[11px] text-muted-foreground">
-            As senhas são criptografadas com AES-256 antes de serem salvas. O daemon Bridge
-            busca as credenciais automaticamente — remova <code className="font-mono text-[10px]">email</code>,{' '}
-            <code className="font-mono text-[10px]">password</code> e <code className="font-mono text-[10px]">senha</code> do{' '}
-            <code className="font-mono text-[10px]">config.yaml</code> após configurar.
-          </p>
-
-          {/* FBTax */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">FBTax</p>
-            <div className="flex flex-wrap gap-3">
-              <div className="flex flex-col gap-1 flex-1 min-w-48">
-                <label className="text-xs text-muted-foreground">E-mail</label>
-                <Input value={fbtaxEmail} onChange={e => setFbtaxEmail(e.target.value)}
-                  className="h-8 text-sm" placeholder="usuario@empresa.com.br" />
-              </div>
-              <div className="flex flex-col gap-1 flex-1 min-w-48">
-                <label className="text-xs text-muted-foreground">
-                  Senha {cfg?.fbtax_password_set && <span className="text-green-600 ml-1">✓ configurada</span>}
-                </label>
-                <div className="relative">
-                  <Input type={showFbtaxPwd ? 'text' : 'password'}
-                    value={fbtaxPassword} onChange={e => setFbtaxPassword(e.target.value)}
-                    className="h-8 text-sm pr-8" placeholder={cfg?.fbtax_password_set ? '••••••••' : 'Nova senha'} />
-                  <button type="button" onClick={() => setShowFbtaxPwd(v => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                    {showFbtaxPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Oracle */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Oracle ERP</p>
-            <div className="flex flex-wrap gap-3">
-              <div className="flex flex-col gap-1 flex-1 min-w-36">
-                <label className="text-xs text-muted-foreground">Usuário</label>
-                <Input value={oracleUsuario} onChange={e => setOracleUsuario(e.target.value)}
-                  className="h-8 text-sm" placeholder="fcosta" />
-              </div>
-              <div className="flex flex-col gap-1 flex-1 min-w-36">
-                <label className="text-xs text-muted-foreground">
-                  Senha {cfg?.oracle_senha_set && <span className="text-green-600 ml-1">✓ configurada</span>}
-                </label>
-                <div className="relative">
-                  <Input type={showOraclePwd ? 'text' : 'password'}
-                    value={oracleSenha} onChange={e => setOracleSenha(e.target.value)}
-                    className="h-8 text-sm pr-8" placeholder={cfg?.oracle_senha_set ? '••••••••' : 'Nova senha'} />
-                  <button type="button" onClick={() => setShowOraclePwd(v => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                    {showOraclePwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* API Key */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">API Key do Daemon</p>
-            <div className="flex gap-2 items-end">
-              <div className="flex flex-col gap-1 flex-1">
-                <label className="text-xs text-muted-foreground">
-                  Chave — copie para o <code className="font-mono text-[10px]">config.yaml</code>
-                </label>
-                <div className="relative">
-                  <Input readOnly
-                    type={showApiKey ? 'text' : 'password'}
-                    value={apiKey || ''}
-                    className="h-8 text-sm font-mono pr-16"
-                    placeholder={apiKey ? undefined : 'Clique em Gerar para criar a chave'} />
-                  <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-1">
-                    <button type="button" onClick={() => setShowApiKey(v => !v)}
-                      className="text-muted-foreground hover:text-foreground p-1">
-                      {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </button>
-                    {apiKey && (
-                      <button type="button"
-                        onClick={() => { navigator.clipboard.writeText(apiKey); toast.success('Chave copiada!'); }}
-                        className="text-muted-foreground hover:text-foreground p-1" title="Copiar">
-                        <Copy className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <Button size="sm" variant="outline" className="h-8 text-xs shrink-0"
-                onClick={() => generateApiKeyMutation.mutate()}
-                disabled={generateApiKeyMutation.isPending}>
-                {generateApiKeyMutation.isPending
-                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                  : <><KeyRound className="h-3 w-3 mr-1" />{apiKey ? 'Regenerar' : 'Gerar chave'}</>
-                }
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-1">
-            <Button size="sm" onClick={() => saveCredentialsMutation.mutate()}
-              disabled={saveCredentialsMutation.isPending}>
-              {saveCredentialsMutation.isPending && <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />}
-              Salvar credenciais
-            </Button>
           </div>
         </CardContent>
       </Card>
