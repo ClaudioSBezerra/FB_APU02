@@ -21,6 +21,7 @@ import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import ConsultaCTesEntradas from './pages/ConsultaCTesEntradas'
 import ERPBridgeConfig from './pages/ERPBridgeConfig'
 import ERPBridgeLogs from './pages/ERPBridgeLogs'
+import ERPBridgeCredenciais from './pages/ERPBridgeCredenciais'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
 import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
@@ -152,6 +153,7 @@ function AppLayout() {
               <Route path="/config/ambiente"        element={<ProtectedRoute><GestaoAmbiente /></ProtectedRoute>} />
               <Route path="/config/usuarios"        element={<AdminRoute><AdminUsers /></AdminRoute>} />
               <Route path="/config/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
+              <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
               <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
 
               {/* Importações */}
