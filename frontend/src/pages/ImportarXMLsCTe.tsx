@@ -85,10 +85,6 @@ function fmtBRL(v: number | null | undefined): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-function fmtCNPJ(v: string): string {
-  if (!v || v.length !== 14) return v || '—';
-  return `${v.slice(0,2)}.${v.slice(2,5)}.${v.slice(5,8)}/${v.slice(8,12)}-${v.slice(12)}`;
-}
 
 const MODAL_LABELS: Record<string, string> = {
   '01': 'Rodoviário',
@@ -321,50 +317,50 @@ export default function ImportarXMLsCTe() {
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="py-1.5 px-2 text-[11px]">Modal</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Série/Nº</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Data</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Transportadora</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">UF</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Remetente</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vPrest</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vICMS</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-center">Modal</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vPrest</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {cteList.map(row => (
-                    <TableRow key={row.id} className="h-8">
-                      <TableCell className="py-1 px-2 text-center">
+                    <TableRow key={row.id}>
+                      <TableCell className="py-0.5 px-2 text-[11px] font-mono whitespace-nowrap">
+                        {row.serie}/{row.numero_cte}
+                      </TableCell>
+                      <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
+                      <TableCell className="py-0.5 px-2 max-w-[160px]">
+                        <div className="truncate text-[11px] font-medium" title={`${row.emit_uf} · ${row.emit_nome}`}>
+                          <span className="text-[10px] text-muted-foreground mr-1">{row.emit_uf}</span>
+                          {row.emit_nome || '—'}
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-0.5 px-2 max-w-[150px]">
+                        <div className="truncate text-[11px]" title={row.rem_nome}>
+                          {row.rem_nome || '—'}
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-0.5 px-2 max-w-[150px]">
+                        <div className="truncate text-[11px]" title={row.dest_nome}>
+                          {row.dest_nome || '—'}
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-0.5 px-2 text-center">
                         <Badge variant="outline" className="text-[10px] px-1 py-0 whitespace-nowrap">
                           {fmtModal(row.modal)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap font-mono">
-                        {row.serie}/{row.numero_cte}
-                      </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                      <TableCell className="py-1 px-2">
-                        <div className="text-[11px] font-medium leading-tight">{row.emit_nome || '—'}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono leading-tight">{fmtCNPJ(row.emit_cnpj)}</div>
-                      </TableCell>
-                      <TableCell className="py-1 px-2 text-[11px]">{row.emit_uf || '—'}</TableCell>
-                      <TableCell className="py-1 px-2">
-                        <div className="text-[11px] leading-tight">{row.rem_nome || '—'}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono leading-tight">{fmtCNPJ(row.rem_cnpj_cpf)}</div>
-                      </TableCell>
-                      <TableCell className="py-1 px-2">
-                        <div className="text-[11px] leading-tight">{row.dest_nome || '—'}</div>
-                        <div className="text-[10px] text-muted-foreground font-mono leading-tight">{fmtCNPJ(row.dest_cnpj_cpf)}</div>
-                      </TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px] font-semibold">{fmtBRL(row.v_prest)}</TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">{fmtBRL(row.v_icms)}</TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">
+                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtBRL(row.v_prest)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">
                         {row.v_ibs != null ? fmtBRL(row.v_ibs) : <span className="text-muted-foreground">—</span>}
                       </TableCell>
-                      <TableCell className="py-1 px-2 text-right text-[11px]">
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">
                         {row.v_cbs != null ? fmtBRL(row.v_cbs) : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                     </TableRow>
