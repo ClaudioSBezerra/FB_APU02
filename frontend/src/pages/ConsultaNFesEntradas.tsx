@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, AlertTriangle, ChevronLeft, ChevronRight, FileText, Copy, Check } from 'lucide-react';
+import { X, AlertTriangle, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
 import { formatCnpjComApelido, formatCNPJMasked } from '@/lib/formatFilial';
 import { toast } from 'sonner';
 
@@ -82,15 +82,6 @@ async function openDanfe(chave: string, token: string | null, companyId: string 
   if (!win) toast.warning('Permita popups para visualizar o DANFE.');
 }
 
-function CopyChaveButton({ chave }: { chave: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button title="Copiar chave" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(chave); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-      className="text-muted-foreground hover:text-foreground transition-colors">
-      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
-    </button>
-  );
-}
 
 // ── Paginação ─────────────────────────────────────────────────────────────────
 function Pagination({ page, pageCount, onChange }: { page: number; pageCount: number; onChange: (p: number) => void }) {
@@ -401,42 +392,37 @@ export default function ConsultaNFesEntradas() {
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Fornecedor</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Fornecedor / UF</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Destinatário (Filial)</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Data</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Série</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Nº Nota</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right">Valor Total</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] font-mono">Chave Eletrônica</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">DANFE</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] w-8">Mod</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Fornecedor</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Filial (Dest.)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">Valor Total</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center w-12">DANFE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {items.map(row => (
-                      <TableRow key={row.id} className="cursor-pointer hover:bg-muted/50 h-8" onClick={() => setSelected(row)}>
-                        <TableCell className="py-0.5 px-2 font-mono text-[11px]">{fmtCNPJ(row.forn_cnpj)}</TableCell>
-                        <TableCell className="py-0.5 px-2">
-                          <div className="text-[11px] font-medium leading-tight">{row.forn_nome || '—'}</div>
-                          <div className="text-[10px] text-muted-foreground leading-tight">{row.forn_uf}</div>
-                        </TableCell>
-                        <TableCell className="py-0.5 px-2">
-                          <div className="text-[11px] font-medium leading-tight">{formatCnpjComApelido(row.dest_cnpj_cpf, apelidos)}</div>
-                        </TableCell>
-                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                        <TableCell className="py-0.5 px-2 text-[11px] text-center">{row.serie}</TableCell>
-                        <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{row.numero_nfe}</TableCell>
+                      <TableRow key={row.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelected(row)}>
                         <TableCell className="py-0.5 px-2 text-center">
                           <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
                         </TableCell>
-                        <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold">{fmtBRL(row.v_nf)}</TableCell>
-                        <TableCell className="py-0.5 px-2 font-mono text-[10px] max-w-[160px]" onClick={e => e.stopPropagation()}>
-                          <div className="flex items-center gap-1">
-                            <span className="truncate">{row.chave_nfe}</span>
-                            <CopyChaveButton chave={row.chave_nfe} />
+                        <TableCell className="py-0.5 px-2 text-[11px] font-mono whitespace-nowrap">
+                          {row.serie}/{row.numero_nfe}
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
+                        <TableCell className="py-0.5 px-2 max-w-[180px]">
+                          <div className="truncate text-[11px] font-medium" title={`${fmtCNPJ(row.forn_cnpj)} · ${row.forn_nome}`}>
+                            <span className="text-[10px] text-muted-foreground mr-1">{row.forn_uf}</span>
+                            {row.forn_nome || fmtCNPJ(row.forn_cnpj)}
                           </div>
                         </TableCell>
+                        <TableCell className="py-0.5 px-2 max-w-[180px]">
+                          <div className="truncate text-[11px]" title={row.dest_cnpj_cpf}>
+                            {formatCnpjComApelido(row.dest_cnpj_cpf, apelidos)}
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">{fmtBRL(row.v_nf)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
                           <button title="Gerar DANFE"
                             onClick={() => openDanfe(row.chave_nfe, token, companyId)}
