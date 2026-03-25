@@ -3,6 +3,7 @@ export interface ModuleTab {
   path: string
   disabled?: boolean
   danger?: boolean
+  adminOnly?: boolean
 }
 
 export interface ModuleConfig {
@@ -71,9 +72,10 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Apelidos Filiais', path: '/config/apelidos-filiais' },
       { label: 'Gestores',         path: '/config/gestores' },
       { label: 'Ambiente',         path: '/config/ambiente' },
-      { label: 'Credenciais RFB',  path: '/rfb/credenciais' },
-      { label: 'Usuários',         path: '/config/usuarios' },
-      { label: 'Limpar Dados',     path: '/config/limpar-dados', danger: true },
+      { label: 'Credenciais RFB',    path: '/rfb/credenciais',    adminOnly: true },
+      { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',  adminOnly: true },
+      { label: 'Usuários',          path: '/config/usuarios',    adminOnly: true },
+      { label: 'Limpar Dados',      path: '/config/limpar-dados', danger: true, adminOnly: true },
     ],
   },
 }
