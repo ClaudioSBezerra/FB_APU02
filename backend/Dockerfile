@@ -1,4 +1,4 @@
-# Build Stage
+# Build Stage — cache bust: 2026-03-25b
 FROM golang:1.22-alpine AS builder
 RUN apk add --no-cache git
 WORKDIR /app
