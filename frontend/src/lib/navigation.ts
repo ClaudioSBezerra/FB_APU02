@@ -17,11 +17,12 @@ export const modules: Record<string, ModuleConfig> = {
     tabs: [],
   },
   notas: {
-    label: 'Notas Fiscais',
+    label: 'Notas Importadas',
     tabs: [
       { label: 'NF-e Saídas',    path: '/apuracao/saida/notas' },
       { label: 'NF-e Entradas',  path: '/apuracao/entrada/notas' },
       { label: 'CT-e Entradas',  path: '/apuracao/cte-entrada/notas' },
+      { label: 'NFS-e Saídas',   path: '#', disabled: true },
     ],
   },
   apuracao: {

@@ -31,7 +31,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 const mainItems = [
-  { id: 'notas',       icon: FileText,         label: 'Notas Fiscais',    path: '/apuracao/saida/notas' },
+  { id: 'notas',       icon: FileText,         label: 'Notas Importadas', path: '/apuracao/saida/notas' },
   { id: 'apuracao',    icon: Calculator,       label: 'Apuração IBS/CBS', path: '/apuracao/creditos-perdidos' },
   { id: 'rfb',         icon: Landmark,         label: 'Receita Federal',  path: '/rfb/gestao-creditos' },
   { id: 'malha',       icon: Telescope,        label: 'Malha Fina',       path: '/malha-fina/nfe-entradas' },

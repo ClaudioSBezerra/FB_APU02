@@ -242,9 +242,7 @@ export default function ConsultaNFeSaidas() {
       if (filterDataAte)      params.set('data_ate',  filterDataAte);
       if (clienteDebounced) {
         const digits = clienteDebounced.replace(/\D/g, '');
-        if (digits && digits === clienteDebounced.replace(/[.\-/]/g, '').replace(/\s/g, '')) {
-          params.set('dest_cnpj', digits);
-        }
+        if (digits) params.set('dest_cnpj', digits);
       }
       const res = await fetch(`/api/nfe-saidas?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
@@ -263,7 +261,8 @@ export default function ConsultaNFeSaidas() {
 
   function clearFilters() {
     setFilterFilial(''); setFilterModelo('');
-    setFilterCliente(''); setFilterDataDe(''); setFilterDataAte('');
+    setFilterCliente(''); setClienteDebounced('');
+    setFilterDataDe(''); setFilterDataAte('');
     setPage(1);
   }
 
