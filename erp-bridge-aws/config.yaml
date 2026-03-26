@@ -3,9 +3,14 @@
 # ATENÇÃO: Não compartilhe este arquivo (contém senhas)
 # ============================================================
 
+# ── Modo de integração ERP ───────────────────────────────────
+# oracle_xml  : leitura individual por filial (legado)
+# sap_s4hana  : leitura centralizada no SAP S/4HANA (FCCORP)
+erp_type: sap_s4hana
+
 # ── FBTax Apuração Assistida (servidor cliente AWS) ─────────
 fbtax:
-  url:        http://172.16.249.77:3006
+  url:        https://fctax.fcxlabs.com
   email:      claudio.bezerra@ferreiracosta.com.br
   password:   "Proxy#6939"
   company_id: "95c3d8fa-ff19-45c0-884b-a4f09fd395bd"
@@ -13,106 +18,112 @@ fbtax:
 # ── Período padrão ao rodar sem --data ──────────────────────
 dias_padrao: 1
 
-# ── Servidores Oracle Ferreira Costa ────────────────────────
-# DSNs em formato host:porta/service_name (thin mode, sem Oracle Client)
+# ── Oracle SAP S/4HANA (FCCORP) — usado quando erp_type = sap_s4hana ──
+oracle:
+  nome:    "FC - FCCORP (SAP S/4HANA)"
+  dsn:     "PLACEHOLDER_HOST:1521/FCCORP"
+  usuario: "PLACEHOLDER_USER"
+  senha:   "PLACEHOLDER_SENHA"
 
-servidores:
-
-  - nome: "FC - Aracaju"
-    dsn:     "10.135.1.111:1521/fcaju"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Salvador"
-    dsn:     "10.133.1.111:1521/fcsal"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Imbiribeira"
-    dsn:     "10.131.1.117:1521/fcimb"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Tamarineira"
-    dsn:     "10.134.1.111:1521/fctam"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Alhandra"
-    dsn:     "10.136.1.111:1521/fcalh"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Barris"
-    dsn:     "10.139.1.111:1521/fcbar"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Cabedelo"
-    dsn:     "10.131.1.117:1521/fccab"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Caruaru"
-    dsn:     "10.138.1.111:1521/fccau"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Garanhuns"
-    dsn:     "10.132.1.111:1521/fcgus"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Lauro"
-    dsn:     "10.139.1.111:1521/fclau"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
-
-  - nome: "FC - Natal"
-    dsn:     "10.137.1.111:1521/fcnat"
-    usuario: "fcosta"
-    senha:   "fcosta2013"
-    tipos:
-      - nfe_saidas
-      - nfe_entradas
-      - cte_entradas
+# ── Servidores Oracle Ferreira Costa (legado oracle_xml) ─────
+# Usado apenas quando erp_type = oracle_xml
+# servidores:
+#
+#   - nome: "FC - Aracaju"
+#     dsn:     "10.135.1.111:1521/fcaju"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Salvador"
+#     dsn:     "10.133.1.111:1521/fcsal"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Imbiribeira"
+#     dsn:     "10.131.1.117:1521/fcimb"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Tamarineira"
+#     dsn:     "10.134.1.111:1521/fctam"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Alhandra"
+#     dsn:     "10.136.1.111:1521/fcalh"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Barris"
+#     dsn:     "10.139.1.111:1521/fcbar"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Cabedelo"
+#     dsn:     "10.131.1.117:1521/fccab"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Caruaru"
+#     dsn:     "10.138.1.111:1521/fccau"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Garanhuns"
+#     dsn:     "10.132.1.111:1521/fcgus"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Lauro"
+#     dsn:     "10.139.1.111:1521/fclau"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
+#
+#   - nome: "FC - Natal"
+#     dsn:     "10.137.1.111:1521/fcnat"
+#     usuario: "fcosta"
+#     senha:   "fcosta2013"
+#     tipos:
+#       - nfe_saidas
+#       - nfe_entradas
+#       - cte_entradas
