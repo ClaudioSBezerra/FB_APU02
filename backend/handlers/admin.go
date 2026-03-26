@@ -17,8 +17,8 @@ type ResetCompanyDataRequest struct {
 	CompanyID string `json:"company_id"`
 }
 
-// LimparDadosApuracaoHandler deletes IBS/CBS XML import data for the active company (admin only).
-// Clears: nfe_saidas, nfe_entradas, cte_entradas, dfe_xml. RFB imports are preserved.
+// LimparDadosApuracaoHandler deletes IBS/CBS import data for the active company (admin only).
+// Clears: nfe_saidas, nfe_entradas, cte_entradas. RFB imports are preserved.
 func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -53,7 +53,7 @@ func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		}
 		results := []tableResult{}
 
-		tables := []string{"nfe_saidas", "nfe_entradas", "cte_entradas", "dfe_xml"}
+		tables := []string{"nfe_saidas", "nfe_entradas", "cte_entradas"}
 		for _, t := range tables {
 			res, err := db.Exec("DELETE FROM "+t+" WHERE company_id = $1", companyID)
 			if err != nil {
