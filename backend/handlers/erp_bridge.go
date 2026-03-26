@@ -452,6 +452,10 @@ func ERPBridgeServidoresHandler(db *sql.DB) http.HandlerFunc {
 			  FROM erp_bridge_run_items i
 			  JOIN erp_bridge_runs r ON r.id = i.run_id
 			  WHERE r.company_id = $1
+			  UNION
+			  SELECT 'FCCORP' AS nome
+			  FROM erp_bridge_config
+			  WHERE company_id = $1 AND COALESCE(erp_type,'oracle_xml') = 'sap_s4hana'
 			) t ORDER BY nome
 		`, companyID)
 		if err != nil {
