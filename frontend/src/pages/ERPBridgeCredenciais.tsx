@@ -4,12 +4,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, KeyRound, Eye, EyeOff, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BridgeConfig {
+  erp_type: string;
   fbtax_email: string;
   fbtax_password_set: boolean;
+  oracle_dsn: string;
   oracle_usuario: string;
   oracle_senha_set: boolean;
   api_key: string;
@@ -30,8 +33,10 @@ export default function ERPBridgeCredenciais() {
     enabled: !!token && !!companyId,
   });
 
+  const [erpType, setErpType]             = useState('oracle_xml');
   const [fbtaxEmail, setFbtaxEmail]       = useState('');
   const [fbtaxPassword, setFbtaxPassword] = useState('');
+  const [oracleDsn, setOracleDsn]         = useState('');
   const [oracleUsuario, setOracleUsuario] = useState('');
   const [oracleSenha, setOracleSenha]     = useState('');
   const [apiKey, setApiKey]               = useState('');
@@ -41,7 +46,9 @@ export default function ERPBridgeCredenciais() {
 
   useEffect(() => {
     if (cfg) {
+      setErpType(cfg.erp_type || 'oracle_xml');
       setFbtaxEmail(cfg.fbtax_email || '');
+      setOracleDsn(cfg.oracle_dsn || '');
       setOracleUsuario(cfg.oracle_usuario || '');
       setApiKey(cfg.api_key || '');
     }
@@ -49,7 +56,12 @@ export default function ERPBridgeCredenciais() {
 
   const saveCredentialsMutation = useMutation({
     mutationFn: async () => {
-      const body: Record<string, string> = { fbtax_email: fbtaxEmail, oracle_usuario: oracleUsuario };
+      const body: Record<string, string> = {
+        erp_type: erpType,
+        fbtax_email: fbtaxEmail,
+        oracle_dsn: oracleDsn,
+        oracle_usuario: oracleUsuario,
+      };
       if (fbtaxPassword)  body.fbtax_password = fbtaxPassword;
       if (oracleSenha)    body.oracle_senha   = oracleSenha;
       const res = await fetch('/api/erp-bridge/config', {
@@ -114,6 +126,32 @@ export default function ERPBridgeCredenciais() {
             <code className="font-mono text-[10px]">senha</code> do{' '}
             <code className="font-mono text-[10px]">config.yaml</code> após configurar.
           </p>
+
+          {/* Tipo de ERP */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tipo de ERP</p>
+            <div className="flex flex-wrap gap-3">
+              <div className="flex flex-col gap-1 flex-1 min-w-48">
+                <label className="text-xs text-muted-foreground">Modo de integração</label>
+                <Select value={erpType} onValueChange={setErpType}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="oracle_xml" className="text-xs">Oracle XML (legado)</SelectItem>
+                    <SelectItem value="sap_s4hana" className="text-xs">SAP S/4HANA (FCCORP)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {erpType === 'sap_s4hana' && (
+                <div className="flex flex-col gap-1 flex-1 min-w-64">
+                  <label className="text-xs text-muted-foreground">Oracle DSN (ex: host:1521/FCCORP)</label>
+                  <Input value={oracleDsn} onChange={e => setOracleDsn(e.target.value)}
+                    className="h-8 text-sm font-mono" placeholder="hostname:1521/FCCORP" />
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* FBTax */}
           <div className="space-y-2">

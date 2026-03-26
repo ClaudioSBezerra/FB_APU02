@@ -129,7 +129,7 @@ const Login = () => {
             ))}
           </ul>
 
-          <p className="text-xs font-semibold" style={{ color: "#DA0812" }}>v1.0.9</p>
+          <p className="text-xs font-semibold" style={{ color: "#DA0812" }}>v2.0.0</p>
         </div>
       </div>
 
