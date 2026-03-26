@@ -24,8 +24,10 @@ type ERPBridgeConfig struct {
 	UltimoRunEm        *time.Time `json:"ultimo_run_em"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 	ResetTracker       bool       `json:"reset_tracker"`
+	ErpType            string     `json:"erp_type"`
 	FBTaxEmail         string     `json:"fbtax_email"`
 	FBTaxPasswordSet   bool       `json:"fbtax_password_set"`
+	OracleDsn          string     `json:"oracle_dsn"`
 	OracleUsuario      string     `json:"oracle_usuario"`
 	OracleSenhaSet     bool       `json:"oracle_senha_set"`
 	APIKey             string     `json:"api_key"`
@@ -86,15 +88,16 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 		case http.MethodGet:
 			var cfg ERPBridgeConfig
 			var horario string
-			var fbtaxEmail, fbtaxPassword, oracleUsuario, oracleSenha, apiKey sql.NullString
+			var erpType, fbtaxEmail, fbtaxPassword, oracleDsn, oracleUsuario, oracleSenha, apiKey sql.NullString
 			err := db.QueryRow(`
 				SELECT company_id, ativo, TO_CHAR(horario, 'HH24:MI'), dias_retroativos,
 				       ultimo_run_em, updated_at, reset_tracker,
-				       fbtax_email, fbtax_password, oracle_usuario, oracle_senha, api_key
+				       COALESCE(erp_type, 'oracle_xml'),
+				       fbtax_email, fbtax_password, oracle_dsn, oracle_usuario, oracle_senha, api_key
 				FROM erp_bridge_config WHERE company_id = $1
 			`, companyID).Scan(&cfg.CompanyID, &cfg.Ativo, &horario,
 				&cfg.DiasRetroativos, &cfg.UltimoRunEm, &cfg.UpdatedAt, &cfg.ResetTracker,
-				&fbtaxEmail, &fbtaxPassword, &oracleUsuario, &oracleSenha, &apiKey)
+				&erpType, &fbtaxEmail, &fbtaxPassword, &oracleDsn, &oracleUsuario, &oracleSenha, &apiKey)
 			if err == sql.ErrNoRows {
 				cfg = ERPBridgeConfig{
 					CompanyID:       companyID,
@@ -103,16 +106,25 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 					DiasRetroativos: 1,
 					UpdatedAt:       time.Now(),
 					ResetTracker:    false,
+					ErpType:         "oracle_xml",
 				}
 			} else if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			} else {
 				cfg.Horario = horario
+				if erpType.Valid {
+					cfg.ErpType = erpType.String
+				} else {
+					cfg.ErpType = "oracle_xml"
+				}
 				if fbtaxEmail.Valid {
 					cfg.FBTaxEmail = fbtaxEmail.String
 				}
 				cfg.FBTaxPasswordSet = fbtaxPassword.Valid && fbtaxPassword.String != ""
+				if oracleDsn.Valid {
+					cfg.OracleDsn = oracleDsn.String
+				}
 				if oracleUsuario.Valid {
 					cfg.OracleUsuario = DecryptFieldWithFallback(oracleUsuario.String)
 				}
@@ -129,8 +141,10 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				Horario         *string `json:"horario"`
 				DiasRetroativos *int    `json:"dias_retroativos"`
 				ResetTracker    *bool   `json:"reset_tracker"`
+				ErpType         *string `json:"erp_type"`
 				FBTaxEmail      *string `json:"fbtax_email"`
 				FBTaxPassword   *string `json:"fbtax_password"`
+				OracleDsn       *string `json:"oracle_dsn"`
 				OracleUsuario   *string `json:"oracle_usuario"`
 				OracleSenha     *string `json:"oracle_senha"`
 			}
@@ -170,6 +184,12 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				if enc, encErr := EncryptField(*req.OracleSenha); encErr == nil {
 					db.Exec(`UPDATE erp_bridge_config SET oracle_senha = $2 WHERE company_id = $1`, companyID, enc)
 				}
+			}
+			if req.ErpType != nil {
+				db.Exec(`UPDATE erp_bridge_config SET erp_type = $2 WHERE company_id = $1`, companyID, *req.ErpType)
+			}
+			if req.OracleDsn != nil {
+				db.Exec(`UPDATE erp_bridge_config SET oracle_dsn = $2 WHERE company_id = $1`, companyID, *req.OracleDsn)
 			}
 			w.WriteHeader(http.StatusNoContent)
 

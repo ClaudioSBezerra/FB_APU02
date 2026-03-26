@@ -16,12 +16,17 @@ export const modules: Record<string, ModuleConfig> = {
     label: 'Painel',
     tabs: [],
   },
+  notas: {
+    label: 'Notas Fiscais',
+    tabs: [
+      { label: 'NF-e Saídas',    path: '/apuracao/saida/notas' },
+      { label: 'NF-e Entradas',  path: '/apuracao/entrada/notas' },
+      { label: 'CT-e Entradas',  path: '/apuracao/cte-entrada/notas' },
+    ],
+  },
   apuracao: {
     label: 'Apuração IBS / CBS',
     tabs: [
-      { label: 'NF-e Entradas',      path: '/apuracao/entrada/notas' },
-      { label: 'NF-e Saídas',        path: '/apuracao/saida/notas' },
-      { label: 'CT-e Entradas',      path: '/apuracao/cte-entrada/notas' },
       { label: 'Créditos em Risco',  path: '/apuracao/creditos-perdidos', danger: true },
       { label: 'Apuração IBS',       path: '/rfb/apuracao-ibs' },
       { label: 'Apuração CBS',       path: '/rfb/apuracao-cbs' },
@@ -73,8 +78,10 @@ export const modules: Record<string, ModuleConfig> = {
 export function getActiveModule(pathname: string): string {
   if (pathname === '/') return 'painel'
 
+  if (pathname.includes('/notas')) return 'notas'
+
   const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs', '/apuracao/limpar-dados']
-  if (pathname.includes('/notas') || apuracaoPaths.includes(pathname)) return 'apuracao'
+  if (apuracaoPaths.includes(pathname)) return 'apuracao'
 
   const rfbExclude = ['/rfb/credenciais', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
   if (pathname.startsWith('/rfb/') && !rfbExclude.includes(pathname)) return 'rfb'
