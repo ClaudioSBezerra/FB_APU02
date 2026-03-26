@@ -567,11 +567,12 @@ func ERPBridgeCredentialsHandler(db *sql.DB) http.Handler {
 		}
 		hash := sha256.Sum256([]byte(apiKey))
 		hashHex := hex.EncodeToString(hash[:])
-		var fbtaxEmail, fbtaxPassword, oracleUsuario, oracleSenha sql.NullString
+		var fbtaxEmail, fbtaxPassword, oracleUsuario, oracleSenha, erpType, oracleDsn sql.NullString
 		err := db.QueryRow(`
-			SELECT fbtax_email, fbtax_password, oracle_usuario, oracle_senha
+			SELECT fbtax_email, fbtax_password, oracle_usuario, oracle_senha,
+			       COALESCE(erp_type, 'oracle_xml'), COALESCE(oracle_dsn, '')
 			FROM erp_bridge_config WHERE api_key_hash = $1
-		`, hashHex).Scan(&fbtaxEmail, &fbtaxPassword, &oracleUsuario, &oracleSenha)
+		`, hashHex).Scan(&fbtaxEmail, &fbtaxPassword, &oracleUsuario, &oracleSenha, &erpType, &oracleDsn)
 		if err == sql.ErrNoRows {
 			http.Error(w, "API key inválida", http.StatusUnauthorized)
 			return
@@ -585,6 +586,8 @@ func ERPBridgeCredentialsHandler(db *sql.DB) http.Handler {
 			"fbtax_password": "",
 			"oracle_usuario": "",
 			"oracle_senha":   "",
+			"erp_type":       "oracle_xml",
+			"oracle_dsn":     "",
 		}
 		if fbtaxEmail.Valid {
 			result["fbtax_email"] = fbtaxEmail.String
@@ -597,6 +600,12 @@ func ERPBridgeCredentialsHandler(db *sql.DB) http.Handler {
 		}
 		if oracleSenha.Valid && oracleSenha.String != "" {
 			result["oracle_senha"] = DecryptFieldWithFallback(oracleSenha.String)
+		}
+		if erpType.Valid {
+			result["erp_type"] = erpType.String
+		}
+		if oracleDsn.Valid && oracleDsn.String != "" {
+			result["oracle_dsn"] = DecryptFieldWithFallback(oracleDsn.String)
 		}
 		json.NewEncoder(w).Encode(result)
 	})
