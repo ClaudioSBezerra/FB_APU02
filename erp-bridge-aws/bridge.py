@@ -962,6 +962,10 @@ def main() -> int:
                     fbtax.email = creds["fbtax_email"]
                 if creds.get("fbtax_password"):
                     fbtax.password = creds["fbtax_password"]
+                # Sobrescreve erp_type com o valor da API (tem precedência sobre config.yaml)
+                if creds.get("erp_type"):
+                    cfg["erp_type"] = creds["erp_type"]
+                    erp_type = creds["erp_type"]
                 # SAP: credenciais Oracle vão para cfg["oracle"]
                 if erp_type == "sap_s4hana":
                     if "oracle" not in cfg:
@@ -970,6 +974,8 @@ def main() -> int:
                         cfg["oracle"]["usuario"] = creds["oracle_usuario"]
                     if creds.get("oracle_senha"):
                         cfg["oracle"]["senha"] = creds["oracle_senha"]
+                    if creds.get("oracle_dsn"):
+                        cfg["oracle"]["dsn"] = creds["oracle_dsn"]
                 else:
                     # oracle_xml: propaga para todos os servidores
                     for srv in cfg.get("servidores", []):
@@ -977,7 +983,7 @@ def main() -> int:
                             srv["usuario"] = creds["oracle_usuario"]
                         if creds.get("oracle_senha"):
                             srv["senha"] = creds["oracle_senha"]
-                log.info("Credenciais carregadas do servidor FBTax.")
+                log.info("Credenciais carregadas do servidor FBTax (erp_type=%s).", erp_type)
             else:
                 log.warning("api_key configurada mas nao foi possivel buscar credenciais. Usando config.yaml.")
         try:
