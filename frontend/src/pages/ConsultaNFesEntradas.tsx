@@ -234,7 +234,7 @@ export default function ConsultaNFesEntradas() {
   const hasFilters = !!(filterFilial || filterFornec || filterDataDe || filterDataAte || filterSemIBS);
 
   function clearFilters() {
-    setFilterFilial(''); setFilterFornec('');
+    setFilterFilial(''); setFilterFornec(''); setFornecDebounced('');
     setFilterDataDe(''); setFilterDataAte(''); setFilterSemIBS(false);
     setPage(1);
   }
