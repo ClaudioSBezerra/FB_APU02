@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ERP Bridge (Linux/AWS) — Oracle ERP (Totvs/Protheus) → FBTax Apuração Assistida
-Versão Linux: usa oracledb thin mode (sem Oracle Client instalado).
-DSNs configurados como host:port/service diretamente no config.yaml.
+ERP Bridge (Linux/AWS) — Oracle ERP → FBTax Apuração Assistida
+Suporta dois modos de importação:
+  - oracle_xml   : Oracle por filial, envia XML multipart (legado Totvs/Protheus)
+  - sap_s4hana   : Oracle FCCORP único, envia JSON batch via s4i_nfe + s4i_nfe_impostos
 
 Uso:
   python bridge.py                               # últimos N dias (padrão config)
   python bridge.py --data 2026-01-01             # desde data específica
   python bridge.py --data 2026-03-01 --data-fim 2026-03-19
   python bridge.py --mes 2026-03                 # mês inteiro
-  python bridge.py --servidor "FC - Recife"      # só um servidor
-  python bridge.py --daemon                      # modo daemon (roda no horário configurado via UI)
+  python bridge.py --servidor "FC - Recife"      # só um servidor (oracle_xml)
+  python bridge.py --daemon                      # modo daemon
 """
 
 import argparse
 import io
+import json as _json
 import logging
 import re
 import sqlite3
 import sys
 import time as _time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -94,7 +96,7 @@ def marcar(conn, servidor, tipo, chave, status):
     """, (servidor, tipo, str(chave), datetime.now().isoformat(), status))
     conn.commit()
 
-# ─── Normalização de XML ──────────────────────────────────────────────────────
+# ─── Normalização de XML (modo oracle_xml) ────────────────────────────────────
 
 _DECL_RE     = re.compile(r'<\?xml[^?]*\?>', re.IGNORECASE)
 _ENCODING_RE = re.compile(r'encoding\s*=\s*["\'][^"\']*["\']', re.IGNORECASE)
@@ -116,7 +118,7 @@ def clob_para_str(valor) -> str:
         return valor.read()
     return str(valor)
 
-# ─── Definição das fontes de dados ───────────────────────────────────────────
+# ─── Fontes de dados (modo oracle_xml legado) ─────────────────────────────────
 
 FONTES = {
     "nfe_saidas": {
@@ -168,6 +170,41 @@ FONTES = {
     },
 }
 
+# ─── Query SAP S4/HANA ────────────────────────────────────────────────────────
+# Retorna 1 linha por documento com pivot dos impostos CBS3/IB3M/IB3S.
+# DIRECT=1 → entrada | DIRECT=2 → saída
+# modelo derivado da posição 21-22 da chave de 44 dígitos (1-indexed Oracle)
+
+SAP_QUERY = """
+SELECT
+    nn.DIRECT,
+    nn.NFEID                                                    AS chave,
+    SUBSTR(nn.NFEID, 21, 2)                                     AS modelo,
+    nn.SERIES                                                   AS serie,
+    nn.NFENUM                                                   AS numero,
+    TO_CHAR(TRUNC(nn.DOCDAT), 'YYYY-MM-DD')                    AS data_emissao,
+    TO_CHAR(TRUNC(nn.CREDAT), 'YYYY-MM-DD')                    AS data_autorizacao,
+    TO_CHAR(TRUNC(nn.DOCDAT), 'MM/YYYY')                       AS mes_ano,
+    nn.CNPJ_EMIT                                                AS emit_cnpj,
+    nn.CNPJ_DEST                                                AS dest_cnpj,
+    nn.NFTOT                                                    AS v_total,
+    MAX(CASE WHEN ni.TAXTYP = 'CBS3' THEN ni.BASE  ELSE 0 END) AS v_bc_ibs_cbs,
+    SUM(CASE WHEN ni.TAXTYP = 'IB3S' THEN ni.TAXVAL ELSE 0 END) AS v_ibs_uf,
+    SUM(CASE WHEN ni.TAXTYP = 'IB3M' THEN ni.TAXVAL ELSE 0 END) AS v_ibs_mun,
+    SUM(CASE WHEN ni.TAXTYP IN ('IB3S','IB3M') THEN ni.TAXVAL ELSE 0 END) AS v_ibs,
+    SUM(CASE WHEN ni.TAXTYP = 'CBS3' THEN ni.TAXVAL ELSE 0 END) AS v_cbs
+FROM s4i_nfe nn
+LEFT JOIN s4i_nfe_impostos ni
+  ON ni.NFEID = nn.NFEID
+ AND ni.TAXTYP IN ('CBS3','IB3M','IB3S')
+WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
+  AND nn.CANCELADO = 'N'
+GROUP BY
+    nn.DIRECT, nn.NFEID, nn.SERIES, nn.NFENUM,
+    nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.NFTOT
+ORDER BY nn.CREDAT, nn.NFEID
+"""
+
 # ─── Cliente FBTax ────────────────────────────────────────────────────────────
 
 class FBTaxClient:
@@ -205,10 +242,23 @@ class FBTaxClient:
             resp = self._post_xml(endpoint, chave, xml_bytes)
         return {"status": resp.status_code, "body": resp.text[:300]}
 
+    def enviar_batch(self, documents: list) -> dict:
+        """Envia batch de documentos SAP para /api/erp-bridge/import/batch (auth X-API-Key)."""
+        url = f"{self.base_url}/api/erp-bridge/import/batch"
+        resp = requests.post(
+            url,
+            headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
+            json={"documents": documents},
+            timeout=120,
+        )
+        if not resp.ok:
+            log.error("enviar_batch HTTP %d: %s", resp.status_code, resp.text[:300])
+            resp.raise_for_status()
+        return resp.json()
+
     # ── Métodos de reporte de execução via API ─────────────────────────────────
 
     def get_bridge_config(self) -> dict | None:
-        """Busca a configuração de agendamento do bridge na API."""
         try:
             resp = self.session.get(f"{self.base_url}/api/erp-bridge/config", timeout=10)
             if resp.status_code == 401:
@@ -221,8 +271,7 @@ class FBTaxClient:
         return None
 
     def fetch_credentials(self) -> dict | None:
-        """Busca credenciais criptografadas do servidor via api_key.
-        Retorna dict com fbtax_email, fbtax_password, oracle_usuario, oracle_senha ou None."""
+        """Busca credenciais criptografadas do servidor via api_key."""
         if not self.api_key:
             return None
         try:
@@ -239,7 +288,6 @@ class FBTaxClient:
         return None
 
     def registrar_servidores(self, nomes: list) -> None:
-        """Registra os servidores configurados na API para popular o dropdown do trigger manual."""
         try:
             self.session.post(
                 f"{self.base_url}/api/erp-bridge/servidores/registrar",
@@ -250,7 +298,6 @@ class FBTaxClient:
             log.warning("Nao foi possivel registrar servidores: %s", exc)
 
     def reset_tracker_ack(self) -> bool:
-        """Confirma para a API que o tracker.db foi limpo (reset_tracker = false)."""
         try:
             resp = self.session.patch(
                 f"{self.base_url}/api/erp-bridge/config",
@@ -270,7 +317,6 @@ class FBTaxClient:
         return False
 
     def create_run(self, data_ini: date, data_fim: date, origem: str = "scheduler") -> str | None:
-        """Cria um novo registro de execução na API. Retorna o run_id ou None."""
         try:
             resp = self.session.post(
                 f"{self.base_url}/api/erp-bridge/runs",
@@ -299,7 +345,6 @@ class FBTaxClient:
         return None
 
     def get_pending_runs(self) -> list:
-        """Busca runs com status='pending' criados pela UI para execução manual."""
         try:
             resp = self.session.get(f"{self.base_url}/api/erp-bridge/pending", timeout=10)
             if resp.status_code == 401:
@@ -312,7 +357,6 @@ class FBTaxClient:
         return []
 
     def start_run(self, run_id: str) -> bool:
-        """Marca um run pendente como 'running' antes de iniciar a execução."""
         try:
             resp = self.session.patch(
                 f"{self.base_url}/api/erp-bridge/runs/{run_id}",
@@ -332,7 +376,6 @@ class FBTaxClient:
         return False
 
     def is_run_cancelled(self, run_id: str) -> bool:
-        """Verifica se o run foi cancelado pela UI durante a execução."""
         try:
             resp = self.session.get(
                 f"{self.base_url}/api/erp-bridge/runs/{run_id}",
@@ -348,7 +391,6 @@ class FBTaxClient:
         return False
 
     def report_items(self, run_id: str, totais: dict) -> None:
-        """Envia os totais por servidor/tipo à API."""
         items = []
         for servidor, tipos in totais.items():
             for tipo, s in tipos.items():
@@ -385,7 +427,6 @@ class FBTaxClient:
             log.warning("Nao foi possivel reportar items na API: %s", exc)
 
     def finalize_run(self, run_id: str, grand: dict, erro_msg: str | None = None) -> None:
-        """Finaliza o run na API com os totais consolidados."""
         total_erros = grand["erros"]
         total_env   = grand["enviados"]
         if erro_msg:
@@ -411,7 +452,136 @@ class FBTaxClient:
         except Exception as exc:
             log.warning("Nao foi possivel finalizar run na API: %s", exc)
 
-# ─── Processamento de um servidor Oracle ─────────────────────────────────────
+
+# ─── Processamento SAP S4/HANA ────────────────────────────────────────────────
+
+def processar_sap(
+    oracle_cfg: dict,
+    data_ini: date,
+    data_fim: date,
+    fbtax: FBTaxClient,
+) -> dict:
+    """Lê s4i_nfe + s4i_nfe_impostos do FCCORP e envia via /api/erp-bridge/import/batch."""
+    NOME = "FCCORP"
+    stats = {
+        "sap_batch": {
+            "enviados": 0,
+            "ignorados": 0,
+            "erros": 0,
+        }
+    }
+
+    log.info("=" * 60)
+    log.info("SAP S4/HANA — servidor : %s", oracle_cfg.get("dsn", ""))
+    log.info("Periodo               : %s -> %s", data_ini, data_fim)
+
+    try:
+        conn_ora = oracledb.connect(
+            user=oracle_cfg["usuario"],
+            password=oracle_cfg["senha"],
+            dsn=oracle_cfg["dsn"],
+        )
+        log.info("Conectado ao Oracle SAP FCCORP (thin mode)")
+    except Exception as exc:
+        log.error("Falha ao conectar ao FCCORP: %s", exc)
+        stats["sap_batch"]["erros"] = 1
+        stats["sap_batch"]["erro_msg"] = str(exc)
+        stats["sap_batch"]["erro_conexao"] = True
+        return stats
+
+    try:
+        cur = conn_ora.cursor()
+        # data_fim é exclusivo na query (data_ini <= credat <= data_fim - 1 dia)
+        data_fim_inc = data_fim - timedelta(days=1)
+        cur.execute(SAP_QUERY, data_ini=data_ini, data_fim=data_fim_inc)
+
+        cols = [d[0].lower() for d in cur.description]
+        rows = []
+        for raw in cur:
+            rows.append(dict(zip(cols, raw)))
+        cur.close()
+
+        log.info("%d documentos encontrados no FCCORP", len(rows))
+
+        if not rows:
+            return stats
+
+        # Converte tipos Oracle para Python nativo
+        documents = []
+        for r in rows:
+            def s(v):
+                return str(v).strip() if v is not None else ""
+            def f(v):
+                try:
+                    return float(v) if v is not None else 0.0
+                except (ValueError, TypeError):
+                    return 0.0
+
+            documents.append({
+                "direct":           s(r.get("direct")),
+                "chave":            s(r.get("chave")),
+                "modelo":           s(r.get("modelo")),
+                "serie":            s(r.get("serie")),
+                "numero":           s(r.get("numero")),
+                "data_emissao":     s(r.get("data_emissao")),
+                "data_autorizacao": s(r.get("data_autorizacao")),
+                "mes_ano":          s(r.get("mes_ano")),
+                "emit_cnpj":        s(r.get("emit_cnpj")),
+                "dest_cnpj":        s(r.get("dest_cnpj")),
+                "v_total":          f(r.get("v_total")),
+                "v_bc_ibs_cbs":     f(r.get("v_bc_ibs_cbs")),
+                "v_ibs_uf":         f(r.get("v_ibs_uf")),
+                "v_ibs_mun":        f(r.get("v_ibs_mun")),
+                "v_ibs":            f(r.get("v_ibs")),
+                "v_cbs":            f(r.get("v_cbs")),
+            })
+
+        # Envia em lotes de 1000 para não sobrecarregar
+        BATCH_SIZE = 1000
+        total_inserted = 0
+        total_ignored  = 0
+        total_errors   = 0
+
+        for i in range(0, len(documents), BATCH_SIZE):
+            lote = documents[i:i + BATCH_SIZE]
+            log.info("Enviando lote %d-%d/%d...", i + 1, min(i + BATCH_SIZE, len(documents)), len(documents))
+            try:
+                result = fbtax.enviar_batch(lote)
+                total_inserted += result.get("inserted", 0)
+                total_ignored  += result.get("ignored", 0)
+                total_errors   += result.get("errors", 0)
+                if result.get("error_details"):
+                    for err in result["error_details"][:5]:
+                        log.warning("  Detalhe erro: %s", err)
+                log.info(
+                    "  Lote: inserted=%d ignored=%d errors=%d",
+                    result.get("inserted", 0),
+                    result.get("ignored", 0),
+                    result.get("errors", 0),
+                )
+            except Exception as exc:
+                log.error("Erro ao enviar lote %d: %s", i // BATCH_SIZE + 1, exc)
+                total_errors += len(lote)
+
+        stats["sap_batch"]["enviados"]  = total_inserted
+        stats["sap_batch"]["ignorados"] = total_ignored
+        stats["sap_batch"]["erros"]     = total_errors
+
+        log.info("=" * 60)
+        log.info("SAP FCCORP — inseridos=%d  ignorados=%d  erros=%d",
+                 total_inserted, total_ignored, total_errors)
+
+    except Exception as exc:
+        log.error("Erro durante processamento SAP: %s", exc)
+        stats["sap_batch"]["erros"] = 1
+        stats["sap_batch"]["erro_msg"] = str(exc)
+    finally:
+        conn_ora.close()
+
+    return stats
+
+
+# ─── Processamento Oracle XML (legado) ────────────────────────────────────────
 
 def processar_servidor(
     srv: dict,
@@ -451,9 +621,6 @@ def processar_servidor(
             log.info("-" * 40)
             log.info("Consultando %s...", fonte["descricao"])
 
-            # Lê o conteúdo do CLOB/BLOB durante a iteração do cursor (locator ainda válido).
-            # fetchall() retorna apenas ponteiros (LOB locators); após cur.close() eles
-            # ficam inválidos. Ler inline evita XMLs inválidos e dispensa I/O de disco.
             try:
                 cur = conn_ora.cursor()
                 cur.execute(fonte["sql"], data_ini=data_ini, data_fim=data_fim)
@@ -525,6 +692,7 @@ def processar_servidor(
 
     return stats
 
+
 # ─── Argumentos CLI ───────────────────────────────────────────────────────────
 
 def parse_args():
@@ -534,11 +702,12 @@ def parse_args():
     p.add_argument("--data",      metavar="YYYY-MM-DD", help="Data inicial")
     p.add_argument("--data-fim",  metavar="YYYY-MM-DD", help="Data final (exclusiva)")
     p.add_argument("--mes",       metavar="YYYY-MM",    help="Mes completo")
-    p.add_argument("--servidor",  metavar="NOME",       help="Processa apenas este servidor")
+    p.add_argument("--servidor",  metavar="NOME",       help="Processa apenas este servidor (oracle_xml)")
     p.add_argument("--dry-run",   action="store_true",  help="Consulta Oracle mas nao envia")
-    p.add_argument("--daemon",    action="store_true",  help="Modo daemon: executa no horario configurado via UI")
-    p.add_argument("--origin",    metavar="ORIGEM",     default="manual", help="Origem do run (manual|scheduler)")
+    p.add_argument("--daemon",    action="store_true",  help="Modo daemon")
+    p.add_argument("--origin",    metavar="ORIGEM",     default="manual", help="Origem do run")
     return p.parse_args()
+
 
 # ─── Execução de um ciclo de importação ──────────────────────────────────────
 
@@ -553,16 +722,17 @@ def executar_importacao(
     dry_run: bool = False,
     existing_run_id: str | None = None,
 ) -> int:
-    """Executa um ciclo completo de importação e reporta via API. Retorna 0 (ok) ou 1 (erros)."""
+    erp_type = cfg.get("erp_type", "oracle_xml")
+
     log.info("=" * 60)
-    log.info("ERP Bridge v1.4 Linux — FBTax Apuracao Assistida")
+    log.info("ERP Bridge v2.0 — FBTax Apuracao Assistida")
+    log.info("Modo    : %s", erp_type)
     log.info("Periodo : %s ate %s", data_ini, data_fim - timedelta(days=1))
     log.info("Origem  : %s", origem)
     if dry_run:
         log.info("MODO DRY-RUN: apenas consultas, sem envio")
     log.info("=" * 60)
 
-    # Usa run existente (criado pela UI) ou abre um novo
     run_id = existing_run_id
     if run_id is None and not dry_run:
         run_id = fbtax.create_run(data_ini, data_fim, origem=origem)
@@ -571,30 +741,57 @@ def executar_importacao(
     elif run_id:
         log.info("Usando run existente: %s", run_id)
 
+    grand = {"enviados": 0, "ignorados": 0, "erros": 0}
+
+    # ── Modo SAP S4/HANA ──────────────────────────────────────────────────────
+    if erp_type == "sap_s4hana":
+        if dry_run:
+            log.info("DRY-RUN: pulando envio SAP")
+            return 0
+
+        oracle_cfg = cfg.get("oracle", {})
+        if not oracle_cfg.get("dsn"):
+            log.error("erp_type=sap_s4hana mas 'oracle.dsn' nao configurado em config.yaml")
+            return 1
+
+        stats = processar_sap(oracle_cfg, data_ini, data_fim, fbtax)
+
+        for s in stats.values():
+            grand["enviados"]  += s["enviados"]
+            grand["ignorados"] += s["ignorados"]
+            grand["erros"]     += s["erros"]
+
+        if run_id:
+            fbtax.report_items(run_id, {"FCCORP": stats})
+            fbtax.finalize_run(run_id, grand)
+            log.info("Run API finalizado: %s", run_id)
+
+        return 0 if grand["erros"] == 0 else 1
+
+    # ── Modo Oracle XML legado ────────────────────────────────────────────────
     tracker = init_tracker()
 
-    servidores = cfg["servidores"]
-    # filtro_servidores (lista, da UI) tem precedência sobre filtro_servidor (CLI)
+    servidores = cfg.get("servidores", [])
     if filtro_servidores:
         servidores = [s for s in servidores if s["nome"] in filtro_servidores]
         if not servidores:
             log.error("Nenhum dos servidores %s encontrado no config.yaml", filtro_servidores)
+            tracker.close()
             return 1
     elif filtro_servidor:
         servidores = [s for s in servidores if s["nome"] == filtro_servidor]
         if not servidores:
             log.error("Servidor '%s' nao encontrado no config.yaml", filtro_servidor)
+            tracker.close()
             return 1
 
     totais: dict = {}
-    grand = {"enviados": 0, "ignorados": 0, "erros": 0}
 
     for srv in servidores:
         if dry_run:
             log.info("DRY-RUN: pulando envio para %s", srv["nome"])
             continue
 
-        # Verifica cancelamento antes de cada servidor (a UI pode ter abortado)
         if run_id and fbtax.is_run_cancelled(run_id):
             log.warning("[Cancelado] Run %s foi cancelado pela UI — interrompendo.", run_id)
             tracker.close()
@@ -603,7 +800,6 @@ def executar_importacao(
         stats = processar_servidor(srv, data_ini, data_fim, fbtax, tracker)
         totais[srv["nome"]] = stats
 
-        # Reporta esta filial imediatamente para o acompanhamento em tempo real
         if run_id:
             fbtax.report_items(run_id, {srv["nome"]: stats})
 
@@ -626,7 +822,6 @@ def executar_importacao(
              grand["enviados"], grand["ignorados"], grand["erros"])
     log.info("Log: %s", log_file)
 
-    # Finaliza o run na API com os totais consolidados
     if run_id and not dry_run:
         fbtax.finalize_run(run_id, grand)
         log.info("Run API finalizado: %s", run_id)
@@ -637,14 +832,14 @@ def executar_importacao(
 # ─── Modo Daemon ──────────────────────────────────────────────────────────────
 
 def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
-    """Loop infinito: verifica a cada minuto runs pendentes (manual) e o horário agendado."""
     BRASILIA = ZoneInfo("America/Sao_Paulo")
     log.info("=" * 60)
-    log.info("ERP Bridge v1.4 — MODO DAEMON iniciado")
+    log.info("ERP Bridge v2.0 — MODO DAEMON iniciado")
+    log.info("erp_type: %s", cfg.get("erp_type", "oracle_xml"))
     log.info("Aguardando horario configurado na UI ou trigger manual...")
     log.info("=" * 60)
 
-    ultimo_run_data: date | None = None  # evita rodar agendamento mais de uma vez por dia
+    ultimo_run_data: date | None = None
 
     while True:
         try:
@@ -652,7 +847,7 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
             agora_hhmm = now.strftime("%H:%M")
             hoje = now.date()
 
-            # ── 0. Verifica se a base foi limpa e o tracker.db deve ser resetado ─
+            # ── 0. Reset tracker ──────────────────────────────────────────────
             bridge_cfg_check = fbtax.get_bridge_config()
             if bridge_cfg_check and bridge_cfg_check.get("reset_tracker"):
                 log.info("[Daemon] reset_tracker detectado — limpando tracker.db...")
@@ -666,22 +861,20 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                     log.error("[Daemon] Erro ao limpar tracker.db: %s", exc)
                 fbtax.reset_tracker_ack()
 
-            # ── 1. Verifica runs pendentes criados pela UI ─────────────────────
+            # ── 1. Runs pendentes criados pela UI ─────────────────────────────
             pending = fbtax.get_pending_runs()
             for run in pending:
-                run_id    = run["id"]
+                run_id     = run["id"]
                 data_ini_s = run.get("data_ini")
                 data_fim_s = run.get("data_fim")
-                filiais_json = run.get("filiais_filter")  # string JSON ou None
+                filiais_json = run.get("filiais_filter")
 
                 if not data_ini_s or not data_fim_s:
                     log.warning("[Daemon] Run pendente %s sem datas — ignorado", run_id)
                     continue
 
-                # Parseia o filtro de filiais
                 filtro_servidores = None
                 if filiais_json:
-                    import json as _json
                     try:
                         filtro_servidores = _json.loads(filiais_json)
                         if not isinstance(filtro_servidores, list) or len(filtro_servidores) == 0:
@@ -690,14 +883,12 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                         filtro_servidores = None
 
                 data_ini_run = date.fromisoformat(data_ini_s[:10])
-                # data_fim armazenado é inclusivo; a query Oracle usa < data_fim (exclusivo)
                 data_fim_run = date.fromisoformat(data_fim_s[:10]) + timedelta(days=1)
 
                 filiais_desc = ", ".join(filtro_servidores) if filtro_servidores else "todas"
                 log.info("[Daemon] Run manual %s: %s → %s | filiais: %s",
                          run_id, data_ini_s, data_fim_s, filiais_desc)
 
-                # Marca como 'running' antes de iniciar
                 fbtax.start_run(run_id)
 
                 try:
@@ -715,7 +906,7 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                     fbtax.finalize_run(run_id, {"enviados": 0, "ignorados": 0, "erros": 1},
                                        erro_msg=str(exc))
 
-            # ── 2. Verifica horário agendado ───────────────────────────────────
+            # ── 2. Horário agendado ────────────────────────────────────────────
             bridge_cfg = fbtax.get_bridge_config()
             if bridge_cfg and bridge_cfg.get("ativo") and bridge_cfg.get("horario") == agora_hhmm:
                 if ultimo_run_data == hoje:
@@ -758,12 +949,12 @@ def main() -> int:
         cfg = yaml.safe_load(f)
 
     args = parse_args()
+    erp_type = cfg.get("erp_type", "oracle_xml")
 
     fbtax = FBTaxClient(cfg["fbtax"])
 
-    # Modo daemon — não precisa de datas, as busca da API a cada ciclo
+    # Modo daemon
     if args.daemon:
-        # Se api_key configurada, busca credenciais do banco (sem login prévio)
         if fbtax.api_key:
             creds = fbtax.fetch_credentials()
             if creds:
@@ -771,8 +962,16 @@ def main() -> int:
                     fbtax.email = creds["fbtax_email"]
                 if creds.get("fbtax_password"):
                     fbtax.password = creds["fbtax_password"]
-                # Propaga credenciais Oracle para todos os servidores
-                if creds.get("oracle_usuario") or creds.get("oracle_senha"):
+                # SAP: credenciais Oracle vão para cfg["oracle"]
+                if erp_type == "sap_s4hana":
+                    if "oracle" not in cfg:
+                        cfg["oracle"] = {}
+                    if creds.get("oracle_usuario"):
+                        cfg["oracle"]["usuario"] = creds["oracle_usuario"]
+                    if creds.get("oracle_senha"):
+                        cfg["oracle"]["senha"] = creds["oracle_senha"]
+                else:
+                    # oracle_xml: propaga para todos os servidores
                     for srv in cfg.get("servidores", []):
                         if creds.get("oracle_usuario"):
                             srv["usuario"] = creds["oracle_usuario"]
@@ -786,11 +985,17 @@ def main() -> int:
         except Exception as exc:
             log.error("Falha ao autenticar no FBTax: %s", exc)
             return 1
-        nomes = [s["nome"] for s in cfg.get("servidores", [])]
-        fbtax.registrar_servidores(nomes)
+
+        # Registra servidores na UI
+        if erp_type == "sap_s4hana":
+            fbtax.registrar_servidores(["FCCORP"])
+        else:
+            nomes = [s["nome"] for s in cfg.get("servidores", [])]
+            fbtax.registrar_servidores(nomes)
+
         return run_daemon(cfg, fbtax)
 
-    # Modo normal (importação pontual)
+    # Modo normal
     if args.mes:
         ano, mes = map(int, args.mes.split("-"))
         data_ini = date(ano, mes, 1)
