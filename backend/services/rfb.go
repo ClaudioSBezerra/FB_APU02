@@ -228,7 +228,8 @@ func (c *RFBClient) DownloadArquivo(token, tiquete string) ([]byte, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	resp, err := c.httpClient.Do(req)
+	downloadClient := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := downloadClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download request failed: %w", err)
 	}
