@@ -54,9 +54,10 @@ func NfeSaidasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const q = `
 			SELECT cnpj, nome, apelido FROM (
-			  SELECT DISTINCT n.emit_cnpj AS cnpj, COALESCE(n.emit_nome,'') AS nome,
+			  SELECT DISTINCT n.emit_cnpj AS cnpj,
+			    COALESCE(fa.apelido, n.emit_cnpj) AS nome,
 			    COALESCE(fa.apelido,'') AS apelido,
-			    COALESCE(NULLIF(fa.apelido,''), n.emit_nome,'') AS sort_key
+			    COALESCE(NULLIF(fa.apelido,''), n.emit_cnpj) AS sort_key
 			  FROM nfe_saidas n
 			  LEFT JOIN filial_apelidos fa
 			    ON fa.company_id = n.company_id AND fa.cnpj = n.emit_cnpj
@@ -72,9 +73,10 @@ func NfeEntradasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const q = `
 			SELECT cnpj, nome, apelido FROM (
-			  SELECT DISTINCT n.dest_cnpj_cpf AS cnpj, COALESCE(n.dest_nome,'') AS nome,
+			  SELECT DISTINCT n.dest_cnpj_cpf AS cnpj,
+			    COALESCE(fa.apelido, n.dest_cnpj_cpf) AS nome,
 			    COALESCE(fa.apelido,'') AS apelido,
-			    COALESCE(NULLIF(fa.apelido,''), n.dest_nome,'') AS sort_key
+			    COALESCE(NULLIF(fa.apelido,''), n.dest_cnpj_cpf) AS sort_key
 			  FROM nfe_entradas n
 			  LEFT JOIN filial_apelidos fa
 			    ON fa.company_id = n.company_id AND fa.cnpj = n.dest_cnpj_cpf
@@ -90,9 +92,10 @@ func CteEntradasFiliaisHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		const q = `
 			SELECT cnpj, nome, apelido FROM (
-			  SELECT DISTINCT c.dest_cnpj_cpf AS cnpj, COALESCE(c.dest_nome,'') AS nome,
+			  SELECT DISTINCT c.dest_cnpj_cpf AS cnpj,
+			    COALESCE(fa.apelido, c.dest_cnpj_cpf) AS nome,
 			    COALESCE(fa.apelido,'') AS apelido,
-			    COALESCE(NULLIF(fa.apelido,''), c.dest_nome,'') AS sort_key
+			    COALESCE(NULLIF(fa.apelido,''), c.dest_cnpj_cpf) AS sort_key
 			  FROM cte_entradas c
 			  LEFT JOIN filial_apelidos fa
 			    ON fa.company_id = c.company_id AND fa.cnpj = c.dest_cnpj_cpf
