@@ -3,7 +3,6 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -26,9 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
-import { toast } from 'sonner';
-import { formatCNPJMasked } from '@/lib/formatFilial';
+import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
+import { formatCnpjComApelido, formatCNPJMasked } from '@/lib/formatFilial';
 
 const PAGE_SIZE = 100;
 
@@ -38,12 +36,12 @@ interface FilialOption { cnpj: string; nome: string; apelido: string }
 
 interface CteEntradaRow {
   id: string; chave_cte: string; modelo: number; serie: string; numero_cte: string;
-  data_emissao: string; mes_ano: string; nat_op: string; cfop: string; modal: string;
-  emit_cnpj: string; emit_nome: string; emit_uf: string;
-  rem_cnpj_cpf: string; rem_nome: string; rem_uf: string;
-  dest_cnpj_cpf: string; dest_nome: string; dest_uf: string;
-  v_prest: number; v_rec: number; v_carga: number; v_bc_icms: number; v_icms: number;
-  v_bc_ibs_cbs: number | null; v_ibs: number | null; v_cbs: number | null;
+  data_emissao: string; data_autorizacao: string; mes_ano: string;
+  emit_cnpj: string;
+  dest_cnpj_cpf: string;
+  v_prest: number;
+  v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number;
+  v_ibs: number; v_cbs: number;
 }
 
 interface CteEntradaResponse {
@@ -63,22 +61,6 @@ function fmtCNPJ(v: string): string {
   if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
   if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
   return v;
-}
-const MODAL_LABELS: Record<string, string> = { '01':'Rodoviário','02':'Aéreo','03':'Aquaviário','04':'Ferroviário','05':'Dutoviário','06':'Multimodal' };
-function fmtModal(m: string): string { return MODAL_LABELS[m] || m || '—'; }
-
-// ── DANFE / DACTE ─────────────────────────────────────────────────────────────
-async function openDanfe(chave: string, token: string | null, companyId: string | null) {
-  const res = await fetch(`/api/danfe/${chave}`, {
-    headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' },
-  });
-  if (res.status === 404) { toast.error('XML deste CT-e não encontrado. Importe o XML primeiro.'); return; }
-  if (!res.ok) { toast.error('Erro ao gerar DACTE.'); return; }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank');
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  if (!win) toast.warning('Permita popups para visualizar o DACTE.');
 }
 
 
@@ -147,29 +129,21 @@ function DetalheCTe({ cte, onClose }: { cte: CteEntradaRow; onClose: () => void 
           <Secao title="Identificação">
             <Linha label="Modelo" value={cte.modelo} /><Linha label="Série" value={cte.serie} />
             <Linha label="Número" value={cte.numero_cte} /><Linha label="Data Emissão" value={cte.data_emissao} />
-            <Linha label="Mês/Ano" value={cte.mes_ano} /><Linha label="Natureza Operação" value={cte.nat_op} />
-            <Linha label="CFOP" value={cte.cfop} /><Linha label="Modal" value={fmtModal(cte.modal)} />
+            <Linha label="Data Autorização" value={cte.data_autorizacao || '—'} />
+            <Linha label="Mês/Ano" value={cte.mes_ano} />
           </Secao>
           <Secao title="Transportadora (Emitente)">
-            <Linha label="CNPJ" value={fmtCNPJ(cte.emit_cnpj)} /><Linha label="Razão Social" value={cte.emit_nome} />
-            <Linha label="UF" value={cte.emit_uf} />
+            <Linha label="CNPJ" value={fmtCNPJ(cte.emit_cnpj)} />
           </Secao>
-          <Secao title="Remetente">
-            <Linha label="CNPJ/CPF" value={fmtCNPJ(cte.rem_cnpj_cpf)} /><Linha label="Nome/Razão Social" value={cte.rem_nome} />
-            <Linha label="UF" value={cte.rem_uf} />
+          <Secao title="Destinatário (Filial)">
+            <Linha label="CNPJ/CPF" value={fmtCNPJ(cte.dest_cnpj_cpf)} />
           </Secao>
-          <Secao title="Destinatário">
-            <Linha label="CNPJ/CPF" value={fmtCNPJ(cte.dest_cnpj_cpf)} /><Linha label="Nome/Razão Social" value={cte.dest_nome} />
-            <Linha label="UF" value={cte.dest_uf} />
-          </Secao>
-          <Secao title="Prestação e Carga">
-            <LinhaBRL label="vTPrest (Total)" value={cte.v_prest} /><LinhaBRL label="vRec (A Receber)" value={cte.v_rec} />
-            <LinhaBRL label="vCarga" value={cte.v_carga} /><LinhaBRL label="vBC ICMS" value={cte.v_bc_icms} />
-            <LinhaBRL label="vICMS" value={cte.v_icms} />
-          </Secao>
-          <Secao title="IBSCBSTot — Reforma Tributária">
+          <Secao title="Valores — Reforma Tributária">
+            <LinhaBRL label="vTPrest (Total Prestação)" value={cte.v_prest} />
             <LinhaBRL label="vBCIBSCBS (Base)" value={cte.v_bc_ibs_cbs} />
-            <LinhaBRL label="vIBS" value={cte.v_ibs} /><LinhaBRL label="vCBS" value={cte.v_cbs} />
+            <LinhaBRL label="vIBSUF" value={cte.v_ibs_uf} /><LinhaBRL label="vIBSMun" value={cte.v_ibs_mun} />
+            <LinhaBRL label="vIBS (Total)" value={cte.v_ibs} />
+            <LinhaBRL label="vCBS" value={cte.v_cbs} />
             {(cte.v_ibs == null || cte.v_ibs === 0) && (cte.v_cbs == null || cte.v_cbs === 0) && (
               <div className="flex items-center gap-1 mt-1 text-orange-600">
                 <AlertTriangle className="h-3 w-3" />
@@ -206,11 +180,20 @@ export default function ConsultaCTesEntradas() {
   useEffect(() => { setPage(1); }, [mesAno, filterFilial, transpDebounced, filterDataDe, filterDataAte, filterSemIBS]);
 
   const [selected, setSelected] = useState<CteEntradaRow | null>(null);
+  const [apelidos, setApelidos] = useState<Record<string, string>>({});
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
 
   useEffect(() => {
     if (!token || !companyId) return;
+    fetch('/api/config/filial-apelidos', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((list: { cnpj: string; apelido: string }[]) => {
+        const map: Record<string, string> = {};
+        (list || []).forEach(fa => { map[fa.cnpj] = fa.apelido; });
+        setApelidos(map);
+      })
+      .catch(() => {});
     fetch('/api/apuracao/painel', { headers: authHeaders })
       .then(r => r.ok ? r.json() : { meses_disponiveis: [] })
       .then((d: { meses_disponiveis?: string[] }) => {
@@ -238,11 +221,7 @@ export default function ConsultaCTesEntradas() {
       if (filterSemIBS)  params.set('sem_ibs_cbs', 'true');
       if (transpDebounced) {
         const digits = transpDebounced.replace(/\D/g, '');
-        if (digits && digits === transpDebounced.replace(/[.\-/]/g, '').replace(/\s/g, '')) {
-          params.set('emit_cnpj_search', digits);
-        } else {
-          params.set('emit_nome', transpDebounced);
-        }
+        if (digits) params.set('emit_cnpj', digits);
       }
       const res = await fetch(`/api/cte-entradas?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
@@ -309,10 +288,10 @@ export default function ConsultaCTesEntradas() {
 
             {/* Transportadora */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Transportadora (nome ou CNPJ)</label>
-              <Input placeholder="Digite nome ou documento..." value={filterTransp}
+              <label className="text-xs text-muted-foreground">Transportadora (CNPJ)</label>
+              <Input placeholder="Digite o CNPJ..." value={filterTransp}
                 onChange={e => setFilterTransp(e.target.value)}
-                className="h-8 w-60" />
+                className="h-8 w-44" />
             </div>
 
             {/* Data De */}
@@ -372,7 +351,7 @@ export default function ConsultaCTesEntradas() {
         <CardHeader className="py-2 px-4">
           <CardTitle className="flex items-center gap-2 text-[11px] text-muted-foreground font-normal">
             <Truck className="h-3.5 w-3.5" />
-            Clique em uma linha para ver detalhes · Botão DACTE abre o documento fiscal
+            Clique em uma linha para ver detalhes
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -391,11 +370,8 @@ export default function ConsultaCTesEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Transportadora</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Remetente</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center">Modal</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Destinatário (Filial)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vPrest</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center w-12">DACTE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -410,34 +386,16 @@ export default function ConsultaCTesEntradas() {
                           </TableCell>
                           <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
                           <TableCell className="py-0.5 px-2 max-w-[160px]">
-                            <div className="truncate text-[11px] font-medium" title={`${fmtCNPJ(row.emit_cnpj)} · ${row.emit_nome}`}>
-                              <span className="text-[10px] text-muted-foreground mr-1">{row.emit_uf}</span>
-                              {row.emit_nome || fmtCNPJ(row.emit_cnpj)}
+                            <div className="truncate text-[11px] font-mono text-muted-foreground">
+                              {fmtCNPJ(row.emit_cnpj)}
                             </div>
                           </TableCell>
-                          <TableCell className="py-0.5 px-2 max-w-[150px]">
-                            <div className="truncate text-[11px]" title={`${row.rem_uf} · ${row.rem_nome}`}>
-                              <span className="text-[10px] text-muted-foreground mr-1">{row.rem_uf}</span>
-                              {row.rem_nome || '—'}
+                          <TableCell className="py-0.5 px-2 max-w-[180px]">
+                            <div className="truncate text-[11px]">
+                              {formatCnpjComApelido(row.dest_cnpj_cpf, apelidos)}
                             </div>
-                          </TableCell>
-                          <TableCell className="py-0.5 px-2 max-w-[150px]">
-                            <div className="truncate text-[11px]" title={`${row.dest_uf} · ${row.dest_nome}`}>
-                              <span className="text-[10px] text-muted-foreground mr-1">{row.dest_uf}</span>
-                              {row.dest_nome || formatCNPJMasked(row.dest_cnpj_cpf)}
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-0.5 px-2 text-center">
-                            <Badge variant="outline" className="text-[10px] px-1 py-0">{fmtModal(row.modal)}</Badge>
                           </TableCell>
                           <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">{fmtBRL(row.v_prest)}</TableCell>
-                          <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
-                            <button title="Gerar DACTE"
-                              onClick={() => openDanfe(row.chave_cte, token, companyId)}
-                              className="text-muted-foreground hover:text-foreground transition-colors">
-                              <FileText className="h-3.5 w-3.5" />
-                            </button>
-                          </TableCell>
                         </TableRow>
                       );
                     })}

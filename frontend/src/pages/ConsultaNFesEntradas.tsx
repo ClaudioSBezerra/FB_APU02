@@ -26,9 +26,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, AlertTriangle, ChevronLeft, ChevronRight, FileText } from 'lucide-react';
+import { X, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCnpjComApelido, formatCNPJMasked } from '@/lib/formatFilial';
-import { toast } from 'sonner';
 
 const PAGE_SIZE = 100;
 
@@ -38,20 +37,17 @@ interface FilialOption { cnpj: string; nome: string; apelido: string }
 
 interface NfeEntradaRow {
   id: string; chave_nfe: string; modelo: number; serie: string; numero_nfe: string;
-  data_emissao: string; mes_ano: string; nat_op: string;
-  forn_cnpj: string; forn_nome: string; forn_uf: string; forn_municipio: string;
-  dest_cnpj_cpf: string; dest_nome: string; dest_uf: string; dest_c_mun: string;
-  v_bc: number; v_icms: number; v_icms_deson: number; v_fcp: number;
-  v_bc_st: number; v_st: number; v_fcp_st: number; v_fcp_st_ret: number;
-  v_prod: number; v_frete: number; v_seg: number; v_desc: number;
-  v_ii: number; v_ipi: number; v_ipi_devol: number; v_pis: number; v_cofins: number; v_outro: number; v_nf: number;
-  v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number; v_ibs: number;
-  v_cred_pres_ibs: number; v_cbs: number; v_cred_pres_cbs: number;
+  data_emissao: string; data_autorizacao: string; mes_ano: string;
+  forn_cnpj: string;
+  dest_cnpj_cpf: string;
+  v_nf: number;
+  v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number;
+  v_ibs: number; v_cbs: number;
 }
 
 interface NfeEntradaResponse {
   total: number; page: number; page_size: number; total_pages: number;
-  totals: { v_nf: number; v_icms: number; v_ibs: number; v_cbs: number };
+  totals: { v_nf: number; v_ibs: number; v_cbs: number };
   items: NfeEntradaRow[];
 }
 
@@ -66,20 +62,6 @@ function fmtCNPJ(v: string): string {
   if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
   if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
   return v;
-}
-
-// ── DANFE ─────────────────────────────────────────────────────────────────────
-async function openDanfe(chave: string, token: string | null, companyId: string | null) {
-  const res = await fetch(`/api/danfe/${chave}`, {
-    headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' },
-  });
-  if (res.status === 404) { toast.error('XML desta NF-e não encontrado. Importe o XML primeiro.'); return; }
-  if (!res.ok) { toast.error('Erro ao gerar DANFE.'); return; }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank');
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  if (!win) toast.warning('Permita popups para visualizar o DANFE.');
 }
 
 
@@ -148,28 +130,21 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeEntradaRow; onClose: () => void 
           <Secao title="Identificação">
             <Linha label="Modelo" value={nfe.modelo} /><Linha label="Série" value={nfe.serie} />
             <Linha label="Número" value={nfe.numero_nfe} /><Linha label="Data Emissão" value={nfe.data_emissao} />
-            <Linha label="Mês/Ano" value={nfe.mes_ano} /><Linha label="Natureza Operação" value={nfe.nat_op} />
+            <Linha label="Data Autorização" value={nfe.data_autorizacao || '—'} />
+            <Linha label="Mês/Ano" value={nfe.mes_ano} />
           </Secao>
           <Secao title="Fornecedor (Emitente)">
-            <Linha label="CNPJ" value={fmtCNPJ(nfe.forn_cnpj)} /><Linha label="Razão Social" value={nfe.forn_nome} />
-            <Linha label="Município" value={nfe.forn_municipio} /><Linha label="UF" value={nfe.forn_uf} />
+            <Linha label="CNPJ" value={fmtCNPJ(nfe.forn_cnpj)} />
           </Secao>
-          <Secao title="Destinatário (Empresa)">
-            <Linha label="CNPJ/CPF" value={fmtCNPJ(nfe.dest_cnpj_cpf)} /><Linha label="Nome/Razão Social" value={nfe.dest_nome} />
-            <Linha label="UF" value={nfe.dest_uf} /><Linha label="Município (IBGE)" value={nfe.dest_c_mun} />
+          <Secao title="Destinatário (Filial)">
+            <Linha label="CNPJ/CPF" value={fmtCNPJ(nfe.dest_cnpj_cpf)} />
           </Secao>
-          <Secao title="ICMSTot — Totais da Nota">
-            <LinhaBRL label="vProd" value={nfe.v_prod} /><LinhaBRL label="vFrete" value={nfe.v_frete} />
-            <LinhaBRL label="vSeg" value={nfe.v_seg} /><LinhaBRL label="vDesc" value={nfe.v_desc} />
-            <LinhaBRL label="vNF (Valor Total)" value={nfe.v_nf} /><LinhaBRL label="vBC (Base ICMS)" value={nfe.v_bc} />
-            <LinhaBRL label="vICMS" value={nfe.v_icms} /><LinhaBRL label="vPIS" value={nfe.v_pis} />
-            <LinhaBRL label="vCOFINS" value={nfe.v_cofins} /><LinhaBRL label="vOutro" value={nfe.v_outro} />
-          </Secao>
-          <Secao title="IBSCBSTot — Reforma Tributária">
+          <Secao title="Valores — Reforma Tributária">
+            <LinhaBRL label="vNF (Valor Total)" value={nfe.v_nf} />
             <LinhaBRL label="vBCIBSCBS (Base)" value={nfe.v_bc_ibs_cbs} />
             <LinhaBRL label="vIBSUF" value={nfe.v_ibs_uf} /><LinhaBRL label="vIBSMun" value={nfe.v_ibs_mun} />
-            <LinhaBRL label="vIBS (Total)" value={nfe.v_ibs} /><LinhaBRL label="vCredPres IBS" value={nfe.v_cred_pres_ibs} />
-            <LinhaBRL label="vCBS" value={nfe.v_cbs} /><LinhaBRL label="vCredPres CBS" value={nfe.v_cred_pres_cbs} />
+            <LinhaBRL label="vIBS (Total)" value={nfe.v_ibs} />
+            <LinhaBRL label="vCBS" value={nfe.v_cbs} />
           </Secao>
         </div>
       </DialogContent>
@@ -234,18 +209,14 @@ export default function ConsultaNFesEntradas() {
       const params = new URLSearchParams();
       params.set('page', String(page));
       params.set('page_size', String(PAGE_SIZE));
-      if (mesAno)      params.set('mes_ano',  mesAno);
-      if (filterFilial) params.set('dest_cnpj', filterFilial);
-      if (filterDataDe) params.set('data_de',   filterDataDe);
+      if (mesAno)        params.set('mes_ano',  mesAno);
+      if (filterFilial)  params.set('dest_cnpj', filterFilial);
+      if (filterDataDe)  params.set('data_de',   filterDataDe);
       if (filterDataAte) params.set('data_ate',  filterDataAte);
-      if (filterSemIBS) params.set('sem_ibs_cbs', 'true');
+      if (filterSemIBS)  params.set('sem_ibs_cbs', 'true');
       if (fornecDebounced) {
         const digits = fornecDebounced.replace(/\D/g, '');
-        if (digits && digits === fornecDebounced.replace(/[.\-/]/g, '').replace(/\s/g, '')) {
-          params.set('forn_cnpj_search', digits);
-        } else {
-          params.set('forn_nome', fornecDebounced);
-        }
+        if (digits) params.set('forn_cnpj', digits);
       }
       const res = await fetch(`/api/nfe-entradas?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
@@ -258,7 +229,7 @@ export default function ConsultaNFesEntradas() {
   const items      = data?.items      ?? [];
   const total      = data?.total      ?? 0;
   const totalPages = data?.total_pages ?? 1;
-  const totals     = data?.totals     ?? { v_nf: 0, v_icms: 0, v_ibs: 0, v_cbs: 0 };
+  const totals     = data?.totals     ?? { v_nf: 0, v_ibs: 0, v_cbs: 0 };
 
   const hasFilters = !!(filterFilial || filterFornec || filterDataDe || filterDataAte || filterSemIBS);
 
@@ -313,10 +284,10 @@ export default function ConsultaNFesEntradas() {
 
             {/* Fornecedor */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Fornecedor (nome ou CNPJ)</label>
-              <Input placeholder="Digite nome ou documento..." value={filterFornec}
+              <label className="text-xs text-muted-foreground">Fornecedor (CNPJ)</label>
+              <Input placeholder="Digite o CNPJ..." value={filterFornec}
                 onChange={e => setFilterFornec(e.target.value)}
-                className="h-8 w-60" />
+                className="h-8 w-44" />
             </div>
 
             {/* Data De */}
@@ -358,12 +329,11 @@ export default function ConsultaNFesEntradas() {
 
       {/* Totalizador */}
       {total > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
           {[
-            { label: 'Total vNF',   value: totals.v_nf },
-            { label: 'Total vICMS', value: totals.v_icms },
-            { label: 'Total vIBS',  value: totals.v_ibs },
-            { label: 'Total vCBS',  value: totals.v_cbs },
+            { label: 'Total vNF',  value: totals.v_nf },
+            { label: 'Total vIBS', value: totals.v_ibs },
+            { label: 'Total vCBS', value: totals.v_cbs },
           ].map(c => (
             <Card key={c.label} className="p-2">
               <p className="text-[10px] text-muted-foreground">{c.label}</p>
@@ -376,7 +346,7 @@ export default function ConsultaNFesEntradas() {
       <Card>
         <CardHeader className="py-2 px-4">
           <CardTitle className="text-[11px] text-muted-foreground font-normal">
-            Clique em uma linha para ver detalhes · Botão DANFE abre o documento fiscal
+            Clique em uma linha para ver detalhes
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -398,7 +368,6 @@ export default function ConsultaNFesEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px]">Fornecedor</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Filial (Dest.)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">Valor Total</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center w-12">DANFE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -411,25 +380,17 @@ export default function ConsultaNFesEntradas() {
                           {row.serie}/{row.numero_nfe}
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                        <TableCell className="py-0.5 px-2 max-w-[180px]">
-                          <div className="truncate text-[11px] font-medium" title={`${fmtCNPJ(row.forn_cnpj)} · ${row.forn_nome}`}>
-                            <span className="text-[10px] text-muted-foreground mr-1">{row.forn_uf}</span>
-                            {row.forn_nome || fmtCNPJ(row.forn_cnpj)}
+                        <TableCell className="py-0.5 px-2 max-w-[160px]">
+                          <div className="truncate text-[11px] font-mono text-muted-foreground">
+                            {fmtCNPJ(row.forn_cnpj)}
                           </div>
                         </TableCell>
                         <TableCell className="py-0.5 px-2 max-w-[180px]">
-                          <div className="truncate text-[11px]" title={row.dest_cnpj_cpf}>
+                          <div className="truncate text-[11px]">
                             {formatCnpjComApelido(row.dest_cnpj_cpf, apelidos)}
                           </div>
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">{fmtBRL(row.v_nf)}</TableCell>
-                        <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
-                          <button title="Gerar DANFE"
-                            onClick={() => openDanfe(row.chave_nfe, token, companyId)}
-                            className="text-muted-foreground hover:text-foreground transition-colors">
-                            <FileText className="h-3.5 w-3.5" />
-                          </button>
-                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCnpjComApelido, formatCNPJMasked } from '@/lib/formatFilial';
 
 const PAGE_SIZE = 100;
@@ -43,24 +42,16 @@ interface NfeSaidaRow {
   serie: string;
   numero_nfe: string;
   data_emissao: string;
+  data_autorizacao: string;
   mes_ano: string;
-  nat_op: string;
   emit_cnpj: string;
-  emit_nome: string;
-  emit_uf: string;
-  emit_municipio: string;
   dest_cnpj_cpf: string;
-  dest_nome: string;
-  dest_uf: string;
-  dest_c_mun: string;
-  v_bc: number; v_icms: number; v_icms_deson: number; v_fcp: number;
-  v_bc_st: number; v_st: number; v_fcp_st: number; v_fcp_st_ret: number;
-  v_prod: number; v_frete: number; v_seg: number; v_desc: number;
-  v_ii: number; v_ipi: number; v_ipi_devol: number;
-  v_pis: number; v_cofins: number; v_outro: number; v_nf: number;
-  v_bc_ibs_cbs: number | null; v_ibs_uf: number | null; v_ibs_mun: number | null;
-  v_ibs: number | null; v_cred_pres_ibs: number | null;
-  v_cbs: number | null; v_cred_pres_cbs: number | null;
+  v_nf: number;
+  v_bc_ibs_cbs: number;
+  v_ibs_uf: number;
+  v_ibs_mun: number;
+  v_ibs: number;
+  v_cbs: number;
 }
 
 interface NfeSaidaResponse {
@@ -68,7 +59,7 @@ interface NfeSaidaResponse {
   page: number;
   page_size: number;
   total_pages: number;
-  totals: { v_nf: number; v_icms: number; v_ibs: number; v_cbs: number };
+  totals: { v_nf: number; v_ibs: number; v_cbs: number };
   items: NfeSaidaRow[];
 }
 
@@ -84,19 +75,6 @@ function fmtCNPJ(v: string): string {
   if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
   if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
   return v;
-}
-
-async function openDanfe(chave: string, token: string | null, companyId: string | null) {
-  const res = await fetch(`/api/danfe/${chave}`, {
-    headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' },
-  });
-  if (res.status === 404) { toast.error('XML desta NF-e não encontrado. Importe o XML primeiro.'); return; }
-  if (!res.ok) { toast.error('Erro ao gerar DANFE.'); return; }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank');
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  if (!win) toast.warning('Permita popups para visualizar o DANFE.');
 }
 
 
@@ -171,50 +149,22 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeSaidaRow; onClose: () => void })
             <Linha label="Série" value={nfe.serie} />
             <Linha label="Número" value={nfe.numero_nfe} />
             <Linha label="Data Emissão" value={nfe.data_emissao} />
+            <Linha label="Data Autorização" value={nfe.data_autorizacao || '—'} />
             <Linha label="Mês/Ano" value={nfe.mes_ano} />
-            <Linha label="Natureza Operação" value={nfe.nat_op} />
           </Secao>
           <Secao title="Emitente (Filial)">
             <Linha label="CNPJ" value={fmtCNPJ(nfe.emit_cnpj)} />
-            <Linha label="Razão Social" value={nfe.emit_nome} />
-            <Linha label="Município" value={nfe.emit_municipio} />
-            <Linha label="UF" value={nfe.emit_uf} />
           </Secao>
           <Secao title="Destinatário (Cliente)">
             <Linha label="CNPJ/CPF" value={fmtCNPJ(nfe.dest_cnpj_cpf)} />
-            <Linha label="Nome/Razão Social" value={nfe.dest_nome} />
-            <Linha label="UF" value={nfe.dest_uf} />
-            <Linha label="Município (IBGE)" value={nfe.dest_c_mun} />
           </Secao>
-          <Secao title="ICMSTot — Totais da Nota">
-            <LinhaBRL label="vProd" value={nfe.v_prod} />
-            <LinhaBRL label="vFrete" value={nfe.v_frete} />
-            <LinhaBRL label="vSeg" value={nfe.v_seg} />
-            <LinhaBRL label="vDesc" value={nfe.v_desc} />
-            <LinhaBRL label="vII" value={nfe.v_ii} />
-            <LinhaBRL label="vIPI" value={nfe.v_ipi} />
-            <LinhaBRL label="vIPIDevol" value={nfe.v_ipi_devol} />
-            <LinhaBRL label="vPIS" value={nfe.v_pis} />
-            <LinhaBRL label="vCOFINS" value={nfe.v_cofins} />
-            <LinhaBRL label="vOutro" value={nfe.v_outro} />
+          <Secao title="Valores — Reforma Tributária">
             <LinhaBRL label="vNF (Valor Total)" value={nfe.v_nf} />
-            <LinhaBRL label="vBC (Base ICMS)" value={nfe.v_bc} />
-            <LinhaBRL label="vICMS" value={nfe.v_icms} />
-            <LinhaBRL label="vICMSDeson" value={nfe.v_icms_deson} />
-            <LinhaBRL label="vFCP" value={nfe.v_fcp} />
-            <LinhaBRL label="vBCST" value={nfe.v_bc_st} />
-            <LinhaBRL label="vST" value={nfe.v_st} />
-            <LinhaBRL label="vFCPST" value={nfe.v_fcp_st} />
-            <LinhaBRL label="vFCPSTRet" value={nfe.v_fcp_st_ret} />
-          </Secao>
-          <Secao title="IBSCBSTot — Reforma Tributária">
             <LinhaBRL label="vBCIBSCBS (Base)" value={nfe.v_bc_ibs_cbs} />
             <LinhaBRL label="vIBSUF" value={nfe.v_ibs_uf} />
             <LinhaBRL label="vIBSMun" value={nfe.v_ibs_mun} />
             <LinhaBRL label="vIBS (Total)" value={nfe.v_ibs} />
-            <LinhaBRL label="vCredPres IBS" value={nfe.v_cred_pres_ibs} />
             <LinhaBRL label="vCBS" value={nfe.v_cbs} />
-            <LinhaBRL label="vCredPres CBS" value={nfe.v_cred_pres_cbs} />
           </Secao>
         </div>
       </DialogContent>
@@ -236,14 +186,12 @@ export default function ConsultaNFeSaidas() {
   const [filterDataAte, setFilterDataAte] = useState('');
   const [page, setPage] = useState(1);
 
-  // Debounce do campo de cliente para não disparar query a cada tecla
   const [clienteDebounced, setClienteDebounced] = useState('');
   useEffect(() => {
     const t = setTimeout(() => setClienteDebounced(filterCliente), 400);
     return () => clearTimeout(t);
   }, [filterCliente]);
 
-  // Reset página quando qualquer filtro muda
   useEffect(() => { setPage(1); }, [mesAno, filterFilial, filterModelo, clienteDebounced, filterDataDe, filterDataAte]);
 
   const [selected, setSelected] = useState<NfeSaidaRow | null>(null);
@@ -254,7 +202,6 @@ export default function ConsultaNFeSaidas() {
     'X-Company-ID': companyId || '',
   };
 
-  // Carrega apelidos de filiais e meses disponíveis
   useEffect(() => {
     if (!token || !companyId) return;
     fetch('/api/config/filial-apelidos', { headers: authHeaders })
@@ -279,7 +226,6 @@ export default function ConsultaNFeSaidas() {
       .catch(() => {});
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── React Query: busca server-side ───────────────────────────────────────
   const { data, isFetching, isError } = useQuery<NfeSaidaResponse>({
     queryKey: ['nfe-saidas', companyId, {
       page, mesAno, filterFilial, filterModelo,
@@ -296,11 +242,8 @@ export default function ConsultaNFeSaidas() {
       if (filterDataAte)      params.set('data_ate',  filterDataAte);
       if (clienteDebounced) {
         const digits = clienteDebounced.replace(/\D/g, '');
-        // Se for apenas dígitos → busca por CNPJ/CPF; senão → busca por nome
         if (digits && digits === clienteDebounced.replace(/[.\-/]/g, '').replace(/\s/g, '')) {
           params.set('dest_cnpj', digits);
-        } else {
-          params.set('dest_nome', clienteDebounced);
         }
       }
       const res = await fetch(`/api/nfe-saidas?${params}`, { headers: authHeaders });
@@ -314,7 +257,7 @@ export default function ConsultaNFeSaidas() {
   const items      = data?.items      ?? [];
   const total      = data?.total      ?? 0;
   const totalPages = data?.total_pages ?? 1;
-  const totals     = data?.totals     ?? { v_nf: 0, v_icms: 0, v_ibs: 0, v_cbs: 0 };
+  const totals     = data?.totals     ?? { v_nf: 0, v_ibs: 0, v_cbs: 0 };
 
   const hasFilters = !!(filterFilial || filterModelo || filterCliente || filterDataDe || filterDataAte);
 
@@ -329,7 +272,7 @@ export default function ConsultaNFeSaidas() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Notas de Saída</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Consulta de NF-e e NFC-e de saída importadas via XML. Clique em uma linha para ver todos os dados.
+          Consulta de NF-e e NFC-e de saída. Clique em uma linha para ver todos os dados.
         </p>
       </div>
 
@@ -388,11 +331,11 @@ export default function ConsultaNFeSaidas() {
 
             {/* Cliente */}
             <div className="flex flex-col gap-1">
-              <label className="text-xs text-muted-foreground">Cliente (nome ou CNPJ/CPF)</label>
-              <Input placeholder="Digite nome ou documento..."
+              <label className="text-xs text-muted-foreground">Cliente (CNPJ/CPF)</label>
+              <Input placeholder="Digite o documento..."
                 value={filterCliente}
                 onChange={e => setFilterCliente(e.target.value)}
-                className="h-8 w-60" />
+                className="h-8 w-44" />
             </div>
 
             {/* Data De */}
@@ -427,12 +370,11 @@ export default function ConsultaNFeSaidas() {
 
       {/* ── Totalizador ── */}
       {total > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
           {[
-            { label: 'Total vNF',   value: totals.v_nf },
-            { label: 'Total vICMS', value: totals.v_icms },
-            { label: 'Total vIBS',  value: totals.v_ibs },
-            { label: 'Total vCBS',  value: totals.v_cbs },
+            { label: 'Total vNF',  value: totals.v_nf },
+            { label: 'Total vIBS', value: totals.v_ibs },
+            { label: 'Total vCBS', value: totals.v_cbs },
           ].map(c => (
             <Card key={c.label} className="p-2">
               <p className="text-[10px] text-muted-foreground">{c.label}</p>
@@ -446,7 +388,7 @@ export default function ConsultaNFeSaidas() {
       <Card>
         <CardHeader className="py-2 px-4">
           <CardTitle className="text-[11px] text-muted-foreground font-normal">
-            Clique em uma linha para ver detalhes · Botão DANFE abre o documento fiscal
+            Clique em uma linha para ver detalhes
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -468,7 +410,6 @@ export default function ConsultaNFeSaidas() {
                       <TableHead className="py-1.5 px-2 text-[11px]">Filial</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Cliente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">Valor NF</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-center w-12">DANFE</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -484,26 +425,17 @@ export default function ConsultaNFeSaidas() {
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
                         <TableCell className="py-0.5 px-2 max-w-[180px]">
-                          <div className="truncate text-[11px] font-medium" title={`${row.emit_uf} · ${row.emit_cnpj}`}>
-                            <span className="text-[10px] text-muted-foreground mr-1">{row.emit_uf}</span>
+                          <div className="truncate text-[11px] font-medium">
                             {formatCnpjComApelido(row.emit_cnpj, apelidos)}
                           </div>
                         </TableCell>
-                        <TableCell className="py-0.5 px-2 max-w-[200px]">
-                          <div className="truncate text-[11px]" title={`${fmtCNPJ(row.dest_cnpj_cpf)} · ${row.dest_nome}`}>
-                            <span className="font-mono text-[10px] text-muted-foreground mr-1">{fmtCNPJ(row.dest_cnpj_cpf)}</span>
-                            {row.dest_nome || '—'}
+                        <TableCell className="py-0.5 px-2 max-w-[160px]">
+                          <div className="truncate text-[11px] font-mono text-muted-foreground">
+                            {fmtCNPJ(row.dest_cnpj_cpf)}
                           </div>
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">
                           {fmtBRL(row.v_nf)}
-                        </TableCell>
-                        <TableCell className="py-0.5 px-2 text-center" onClick={e => e.stopPropagation()}>
-                          <button title="Gerar DANFE"
-                            onClick={() => openDanfe(row.chave_nfe, token, companyId)}
-                            className="text-muted-foreground hover:text-foreground transition-colors">
-                            <FileText className="h-3.5 w-3.5" />
-                          </button>
                         </TableCell>
                       </TableRow>
                     ))}

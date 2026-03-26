@@ -16,18 +16,6 @@ export const modules: Record<string, ModuleConfig> = {
     label: 'Painel',
     tabs: [],
   },
-  importacoes: {
-    label: 'Importações',
-    tabs: [
-      { label: 'NF-e Saídas',    path: '/apuracao/saida' },
-      { label: 'NF-e Entradas',  path: '/apuracao/entrada' },
-      { label: 'CT-e Entradas',  path: '/apuracao/cte-entrada' },
-      { label: 'NFS-e',          path: '#', disabled: true },
-      { label: 'ERP Bridge',     path: '/importacoes/erp-bridge' },
-      { label: 'Logs Bridge',    path: '/importacoes/erp-bridge/logs' },
-      { label: 'Limpar Dados',   path: '/importacoes/limpar-dados', danger: true },
-    ],
-  },
   apuracao: {
     label: 'Apuração IBS / CBS',
     tabs: [
@@ -73,8 +61,10 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Gestores',         path: '/config/gestores' },
       { label: 'Ambiente',         path: '/config/ambiente' },
       { label: 'Credenciais RFB',    path: '/rfb/credenciais',    adminOnly: true },
-      { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',  adminOnly: true },
-      { label: 'Usuários',          path: '/config/usuarios',    adminOnly: true },
+      { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',         adminOnly: true },
+      { label: 'ERP Bridge',        path: '/importacoes/erp-bridge',    adminOnly: true },
+      { label: 'Logs Bridge',       path: '/importacoes/erp-bridge/logs', adminOnly: true },
+      { label: 'Usuários',          path: '/config/usuarios',           adminOnly: true },
       { label: 'Limpar Dados',      path: '/config/limpar-dados', danger: true, adminOnly: true },
     ],
   },
@@ -82,9 +72,6 @@ export const modules: Record<string, ModuleConfig> = {
 
 export function getActiveModule(pathname: string): string {
   if (pathname === '/') return 'painel'
-
-  const importPaths = ['/apuracao/saida', '/apuracao/entrada', '/apuracao/cte-entrada']
-  if (importPaths.includes(pathname) || pathname.startsWith('/importacoes/')) return 'importacoes'
 
   const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs', '/apuracao/limpar-dados']
   if (pathname.includes('/notas') || apuracaoPaths.includes(pathname)) return 'apuracao'
@@ -94,7 +81,7 @@ export function getActiveModule(pathname: string): string {
 
   if (pathname.startsWith('/malha-fina/')) return 'malha'
 
-  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais') return 'config'
+  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais' || pathname.startsWith('/importacoes/')) return 'config'
 
   return 'painel'
 }
