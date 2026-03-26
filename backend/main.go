@@ -199,20 +199,6 @@ func onDBConnected() {
 		}
 	}
 
-	// Retenção automática de dfe_xml: apaga XMLs com mais de 5 anos (obrigação fiscal = 5 anos)
-	go func() {
-		ticker := time.NewTicker(7 * 24 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			cutoff := time.Now().AddDate(-5, 0, 0)
-			res, err := database.Exec(`DELETE FROM dfe_xml WHERE created_at < $1`, cutoff)
-			if err == nil {
-				if n, _ := res.RowsAffected(); n > 0 {
-					log.Printf("[Retention] Deleted %d dfe_xml records older than 5 years", n)
-				}
-			}
-		}
-	}()
 }
 
 func DBMiddleware(next http.HandlerFunc) http.HandlerFunc {
@@ -453,17 +439,14 @@ func main() {
 	http.HandleFunc("/api/rfb/webhook", withDB(handlers.RFBWebhookHandler))
 
 	// NF-e Saídas
-	http.HandleFunc("/api/nfe-saidas/upload",   withAuth(handlers.NfeSaidasUploadHandler, ""))
 	http.HandleFunc("/api/nfe-saidas/filiais",  withAuth(handlers.NfeSaidasFiliaisHandler, ""))
 	http.HandleFunc("/api/nfe-saidas",          withAuth(handlers.NfeSaidasListHandler, ""))
 
 	// NF-e Entradas
-	http.HandleFunc("/api/nfe-entradas/upload",   withAuth(handlers.NfeEntradasUploadHandler, ""))
 	http.HandleFunc("/api/nfe-entradas/filiais",  withAuth(handlers.NfeEntradasFiliaisHandler, ""))
 	http.HandleFunc("/api/nfe-entradas",          withAuth(handlers.NfeEntradasListHandler, ""))
 
 	// CT-e Entradas
-	http.HandleFunc("/api/cte-entradas/upload",   withAuth(handlers.CteEntradasUploadHandler, ""))
 	http.HandleFunc("/api/cte-entradas/filiais",  withAuth(handlers.CteEntradasFiliaisHandler, ""))
 	http.HandleFunc("/api/cte-entradas",          withAuth(handlers.CteEntradasListHandler, ""))
 
@@ -520,8 +503,8 @@ func main() {
 	http.HandleFunc("/api/erp-bridge/runs",        withAuth(handlers.ERPBridgeRunsHandler, ""))
 	http.HandleFunc("/api/erp-bridge/runs/",       withAuth(handlers.ERPBridgeRunHandler, ""))
 
-	// DANFE generation
-	http.HandleFunc("/api/danfe/", withAuth(handlers.DanfeHandler, ""))
+	// ERP Bridge — importação batch SAP S4/HANA (auth via X-API-Key, sem JWT)
+	http.HandleFunc("/api/erp-bridge/import/batch", withDB(handlers.ERPBridgeBatchImportHandler))
 
 	// Serve frontend static files (SPA — React Router)
 	// index.html: no-cache para que o browser sempre busque a versão atual após deploy.
