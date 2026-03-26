@@ -13,11 +13,8 @@ import RFBDebitos from './pages/RFBDebitos'
 import GestaoCredIBSCBS from './pages/GestaoCredIBSCBS'
 import PainelApuracaoIBS from './pages/PainelApuracaoIBS'
 import PainelApuracaoCBS from './pages/PainelApuracaoCBS'
-import ImportarXMLsSaida from './pages/ImportarXMLsSaida'
 import ConsultaNFeSaidas from './pages/ConsultaNFeSaidas'
-import ImportarXMLsEntrada from './pages/ImportarXMLsEntrada'
 import ConsultaNFesEntradas from './pages/ConsultaNFesEntradas'
-import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import ConsultaCTesEntradas from './pages/ConsultaCTesEntradas'
 import ERPBridgeConfig from './pages/ERPBridgeConfig'
 import ERPBridgeLogs from './pages/ERPBridgeLogs'
@@ -160,13 +157,9 @@ function AppLayout() {
               <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
               <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
 
-              {/* Importações */}
-              <Route path="/apuracao/saida"              element={<ImportarXMLsSaida />} />
-              <Route path="/apuracao/entrada"            element={<ImportarXMLsEntrada />} />
-              <Route path="/apuracao/cte-entrada"        element={<ImportarXMLsCTe />} />
-              <Route path="/importacoes/erp-bridge"      element={<ERPBridgeConfig />} />
-              <Route path="/importacoes/erp-bridge/logs" element={<ERPBridgeLogs />} />
-              <Route path="/importacoes/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
+              {/* ERP Bridge */}
+              <Route path="/importacoes/erp-bridge"      element={<AdminRoute><ERPBridgeConfig /></AdminRoute>} />
+              <Route path="/importacoes/erp-bridge/logs" element={<AdminRoute><ERPBridgeLogs /></AdminRoute>} />
 
               {/* Apuração */}
               <Route path="/apuracao/saida/notas"       element={<ConsultaNFeSaidas />} />
@@ -202,7 +195,7 @@ function AppLayout() {
 
 // ── App root ─────────────────────────────────────────────────────────────────
 function App() {
-  console.log('App Version: 1.0.9 — FB_APU02 Apuração Assistida')
+  console.log('App Version: 2.0.0 — FB_APU02 Apuração Assistida SAP S/4HANA')
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
