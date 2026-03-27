@@ -260,7 +260,8 @@ export default function ConsultaCTesEntradas() {
   const hasFilters = !!(filterFilial || filterTransp || filterDataDe || filterDataAte || filterSemIBS);
 
   function clearFilters() {
-    setFilterFilial(''); setFilterTransp(''); setFilterDataDe(''); setFilterDataAte(''); setFilterSemIBS(false);
+    setFilterFilial(''); setFilterTransp(''); setTranspDebounced('');
+    setFilterDataDe(''); setFilterDataAte(''); setFilterSemIBS(false);
     setPage(1);
   }
 
