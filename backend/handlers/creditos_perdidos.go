@@ -124,8 +124,8 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 				UNION
 				SELECT mes_ano FROM cte_entradas WHERE company_id = $1
 			) t
-			WHERE mes_ano IS NOT NULL AND mes_ano != ''
-			ORDER BY mes_ano DESC
+			WHERE mes_ano ~ '^\d{2}/\d{4}$'
+			ORDER BY TO_DATE(mes_ano, 'MM/YYYY') DESC
 		`, companyID)
 		var mesesDisp []string
 		if perRows != nil {
