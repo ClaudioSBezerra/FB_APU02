@@ -202,6 +202,7 @@ FROM s4i_nfe nn
 JOIN s4i_nfe_impostos ni
   ON ni.NFEID = nn.NFEID
  AND ni.TAXTYP IN ('CBS3','IB3M','IB3S')
+ AND ni.TAXVAL > 0
 JOIN s4i_nfe_it it
   ON it.NFEID = ni.NFEID
  AND it.ITMNUM = ni.ITMNUM
