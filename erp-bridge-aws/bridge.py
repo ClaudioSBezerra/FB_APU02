@@ -199,11 +199,24 @@ SELECT
     SUM(CASE WHEN ni.TAXTYP IN ('IB3S','IB3M') THEN ni.TAXVAL ELSE 0 END) AS v_ibs,
     SUM(CASE WHEN ni.TAXTYP = 'CBS3' THEN ni.TAXVAL ELSE 0 END) AS v_cbs
 FROM s4i_nfe nn
-LEFT JOIN s4i_nfe_impostos ni
+JOIN s4i_nfe_impostos ni
   ON ni.NFEID = nn.NFEID
  AND ni.TAXTYP IN ('CBS3','IB3M','IB3S')
+JOIN s4i_nfe_it it
+  ON it.NFEID = ni.NFEID
+ AND it.ITMNUM = ni.ITMNUM
 WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
   AND nn.CANCELADO = 'N'
+  AND LPAD(it.cfop, 4, '1') NOT IN (
+    '1151','1152','1153','1154',
+    '1408','1409','1658','1659',
+    '2151','2152','2153','2154',
+    '2408','2409','2658','2659',
+    '5151','5152','5153','5154','5155','5156',
+    '5408','5409','5658','5659',
+    '6151','6152','6153','6154','6155','6156',
+    '6408','6409','6658','6659'
+  )
 GROUP BY
     nn.DIRECT, nn.NFEID, nn.SERIES, nn.NFENUM,
     nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.NFTOT
