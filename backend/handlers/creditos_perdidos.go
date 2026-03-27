@@ -145,7 +145,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 		rows, err := db.Query(`
 			SELECT
 				forn_cnpj,
-				COALESCE(forn_nome, ''),
+				'' AS forn_nome,
 				COUNT(*)          AS qtd_notas,
 				SUM(v_nf)         AS valor_total
 			FROM nfe_entradas
@@ -154,7 +154,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			  AND v_cbs = 0
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
-			GROUP BY forn_cnpj, forn_nome
+			GROUP BY forn_cnpj
 			ORDER BY valor_total DESC
 			LIMIT 50
 		`, companyID)
@@ -265,7 +265,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 		cteRows, err := db.Query(`
 			SELECT
 				emit_cnpj,
-				COALESCE(emit_nome, ''),
+				'' AS emit_nome,
 				COUNT(*)        AS qtd_ctes,
 				SUM(v_prest)    AS valor_total
 			FROM cte_entradas
@@ -273,7 +273,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			  AND (v_ibs IS NULL OR v_ibs = 0)
 			  AND (v_cbs IS NULL OR v_cbs = 0)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = emit_cnpj)
-			GROUP BY emit_cnpj, emit_nome
+			GROUP BY emit_cnpj
 			ORDER BY valor_total DESC
 			LIMIT 50
 		`, companyID)
