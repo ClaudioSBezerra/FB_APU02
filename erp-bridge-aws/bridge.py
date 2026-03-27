@@ -220,7 +220,7 @@ WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
   )
 GROUP BY
     nn.DIRECT, nn.NFEID, nn.SERIES, nn.NFENUM,
-    nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.NFTOT
+    nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.CANCELADO, nn.NFTOT
 ORDER BY nn.CREDAT, nn.NFEID
 """
 
