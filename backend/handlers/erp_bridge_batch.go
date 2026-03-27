@@ -33,8 +33,8 @@ type batchDoc struct {
 	DataAutorizacao  string  `json:"data_autorizacao"`  // "YYYY-MM-DD"
 	MesAno           string  `json:"mes_ano"`           // "MM/YYYY"
 	EmitCNPJ         string  `json:"emit_cnpj"`
-	EmitNome         string  `json:"emit_nome"`         // opcional — nome do emitente/transportadora
 	DestCNPJ         string  `json:"dest_cnpj"`
+	NomeParceiro     string  `json:"nome_parceiro"`     // forn.razsoc (DIRECT=1) ou clie.razsoc (DIRECT=2)
 	VTotal           float64 `json:"v_total"`
 	VBcIbsCbs        float64 `json:"v_bc_ibs_cbs"`
 	VIbsUf           float64 `json:"v_ibs_uf"`
@@ -150,10 +150,20 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 				result.Errors++
 				result.ErrorDetails = append(result.ErrorDetails,
 					"doc["+strconv.Itoa(i)+"] "+doc.Chave+": "+insertErr.Error())
-			} else if inserted {
-				result.Inserted++
 			} else {
-				result.Ignored++ // ON CONFLICT DO NOTHING
+				if inserted {
+					result.Inserted++
+				} else {
+					result.Ignored++
+				}
+				// Grava parceiro na tabela de lookup independente de inserção nova
+				if doc.NomeParceiro != "" {
+					if direct == "1" {
+						upsertParceiro(db, companyID, doc.EmitCNPJ, doc.NomeParceiro)
+					} else {
+						upsertParceiro(db, companyID, doc.DestCNPJ, doc.NomeParceiro)
+					}
+				}
 			}
 		}
 
@@ -169,20 +179,21 @@ func batchInsertNFeSaida(db *sql.DB, companyID string, doc batchDoc, modelo stri
 		INSERT INTO nfe_saidas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
-			emit_cnpj, dest_cnpj_cpf,
+			emit_cnpj, dest_cnpj_cpf, dest_nome,
 			v_nf,
 			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
-			$9,$10,
-			$11,
-			$12,$13,$14,$15,$16
+			$9,$10,$11,
+			$12,
+			$13,$14,$15,$16,$17
 		)
-		ON CONFLICT ON CONSTRAINT uq_nfe_saidas_company_chave DO NOTHING`,
+		ON CONFLICT ON CONSTRAINT uq_nfe_saidas_company_chave
+		DO UPDATE SET dest_nome = EXCLUDED.dest_nome WHERE nfe_saidas.dest_nome IS NULL`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, doc.DestCNPJ,
+		doc.EmitCNPJ, doc.DestCNPJ, nullStr(doc.NomeParceiro),
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 	)
@@ -209,10 +220,11 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 			$12,
 			$13,$14,$15,$16,$17
 		)
-		ON CONFLICT ON CONSTRAINT uq_nfe_entradas_company_chave DO NOTHING`,
+		ON CONFLICT ON CONSTRAINT uq_nfe_entradas_company_chave
+		DO UPDATE SET forn_nome = EXCLUDED.forn_nome WHERE nfe_entradas.forn_nome IS NULL`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, nullStr(doc.EmitNome), doc.DestCNPJ,
+		doc.EmitCNPJ, nullStr(doc.NomeParceiro), doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 	)
@@ -239,10 +251,11 @@ func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 			$12,
 			$13,$14,$15,$16,$17
 		)
-		ON CONFLICT ON CONSTRAINT uq_cte_entradas_company_chave DO NOTHING`,
+		ON CONFLICT ON CONSTRAINT uq_cte_entradas_company_chave
+		DO UPDATE SET emit_nome = EXCLUDED.emit_nome WHERE cte_entradas.emit_nome IS NULL`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, nullStr(doc.EmitNome), doc.DestCNPJ,
+		doc.EmitCNPJ, nullStr(doc.NomeParceiro), doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 	)
@@ -251,6 +264,19 @@ func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// upsertParceiro grava/atualiza CNPJ→nome na tabela parceiros (lookup cross-document).
+func upsertParceiro(db *sql.DB, companyID, cnpj, nome string) {
+	if strings.TrimSpace(cnpj) == "" || strings.TrimSpace(nome) == "" {
+		return
+	}
+	db.Exec(`
+		INSERT INTO parceiros (company_id, cnpj, nome) VALUES ($1, $2, $3)
+		ON CONFLICT (company_id, cnpj)
+		DO UPDATE SET nome = EXCLUDED.nome
+		WHERE parceiros.nome = '' OR parceiros.nome IS NULL
+	`, companyID, strings.TrimSpace(cnpj), strings.TrimSpace(nome))
 }
 
 // nullDate converte "YYYY-MM-DD" para sql.NullString; retorna NULL se vazio.

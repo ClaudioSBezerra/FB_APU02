@@ -59,6 +59,7 @@ type cteRow struct {
 	DataAutorizacao string  `json:"data_autorizacao"`
 	MesAno          string  `json:"mes_ano"`
 	EmitCNPJ        string  `json:"emit_cnpj"`
+	EmitNome        string  `json:"emit_nome"`
 	DestCNPJCPF     string  `json:"dest_cnpj_cpf"`
 	VPrest          float64 `json:"v_prest"`
 	VBcIbsCbs       float64 `json:"v_bc_ibs_cbs"`
@@ -139,7 +140,13 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				TO_CHAR(data_emissao, 'DD/MM/YYYY'),
 				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
 				mes_ano,
-				emit_cnpj, COALESCE(dest_cnpj_cpf,''),
+				emit_cnpj,
+				COALESCE(emit_nome, (
+					SELECT nome FROM parceiros
+					WHERE company_id = cte_entradas.company_id AND cnpj = cte_entradas.emit_cnpj
+					LIMIT 1
+				), '') AS emit_nome,
+				COALESCE(dest_cnpj_cpf,''),
 				v_prest,
 				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
 			FROM cte_entradas ` + where +
@@ -160,7 +167,7 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 			if err := rows.Scan(
 				&row.ID, &row.ChaveCTe, &row.Modelo, &row.Serie, &row.NumeroCTe,
 				&row.DataEmissao, &row.DataAutorizacao, &row.MesAno,
-				&row.EmitCNPJ, &row.DestCNPJCPF,
+				&row.EmitCNPJ, &row.EmitNome, &row.DestCNPJCPF,
 				&row.VPrest,
 				&row.VBcIbsCbs, &row.VIbsUf, &row.VIbsMun, &row.VIBS, &row.VCBS,
 			); err != nil {

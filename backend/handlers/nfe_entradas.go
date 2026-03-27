@@ -59,6 +59,7 @@ type nfeEntradaRow struct {
 	DataAutorizacao string  `json:"data_autorizacao"`
 	MesAno          string  `json:"mes_ano"`
 	FornCNPJ        string  `json:"forn_cnpj"`
+	FornNome        string  `json:"forn_nome"`
 	DestCNPJCPF     string  `json:"dest_cnpj_cpf"`
 	VNF             float64 `json:"v_nf"`
 	VBCIbsCbs       float64 `json:"v_bc_ibs_cbs"`
@@ -139,7 +140,13 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				TO_CHAR(data_emissao, 'DD/MM/YYYY'),
 				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
 				mes_ano,
-				forn_cnpj, COALESCE(dest_cnpj_cpf,''),
+				forn_cnpj,
+				COALESCE(forn_nome, (
+					SELECT nome FROM parceiros
+					WHERE company_id = nfe_entradas.company_id AND cnpj = nfe_entradas.forn_cnpj
+					LIMIT 1
+				), '') AS forn_nome,
+				COALESCE(dest_cnpj_cpf,''),
 				v_nf,
 				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
 			FROM nfe_entradas ` + where +
@@ -160,7 +167,7 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 			if err := rows.Scan(
 				&row.ID, &row.ChaveNFe, &row.Modelo, &row.Serie, &row.NumeroNFe,
 				&row.DataEmissao, &row.DataAutorizacao, &row.MesAno,
-				&row.FornCNPJ, &row.DestCNPJCPF,
+				&row.FornCNPJ, &row.FornNome, &row.DestCNPJCPF,
 				&row.VNF,
 				&row.VBCIbsCbs, &row.VIBSuf, &row.VIBSMun, &row.VIBS, &row.VCBS,
 			); err != nil {

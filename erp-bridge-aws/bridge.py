@@ -187,6 +187,11 @@ SELECT
     TO_CHAR(TRUNC(nn.DOCDAT), 'MM/YYYY')                       AS mes_ano,
     nn.CNPJ_EMIT                                                AS emit_cnpj,
     nn.CNPJ_DEST                                                AS dest_cnpj,
+    CASE
+      WHEN nn.DIRECT = '1' THEN (SELECT f.RAZSOC FROM FORN f WHERE f.CGC = nn.CNPJ_EMIT AND ROWNUM = 1)
+      WHEN nn.DIRECT = '2' THEN (SELECT c.RAZSOC FROM CLIE c WHERE c.CGCCPF = nn.CNPJ_DEST AND ROWNUM = 1)
+      ELSE NULL
+    END                                                         AS nome_parceiro,
     nn.NFTOT                                                    AS v_total,
     MAX(CASE WHEN ni.TAXTYP = 'CBS3' THEN ni.BASE  ELSE 0 END) AS v_bc_ibs_cbs,
     SUM(CASE WHEN ni.TAXTYP = 'IB3S' THEN ni.TAXVAL ELSE 0 END) AS v_ibs_uf,
@@ -528,6 +533,7 @@ def processar_sap(
                 "mes_ano":          s(r.get("mes_ano")),
                 "emit_cnpj":        s(r.get("emit_cnpj")),
                 "dest_cnpj":        s(r.get("dest_cnpj")),
+                "nome_parceiro":    s(r.get("nome_parceiro")),
                 "v_total":          f(r.get("v_total")),
                 "v_bc_ibs_cbs":     f(r.get("v_bc_ibs_cbs")),
                 "v_ibs_uf":         f(r.get("v_ibs_uf")),

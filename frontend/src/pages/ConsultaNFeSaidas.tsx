@@ -46,6 +46,7 @@ interface NfeSaidaRow {
   mes_ano: string;
   emit_cnpj: string;
   dest_cnpj_cpf: string;
+  dest_nome: string;
   v_nf: number;
   v_bc_ibs_cbs: number;
   v_ibs_uf: number;
@@ -453,10 +454,15 @@ export default function ConsultaNFeSaidas() {
                             {formatCnpjComApelido(row.emit_cnpj, apelidos)}
                           </div>
                         </TableCell>
-                        <TableCell className="py-0.5 px-2 max-w-[160px]">
-                          <div className="truncate text-[11px] font-mono text-muted-foreground">
-                            {fmtCNPJ(row.dest_cnpj_cpf)}
+                        <TableCell className="py-0.5 px-2 max-w-[180px]">
+                          <div className="truncate text-[11px] font-medium">
+                            {row.dest_nome || fmtCNPJ(row.dest_cnpj_cpf)}
                           </div>
+                          {row.dest_nome && (
+                            <div className="truncate text-[10px] font-mono text-muted-foreground">
+                              {fmtCNPJ(row.dest_cnpj_cpf)}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="py-0.5 px-2" onClick={e => e.stopPropagation()}>
                           <CopyChave chave={row.chave_nfe} />
