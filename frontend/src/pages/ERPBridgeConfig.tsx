@@ -16,6 +16,7 @@ interface BridgeConfig {
   dias_retroativos: number;
   ultimo_run_em: string | null;
   updated_at: string;
+  erp_type: string; // 'sap_s4hana' | 'oracle_xml'
   fbtax_email: string;
   fbtax_password_set: boolean;
   oracle_usuario: string;
@@ -71,6 +72,18 @@ function StatusBadge({ status }: { status: string }) {
 function fmtDateTime(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function ServidorBadge({ erp_type }: { erp_type: string }) {
+  if (erp_type === 'sap_s4hana') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">
+        <span className="font-mono">FCCORP</span>
+        <span className="font-normal text-blue-500">SAP S/4HANA</span>
+      </span>
+    );
+  }
+  return null;
 }
 
 // ── Helpers de data ───────────────────────────────────────────────────────────
@@ -253,7 +266,8 @@ const abortMutation = useMutation({
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3">
-            <div className="flex flex-wrap gap-4 text-xs">
+            <div className="flex flex-wrap gap-4 text-xs items-center">
+              {cfg?.erp_type && <ServidorBadge erp_type={cfg.erp_type} />}
               <div>
                 <span className="text-muted-foreground">Criado em: </span>
                 <span className="font-medium">{fmtDateTime(pendingRun.iniciado_em)}</span>
@@ -303,7 +317,8 @@ const abortMutation = useMutation({
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-3 space-y-3">
-            <div className="flex flex-wrap gap-4 text-xs">
+            <div className="flex flex-wrap gap-4 text-xs items-center">
+              {cfg?.erp_type && <ServidorBadge erp_type={cfg.erp_type} />}
               <div>
                 <span className="text-muted-foreground">Início: </span>
                 <span className="font-medium">{fmtDateTime(runningRun.iniciado_em)}</span>
@@ -368,7 +383,9 @@ const abortMutation = useMutation({
               </div>
             ) : (
               <p className="text-[11px] text-muted-foreground italic">
-                Aguardando conclusão da primeira filial...
+                {cfg?.erp_type === 'sap_s4hana'
+                  ? 'FCCORP (SAP S/4HANA) — Aguardando início da importação...'
+                  : 'Aguardando conclusão da primeira filial...'}
               </p>
             )}
           </CardContent>
@@ -428,9 +445,10 @@ const abortMutation = useMutation({
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4 space-y-4">
-          <p className="text-[11px] text-muted-foreground">
-            Dispara uma importação imediatamente. O daemon Bridge a executará na próxima varredura (em até 1 minuto).
-          </p>
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground flex-wrap">
+            <span>Dispara uma importação imediatamente. O daemon Bridge a executará na próxima varredura (em até 1 minuto).</span>
+            {cfg?.erp_type && <ServidorBadge erp_type={cfg.erp_type} />}
+          </div>
 
           {/* Período */}
           <div className="flex flex-wrap gap-4 items-end">
