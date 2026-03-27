@@ -186,6 +186,7 @@ export default function ConsultaCTesEntradas() {
 
   const [mesAnoOptions, setMesAnoOptions] = useState<string[]>([]);
   const [mesAno,        setMesAno]        = useState('');
+  const [mesAnoLoaded,  setMesAnoLoaded]  = useState(false);
   const [filterFilial,  setFilterFilial]  = useState('');
   const [filterTransp,  setFilterTransp]  = useState('');
   const [filterDataDe,  setFilterDataDe]  = useState('');
@@ -222,8 +223,9 @@ export default function ConsultaCTesEntradas() {
       .then((meses: string[]) => {
         setMesAnoOptions(meses);
         setMesAno(prev => prev || meses[0] || '');
+        setMesAnoLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => { setMesAnoLoaded(true); });
     fetch('/api/cte-entradas/filiais', { headers: authHeaders })
       .then(r => r.ok ? r.json() : [])
       .then((list: FilialOption[]) => setFiliaisOptions(list || []))
@@ -250,7 +252,7 @@ export default function ConsultaCTesEntradas() {
       return res.json();
     },
     placeholderData: keepPreviousData,
-    enabled: !!token && !!companyId && !!mesAno,
+    enabled: !!token && !!companyId && mesAnoLoaded,
   });
 
   const items      = data?.items      ?? [];
@@ -283,7 +285,7 @@ export default function ConsultaCTesEntradas() {
               <label className="text-xs text-muted-foreground">Mês/Ano</label>
               <Select value={mesAno} onValueChange={v => { setMesAno(v); setPage(1); }}>
                 <SelectTrigger className="h-8 w-32 text-[11px]">
-                  <SelectValue placeholder={mesAnoOptions.length === 0 ? 'Carregando...' : 'Selecione...'} />
+                  <SelectValue placeholder={!mesAnoLoaded ? 'Carregando...' : mesAnoOptions.length === 0 ? 'Sem períodos' : 'Selecione...'} />
                 </SelectTrigger>
                 <SelectContent>
                   {mesAnoOptions.map(m => <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>)}

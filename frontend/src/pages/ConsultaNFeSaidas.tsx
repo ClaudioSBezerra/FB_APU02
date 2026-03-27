@@ -201,6 +201,7 @@ export default function ConsultaNFeSaidas() {
 
   const [mesAnoOptions,  setMesAnoOptions]  = useState<string[]>([]);
   const [mesAno,         setMesAno]         = useState('');
+  const [mesAnoLoaded,   setMesAnoLoaded]   = useState(false);
   const [filiaisOptions, setFiliaisOptions] = useState<FilialOption[]>([]);
   const [filterFilial, setFilterFilial] = useState('');
   const [filterModelo, setFilterModelo] = useState('');
@@ -240,8 +241,9 @@ export default function ConsultaNFeSaidas() {
       .then((meses: string[]) => {
         setMesAnoOptions(meses);
         setMesAno(prev => prev || meses[0] || '');
+        setMesAnoLoaded(true);
       })
-      .catch(() => {});
+      .catch(() => { setMesAnoLoaded(true); });
     fetch('/api/nfe-saidas/filiais', { headers: authHeaders })
       .then(r => r.ok ? r.json() : [])
       .then((list: FilialOption[]) => setFiliaisOptions(list || []))
@@ -271,7 +273,7 @@ export default function ConsultaNFeSaidas() {
       return res.json();
     },
     placeholderData: keepPreviousData,
-    enabled: !!token && !!companyId && !!mesAno,
+    enabled: !!token && !!companyId && mesAnoLoaded,
   });
 
   const items      = data?.items      ?? [];
@@ -307,7 +309,7 @@ export default function ConsultaNFeSaidas() {
               <label className="text-xs text-muted-foreground">Mês/Ano</label>
               <Select value={mesAno} onValueChange={v => { setMesAno(v); setPage(1); }}>
                 <SelectTrigger className="h-8 w-32 text-[11px]">
-                  <SelectValue placeholder={mesAnoOptions.length === 0 ? 'Carregando...' : 'Selecione...'} />
+                  <SelectValue placeholder={!mesAnoLoaded ? 'Carregando...' : mesAnoOptions.length === 0 ? 'Sem períodos' : 'Selecione...'} />
                 </SelectTrigger>
                 <SelectContent>
                   {mesAnoOptions.map(m => (
