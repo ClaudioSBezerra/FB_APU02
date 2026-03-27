@@ -52,7 +52,7 @@ func NfeSaidasCompetenciasHandler(db *sql.DB) http.HandlerFunc {
 			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa")
 			return
 		}
-		rows, err := db.Query(`SELECT DISTINCT mes_ano FROM nfe_saidas WHERE company_id = $1 AND mes_ano IS NOT NULL AND mes_ano != '' ORDER BY SPLIT_PART(mes_ano,'/',2) DESC, SPLIT_PART(mes_ano,'/',1) DESC`, companyID)
+		rows, err := db.Query(`SELECT mes_ano FROM (SELECT DISTINCT mes_ano FROM nfe_saidas WHERE company_id = $1 AND mes_ano IS NOT NULL AND mes_ano != '') sub ORDER BY SPLIT_PART(mes_ano,'/',2) DESC, SPLIT_PART(mes_ano,'/',1) DESC`, companyID)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
 			return

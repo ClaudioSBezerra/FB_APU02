@@ -73,14 +73,16 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 
 		// ── Meses disponíveis (union das 3 tabelas com dados reais) ──────────
 		rows, err := db.Query(`
-			SELECT DISTINCT mes_ano FROM (
-				SELECT mes_ano FROM nfe_saidas   WHERE company_id = $1
-				UNION
-				SELECT mes_ano FROM nfe_entradas WHERE company_id = $1
-				UNION
-				SELECT mes_ano FROM cte_entradas WHERE company_id = $1
-			) t
-			WHERE mes_ano IS NOT NULL AND mes_ano != ''
+			SELECT mes_ano FROM (
+				SELECT DISTINCT mes_ano FROM (
+					SELECT mes_ano FROM nfe_saidas   WHERE company_id = $1
+					UNION
+					SELECT mes_ano FROM nfe_entradas WHERE company_id = $1
+					UNION
+					SELECT mes_ano FROM cte_entradas WHERE company_id = $1
+				) t
+				WHERE mes_ano IS NOT NULL AND mes_ano != ''
+			) u
 			ORDER BY SPLIT_PART(mes_ano, '/', 2) DESC,
 			         SPLIT_PART(mes_ano, '/', 1) DESC
 		`, companyID)
