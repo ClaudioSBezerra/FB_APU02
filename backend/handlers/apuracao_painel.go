@@ -80,7 +80,7 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 				UNION
 				SELECT mes_ano FROM cte_entradas WHERE company_id = $1
 			) t
-			WHERE mes_ano ~ '^\d{2}/\d{4}$'
+			WHERE mes_ano ~ '^[0-9]{2}/[0-9]{4}$'
 			ORDER BY TO_DATE(mes_ano, 'MM/YYYY') DESC
 		`, companyID)
 		if err != nil {
