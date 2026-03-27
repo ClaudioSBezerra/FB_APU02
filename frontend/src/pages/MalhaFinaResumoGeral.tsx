@@ -45,6 +45,9 @@ const TIPO_COLOR: Record<string, string> = {
 function fmtBRL(v: number): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
+function fmtNum(v: number): string {
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function fmtCNPJ(v: string): string {
   const d = v.replace(/\D/g, '');
   if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
@@ -256,7 +259,7 @@ export default function MalhaFinaResumoGeral() {
                       <TableHead className="py-1.5 px-3 text-[11px]">Apelido Filial</TableHead>
                       <TableHead className="py-1.5 px-3 text-[11px]">Data Emissão</TableHead>
                       <TableHead className="py-1.5 px-3 text-[11px] text-right">Qtd Docs</TableHead>
-                      <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Não Extinto</TableHead>
+                      <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Não Extinto (R$)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -291,7 +294,7 @@ export default function MalhaFinaResumoGeral() {
                             )}
                           </TableCell>
                           <TableCell className="py-1 px-3 text-[11px] text-right text-red-700 font-semibold">
-                            {idx === 0 ? fmtBRL(valorGrupo) : fmtBRL(d.valor)}
+                            {idx === 0 ? fmtNum(valorGrupo) : fmtNum(d.valor)}
                           </TableCell>
                         </TableRow>
                       ));

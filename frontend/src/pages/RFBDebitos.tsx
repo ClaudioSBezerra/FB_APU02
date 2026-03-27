@@ -141,6 +141,10 @@ function formatCurrency(v: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
 
+function formatNum(v: number): string {
+  return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+}
+
 function formatNumber(n: number): string {
   return new Intl.NumberFormat('pt-BR').format(n);
 }
@@ -544,9 +548,9 @@ export default function RFBDebitos() {
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Cliente</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Data Emissão</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Chave Eletrônica</th>
-                    <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">CBS Total</th>
-                    <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Extinto</th>
-                    <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Não Extinto</th>
+                    <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">CBS Total (R$)</th>
+                    <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Extinto (R$)</th>
+                    <th className="px-2 py-2 text-right font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Não Extinto (R$)</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Situação</th>
                   </tr>
                 </thead>
@@ -572,9 +576,9 @@ export default function RFBDebitos() {
                           </button>
                         )}
                       </td>
-                      <td className="px-2 py-1 text-right font-medium text-red-600">{formatCurrency(d.valor_cbs_total)}</td>
-                      <td className="px-2 py-1 text-right text-green-600">{formatCurrency(d.valor_cbs_extinto)}</td>
-                      <td className="px-2 py-1 text-right text-orange-600">{formatCurrency(d.valor_cbs_nao_extinto)}</td>
+                      <td className="px-2 py-1 text-right font-medium text-red-600">{formatNum(d.valor_cbs_total)}</td>
+                      <td className="px-2 py-1 text-right text-green-600">{formatNum(d.valor_cbs_extinto)}</td>
+                      <td className="px-2 py-1 text-right text-orange-600">{formatNum(d.valor_cbs_nao_extinto)}</td>
                       <td className="px-2 py-1 text-muted-foreground">{d.situacao_debito || '—'}</td>
                     </tr>
                   ))}

@@ -29,9 +29,13 @@ function fmt(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
 }
 
+function fmtNum(v: number) {
+  return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 function fmtParen(v: number) {
-  if (v === 0) return "R$ 0,00"
-  return `(${fmt(v)})`
+  if (v === 0) return "0,00"
+  return `(${fmtNum(v)})`
 }
 
 // ---------------------------------------------------------------------------
@@ -187,13 +191,13 @@ export default function PainelApuracaoCBS() {
               <thead>
                 <tr className="border-b text-muted-foreground text-xs uppercase tracking-wide">
                   <th className="text-left py-2 pr-4 font-medium">Origem</th>
-                  <th className="text-right py-2 pl-4 font-medium">CBS</th>
+                  <th className="text-right py-2 pl-4 font-medium">CBS (R$)</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 <tr>
                   <td className="py-2.5 pr-4 text-muted-foreground">Débito — NF-e Saídas</td>
-                  <td className="py-2.5 pl-4 text-right font-mono font-medium">{fmt(cbs.debito_total)}</td>
+                  <td className="py-2.5 pl-4 text-right font-mono font-medium">{fmtNum(cbs.debito_total)}</td>
                 </tr>
                 <tr>
                   <td className="py-2.5 pr-4 text-muted-foreground">Crédito — NF-e Entradas</td>
@@ -208,7 +212,7 @@ export default function PainelApuracaoCBS() {
                 <tr className="border-t-2">
                   <td className="py-3 pr-4 font-bold">Saldo a Recolher / Favor</td>
                   <td className={`py-3 pl-4 text-right font-mono font-bold text-base ${saldoCor(cbs.saldo_total)}`}>
-                    {fmt(cbs.saldo_total)}
+                    {fmtNum(cbs.saldo_total)}
                   </td>
                 </tr>
               </tfoot>

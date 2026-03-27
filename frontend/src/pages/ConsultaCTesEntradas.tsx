@@ -56,6 +56,11 @@ function fmtBRL(v: number | null | undefined, dash = '—'): string {
   if (v == null) return dash;
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
+
+function fmtNum(v: number | null | undefined, dash = '—'): string {
+  if (v == null) return dash;
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function fmtCNPJ(v: string): string {
   if (!v) return '—';
   const d = v.replace(/\D/g, '');
@@ -416,14 +421,14 @@ export default function ConsultaCTesEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px]">Destinatário (Filial)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Chave</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_prest')}>
-                        vPrest <SortIcon col="v_prest" />
+                        vPrest (R$) <SortIcon col="v_prest" />
                       </TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_ibs')}>
-                        IBS <SortIcon col="v_ibs" />
+                        IBS (R$) <SortIcon col="v_ibs" />
                       </TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Mun.</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Mun. (R$)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_cbs')}>
-                        CBS <SortIcon col="v_cbs" />
+                        CBS (R$) <SortIcon col="v_cbs" />
                       </TableHead>
                     </TableRow>
                   </TableHeader>
@@ -456,10 +461,10 @@ export default function ConsultaCTesEntradas() {
                           <TableCell className="py-0.5 px-2" onClick={e => e.stopPropagation()}>
                             <CopyChave chave={row.chave_cte} />
                           </TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">{fmtBRL(row.v_prest)}</TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtBRL(row.v_ibs_uf)}</TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtBRL(row.v_ibs_mun)}</TableCell>
-                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtBRL(row.v_cbs)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">{fmtNum(row.v_prest)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_ibs_uf)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_ibs_mun)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_cbs)}</TableCell>
                         </TableRow>
                       );
                     })}

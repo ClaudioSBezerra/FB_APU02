@@ -82,6 +82,11 @@ function fmtBRL(v: number | null | undefined): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function fmtNum(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 
 // ---------------------------------------------------------------------------
 // Component
@@ -303,9 +308,9 @@ export default function ImportarXMLsEntrada() {
                     <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Fornecedor</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vNF</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vNF (R$)</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS (R$)</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS (R$)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -329,9 +334,9 @@ export default function ImportarXMLsEntrada() {
                           {row.dest_nome}
                         </div>
                       </TableCell>
-                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtBRL(row.v_nf)}</TableCell>
-                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtBRL(row.v_ibs)}</TableCell>
-                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtBRL(row.v_cbs)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtNum(row.v_nf)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtNum(row.v_ibs)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px]">{fmtNum(row.v_cbs)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

@@ -96,6 +96,9 @@ interface CreditosPerdidosData {
 const fmtBRL = (v: number) =>
   v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+const fmtNum = (v: number) =>
+  v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 const fmtPct = (v: number) =>
   `${v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 
@@ -298,10 +301,10 @@ export default function ApuracaoCredPerdidos() {
                     <TableHead className="py-1.5 px-3 text-[11px]">Fornecedor</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px]">CNPJ</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px] text-center">Notas</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">Valor Total</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">IBS Est.</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Est.</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right font-semibold text-orange-600">Total em Risco</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">Valor Total (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">IBS Est. (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Est. (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right font-semibold text-orange-600">Total em Risco (R$)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -312,10 +315,10 @@ export default function ApuracaoCredPerdidos() {
                       <TableCell className="py-1 px-3 text-[11px] text-center">
                         <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{f.qtd_notas}</Badge>
                       </TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right">{fmtBRL(f.valor_total)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtBRL(f.ibs_estimado)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right text-purple-600">{fmtBRL(f.cbs_estimado)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right font-semibold text-orange-600">{fmtBRL(f.total_estimado)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right">{fmtNum(f.valor_total)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtNum(f.ibs_estimado)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right text-purple-600">{fmtNum(f.cbs_estimado)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right font-semibold text-orange-600">{fmtNum(f.total_estimado)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -363,10 +366,10 @@ export default function ApuracaoCredPerdidos() {
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="py-1.5 px-3 text-[11px]">Fornecedor</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px]">CNPJ</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">Valor Compras</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">IBS Perdido</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Perdido</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right font-semibold text-amber-600">Total Perdido</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">Valor Compras (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">IBS Perdido (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Perdido (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right font-semibold text-amber-600">Total Perdido (R$)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -374,10 +377,10 @@ export default function ApuracaoCredPerdidos() {
                     <TableRow key={i} className="h-8">
                       <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(f.forn_cnpj)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right">{fmtBRL(f.valor_total)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtBRL(f.ibs_perdido)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right text-purple-600">{fmtBRL(f.cbs_perdido)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right font-semibold text-amber-600">{fmtBRL(f.total_perdido)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right">{fmtNum(f.valor_total)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtNum(f.ibs_perdido)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right text-purple-600">{fmtNum(f.cbs_perdido)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right font-semibold text-amber-600">{fmtNum(f.total_perdido)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -432,10 +435,10 @@ export default function ApuracaoCredPerdidos() {
                     <TableHead className="py-1.5 px-3 text-[11px]">Transportadora</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px]">CNPJ</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px] text-center">CT-es</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">Valor Total Frete</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">IBS Est.</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Est.</TableHead>
-                    <TableHead className="py-1.5 px-3 text-[11px] text-right font-semibold text-violet-600">Total em Risco</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">Valor Total Frete (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">IBS Est. (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right">CBS Est. (R$)</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-right font-semibold text-violet-600">Total em Risco (R$)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -446,10 +449,10 @@ export default function ApuracaoCredPerdidos() {
                       <TableCell className="py-1 px-3 text-[11px] text-center">
                         <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{t.qtd_ctes}</Badge>
                       </TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right">{fmtBRL(t.valor_total)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtBRL(t.ibs_estimado)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right text-purple-600">{fmtBRL(t.cbs_estimado)}</TableCell>
-                      <TableCell className="py-1 px-3 text-[11px] text-right font-semibold text-violet-600">{fmtBRL(t.total_estimado)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right">{fmtNum(t.valor_total)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtNum(t.ibs_estimado)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right text-purple-600">{fmtNum(t.cbs_estimado)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-right font-semibold text-violet-600">{fmtNum(t.total_estimado)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
