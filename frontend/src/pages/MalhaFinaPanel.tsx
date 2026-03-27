@@ -45,6 +45,7 @@ export interface MalhaFinaRow {
   valor_cbs_nao_extinto: number;
   situacao_debito: string;
   tipo_apuracao: string;
+  status_nota: string; // 'AUSENTE' | 'CANCELADA'
 }
 
 interface MalhaFinaApiResponse {
@@ -52,7 +53,7 @@ interface MalhaFinaApiResponse {
   page: number;
   page_size: number;
   total_pages: number;
-  totals: { valor_cbs_total: number; valor_cbs_nao_extinto: number };
+  totals: { valor_cbs_total: number; valor_cbs_nao_extinto: number; canceladas_count: number };
   items: MalhaFinaRow[];
 }
 
@@ -105,6 +106,21 @@ function SituacaoBadge({ s }: { s: string }) {
   return (
     <Badge variant="outline" className={`text-[10px] px-1 py-0 ${cls}`}>
       {s.replace(/_/g, ' ') || '—'}
+    </Badge>
+  );
+}
+
+function StatusNotaBadge({ status }: { status: string }) {
+  if (status === 'CANCELADA') {
+    return (
+      <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-yellow-50 text-yellow-700 border-yellow-300">
+        Cancelada
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-50 text-red-700 border-red-200">
+      Ausente
     </Badge>
   );
 }
@@ -327,7 +343,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   const items      = data?.items      ?? [];
   const total      = data?.total      ?? 0;
   const totalPages = data?.total_pages ?? 1;
-  const totals     = data?.totals     ?? { valor_cbs_total: 0, valor_cbs_nao_extinto: 0 };
+  const totals     = data?.totals     ?? { valor_cbs_total: 0, valor_cbs_nao_extinto: 0, canceladas_count: 0 };
   const resumoItems = resumoData?.items ?? [];
 
   // Opções do Select derivadas dos emitentes presentes no resumo
@@ -438,7 +454,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
 
       {/* Totalizadores */}
       {total > 0 && (
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <Card className="p-3 border-red-100">
             <p className="text-[10px] text-muted-foreground">CBS Total (RFB)</p>
             <p className="text-sm font-bold mt-0.5 text-red-700">{fmtBRL(totals.valor_cbs_total)}</p>
@@ -446,6 +462,12 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
           <Card className="p-3 border-red-200 bg-red-50/50">
             <p className="text-[10px] text-muted-foreground">CBS Não Extinto (em aberto)</p>
             <p className="text-sm font-bold mt-0.5 text-red-800">{fmtBRL(totals.valor_cbs_nao_extinto)}</p>
+          </Card>
+          <Card className="p-3 border-yellow-200 bg-yellow-50/50">
+            <p className="text-[10px] text-muted-foreground">Canceladas (SAP)</p>
+            <p className="text-sm font-bold mt-0.5 text-yellow-700">
+              {totals.canceladas_count.toLocaleString('pt-BR')} nota{totals.canceladas_count !== 1 ? 's' : ''}
+            </p>
           </Card>
         </div>
       )}
@@ -481,6 +503,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
+                      <TableHead className="py-1.5 px-2 text-[11px]">Status</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Chave DFe</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod.</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Número</TableHead>
@@ -501,9 +524,12 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                     {items.map(row => (
                       <TableRow
                         key={row.id}
-                        className="cursor-pointer hover:bg-muted/50 h-8 bg-red-50/30 dark:bg-red-950/10"
+                        className={`cursor-pointer hover:bg-muted/50 h-8 ${row.status_nota === 'CANCELADA' ? 'bg-yellow-50/40 dark:bg-yellow-950/10' : 'bg-red-50/30 dark:bg-red-950/10'}`}
                         onClick={() => setSelected(row)}
                       >
+                        <TableCell className="py-1 px-2">
+                          <StatusNotaBadge status={row.status_nota} />
+                        </TableCell>
                         <TableCell className="py-1 px-2">
                           <div className="flex items-center gap-1">
                             <span className="font-mono text-[10px] text-muted-foreground">{row.chave_dfe}</span>

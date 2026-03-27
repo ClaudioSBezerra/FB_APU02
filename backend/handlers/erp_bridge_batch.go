@@ -34,6 +34,7 @@ type batchDoc struct {
 	MesAno           string  `json:"mes_ano"`           // "MM/YYYY"
 	EmitCNPJ         string  `json:"emit_cnpj"`
 	DestCNPJ         string  `json:"dest_cnpj"`
+	Cancelado        string  `json:"cancelado"`         // "S" = cancelada, demais = normal
 	NomeParceiro     string  `json:"nome_parceiro"`     // forn.razsoc (DIRECT=1) ou clie.razsoc (DIRECT=2)
 	VTotal           float64 `json:"v_total"`
 	VBcIbsCbs        float64 `json:"v_bc_ibs_cbs"`
@@ -175,27 +176,34 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 
 func batchInsertNFeSaida(db *sql.DB, companyID string, doc batchDoc, modelo string) (bool, error) {
 	modInt, _ := strconv.Atoi(modelo)
+	cancelado := doc.Cancelado
+	if cancelado != "S" { cancelado = "N" }
 	res, err := db.Exec(`
 		INSERT INTO nfe_saidas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
 			emit_cnpj, dest_cnpj_cpf, dest_nome,
 			v_nf,
-			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
+			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
+			cancelado
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
 			$9,$10,$11,
 			$12,
-			$13,$14,$15,$16,$17
+			$13,$14,$15,$16,$17,
+			$18
 		)
 		ON CONFLICT ON CONSTRAINT uq_nfe_saidas_company_chave
-		DO UPDATE SET dest_nome = EXCLUDED.dest_nome WHERE nfe_saidas.dest_nome IS NULL`,
+		DO UPDATE SET
+			cancelado  = EXCLUDED.cancelado,
+			dest_nome  = COALESCE(EXCLUDED.dest_nome, nfe_saidas.dest_nome)`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
 		doc.EmitCNPJ, doc.DestCNPJ, nullStr(doc.NomeParceiro),
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
+		cancelado,
 	)
 	if err != nil {
 		return false, err
@@ -206,27 +214,34 @@ func batchInsertNFeSaida(db *sql.DB, companyID string, doc batchDoc, modelo stri
 
 func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo string) (bool, error) {
 	modInt, _ := strconv.Atoi(modelo)
+	cancelado := doc.Cancelado
+	if cancelado != "S" { cancelado = "N" }
 	res, err := db.Exec(`
 		INSERT INTO nfe_entradas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
 			forn_cnpj, forn_nome, dest_cnpj_cpf,
 			v_nf,
-			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
+			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
+			cancelado
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
 			$9,$10,$11,
 			$12,
-			$13,$14,$15,$16,$17
+			$13,$14,$15,$16,$17,
+			$18
 		)
 		ON CONFLICT ON CONSTRAINT uq_nfe_entradas_company_chave
-		DO UPDATE SET forn_nome = EXCLUDED.forn_nome WHERE nfe_entradas.forn_nome IS NULL`,
+		DO UPDATE SET
+			cancelado  = EXCLUDED.cancelado,
+			forn_nome  = COALESCE(EXCLUDED.forn_nome, nfe_entradas.forn_nome)`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
 		doc.EmitCNPJ, nullStr(doc.NomeParceiro), doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
+		cancelado,
 	)
 	if err != nil {
 		return false, err
@@ -237,27 +252,34 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 
 func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo string) (bool, error) {
 	modInt, _ := strconv.Atoi(modelo)
+	cancelado := doc.Cancelado
+	if cancelado != "S" { cancelado = "N" }
 	res, err := db.Exec(`
 		INSERT INTO cte_entradas (
 			company_id, chave_cte, modelo, serie, numero_cte,
 			data_emissao, data_autorizacao, mes_ano,
 			emit_cnpj, emit_nome, dest_cnpj_cpf,
 			v_prest,
-			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
+			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
+			cancelado
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
 			$9,$10,$11,
 			$12,
-			$13,$14,$15,$16,$17
+			$13,$14,$15,$16,$17,
+			$18
 		)
 		ON CONFLICT ON CONSTRAINT uq_cte_entradas_company_chave
-		DO UPDATE SET emit_nome = EXCLUDED.emit_nome WHERE cte_entradas.emit_nome IS NULL`,
+		DO UPDATE SET
+			cancelado  = EXCLUDED.cancelado,
+			emit_nome  = COALESCE(EXCLUDED.emit_nome, cte_entradas.emit_nome)`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
 		doc.EmitCNPJ, nullStr(doc.NomeParceiro), doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
+		cancelado,
 	)
 	if err != nil {
 		return false, err
