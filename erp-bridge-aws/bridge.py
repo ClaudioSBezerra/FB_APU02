@@ -187,6 +187,7 @@ SELECT
     TO_CHAR(TRUNC(nn.DOCDAT), 'MM/YYYY')                       AS mes_ano,
     nn.CNPJ_EMIT                                                AS emit_cnpj,
     nn.CNPJ_DEST                                                AS dest_cnpj,
+    nn.CANCELADO                                                AS cancelado,
     CASE
       WHEN nn.DIRECT = '1' THEN (SELECT f.RAZSOC FROM FORN f WHERE f.CGC = nn.CNPJ_EMIT AND ROWNUM = 1)
       WHEN nn.DIRECT = '2' THEN (SELECT c.RAZSOC FROM CLIE c WHERE c.CGCCPF = nn.CNPJ_DEST AND ROWNUM = 1)
@@ -207,7 +208,6 @@ JOIN s4i_nfe_it it
   ON it.NFEID = ni.NFEID
  AND it.ITMNUM = ni.ITMNUM
 WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
-  AND nn.CANCELADO = 'N'
   AND LPAD(it.cfop, 4, '1') NOT IN (
     '1151','1152','1153','1154',
     '1408','1409','1658','1659',
@@ -547,6 +547,7 @@ def processar_sap(
                 "mes_ano":          s(r.get("mes_ano")),
                 "emit_cnpj":        s(r.get("emit_cnpj")),
                 "dest_cnpj":        s(r.get("dest_cnpj")),
+                "cancelado":        s(r.get("cancelado")) or "N",
                 "nome_parceiro":    s(r.get("nome_parceiro")),
                 "v_total":          f(r.get("v_total")),
                 "v_bc_ibs_cbs":     f(r.get("v_bc_ibs_cbs")),

@@ -14,7 +14,7 @@ import (
 
 const malhaFinaPageSize = 100
 
-// MalhaFinaRow — documento presente na RFB (rfb_debitos) mas não importado pela empresa.
+// MalhaFinaRow — documento presente na RFB (rfb_debitos) mas ausente ou cancelado na empresa.
 type MalhaFinaRow struct {
 	ID                 string  `json:"id"`
 	ChaveDFe           string  `json:"chave_dfe"`
@@ -29,11 +29,13 @@ type MalhaFinaRow struct {
 	ValorCBSNaoExtinto float64 `json:"valor_cbs_nao_extinto"`
 	SituacaoDebito     string  `json:"situacao_debito"`
 	TipoApuracao       string  `json:"tipo_apuracao"`
+	StatusNota         string  `json:"status_nota"` // "AUSENTE" | "CANCELADA"
 }
 
 type MalhaFinaTotals struct {
 	ValorCBSTotal      float64 `json:"valor_cbs_total"`
 	ValorCBSNaoExtinto float64 `json:"valor_cbs_nao_extinto"`
+	CanceladasCount    int     `json:"canceladas_count"`
 }
 
 type MalhaFinaResponse struct {
@@ -90,8 +92,10 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		modeloPlaceholders[i] = fmt.Sprintf("$%d", len(args))
 	}
 
+	// Mostrar notas que estão na RFB mas não têm registro NORMAL na empresa.
+	// Notas importadas como canceladas (cancelado='S') ainda aparecem aqui com status CANCELADA.
 	where := fmt.Sprintf(
-		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != '' AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe)",
+		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != '' AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe AND COALESCE(t.cancelado,'N') != 'S')",
 		strings.Join(modeloPlaceholders, ","), excludeTable, excludeChaveCol,
 	)
 
@@ -126,6 +130,12 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		args...,
 	).Scan(&totCBSTotal, &totCBSNaoExtinto)
 
+	var canceladasCount int
+	_ = db.QueryRow(
+		fmt.Sprintf("SELECT COUNT(*) FROM rfb_debitos rd WHERE %s AND EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)", where, excludeTable, excludeChaveCol),
+		args...,
+	).Scan(&canceladasCount)
+
 	// ── DADOS ─────────────────────────────────────────────────────────────────
 	limitIdx := len(args) + 1
 	offsetIdx := len(args) + 2
@@ -144,12 +154,14 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		       COALESCE(rd.valor_cbs_extinto, 0),
 		       COALESCE(rd.valor_cbs_nao_extinto, 0),
 		       COALESCE(rd.situacao_debito, ''),
-		       COALESCE(rd.tipo_apuracao, '')
+		       COALESCE(rd.tipo_apuracao, ''),
+		       CASE WHEN EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)
+		            THEN 'CANCELADA' ELSE 'AUSENTE' END AS status_nota
 		FROM rfb_debitos rd
 		WHERE %s
 		ORDER BY %s %s NULLS LAST
 		LIMIT $%d OFFSET $%d
-	`, where, sortCol, sortDir, limitIdx, offsetIdx)
+	`, excludeTable, excludeChaveCol, where, sortCol, sortDir, limitIdx, offsetIdx)
 
 	rows, err := db.Query(dataSQL, dataArgs...)
 	if err != nil {
@@ -167,7 +179,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 			&row.DataDFeEmissao, &row.DataApuracao,
 			&row.NiEmitente, &row.NiAdquirente,
 			&row.ValorCBSTotal, &row.ValorCBSExtinto, &row.ValorCBSNaoExtinto,
-			&row.SituacaoDebito, &row.TipoApuracao,
+			&row.SituacaoDebito, &row.TipoApuracao, &row.StatusNota,
 		); err != nil {
 			log.Printf("malha_fina scan error: %v", err)
 			continue
@@ -181,7 +193,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		Page:       page,
 		PageSize:   malhaFinaPageSize,
 		TotalPages: totalPages,
-		Totals:     MalhaFinaTotals{ValorCBSTotal: totCBSTotal, ValorCBSNaoExtinto: totCBSNaoExtinto},
+		Totals:     MalhaFinaTotals{ValorCBSTotal: totCBSTotal, ValorCBSNaoExtinto: totCBSNaoExtinto, CanceladasCount: canceladasCount},
 		Items:      items,
 	})
 }
