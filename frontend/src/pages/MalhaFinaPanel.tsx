@@ -86,6 +86,10 @@ function fmtBRL(v: number | null | undefined): string {
   if (v == null) return '—';
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
+function fmtNum(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function fmtCNPJ(v: string): string {
   if (!v) return '—';
   const d = v.replace(/\D/g, '');
@@ -513,10 +517,10 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                       <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Emitente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Adquirente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('valor_cbs_total')}>
-                        CBS Total <SortIcon col="valor_cbs_total" />
+                        CBS Total (R$) <SortIcon col="valor_cbs_total" />
                       </TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('valor_cbs_nao_extinto')}>
-                        CBS Não Extinto <SortIcon col="valor_cbs_nao_extinto" />
+                        CBS Não Extinto (R$) <SortIcon col="valor_cbs_nao_extinto" />
                       </TableHead>
                     </TableRow>
                   </TableHeader>
@@ -550,10 +554,10 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                         </TableCell>
                         <TableCell className="py-1 px-2 font-mono text-[11px]">{fmtCNPJ(row.ni_adquirente)}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-right font-semibold text-red-700">
-                          {fmtBRL(row.valor_cbs_total)}
+                          {fmtNum(row.valor_cbs_total)}
                         </TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-right font-semibold text-red-800">
-                          {fmtBRL(row.valor_cbs_nao_extinto)}
+                          {fmtNum(row.valor_cbs_nao_extinto)}
                         </TableCell>
                       </TableRow>
                     ))}

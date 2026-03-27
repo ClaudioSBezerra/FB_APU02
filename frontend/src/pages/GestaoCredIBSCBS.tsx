@@ -51,6 +51,10 @@ function fmt(value: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
 }
 
+function fmtNum(value: number): string {
+  return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
 const statusCfg: Record<Lancamento['status'], { label: string; cls: string }> = {
   confirmado: { label: 'Confirmado', cls: 'bg-green-100 text-green-700 border-green-200' },
   pendente:   { label: 'Pendente',   cls: 'bg-orange-100 text-orange-700 border-orange-200' },
@@ -196,11 +200,11 @@ export default function GestaoCredIBSCBS() {
                   <thead className="bg-gray-50">
                     <tr>
                       {['Tipo', 'Documento', 'Fornecedor / Cliente', 'Descrição',
-                        'Valor IBS', 'Valor CBS', 'Status', 'Vínculado', ''].map((h) => (
+                        'Valor IBS (R$)', 'Valor CBS (R$)', 'Status', 'Vínculado', ''].map((h) => (
                         <th
                           key={h}
                           className={`px-2 py-1.5 text-[11px] font-semibold text-gray-600 ${
-                            ['Valor IBS', 'Valor CBS'].includes(h) ? 'text-right' : 'text-left'
+                            ['Valor IBS (R$)', 'Valor CBS (R$)'].includes(h) ? 'text-right' : 'text-left'
                           }`}
                         >
                           {h}
@@ -229,8 +233,8 @@ export default function GestaoCredIBSCBS() {
                           <td className="px-2 py-1 text-[11px] font-mono">{item.documento}</td>
                           <td className="px-2 py-1 text-[11px]">{item.fornecedorCliente}</td>
                           <td className="px-2 py-1 text-[11px] text-muted-foreground">{item.descricao}</td>
-                          <td className="px-2 py-1 text-right text-[11px] font-medium">{fmt(item.valorIBS)}</td>
-                          <td className="px-2 py-1 text-right text-[11px] font-medium">{fmt(item.valorCBS)}</td>
+                          <td className="px-2 py-1 text-right text-[11px] font-medium">{fmtNum(item.valorIBS)}</td>
+                          <td className="px-2 py-1 text-right text-[11px] font-medium">{fmtNum(item.valorCBS)}</td>
                           <td className="px-2 py-1">
                             <Badge variant="outline" className={`${st.cls} text-[10px] px-1.5 py-0`}>
                               {st.label}
@@ -260,8 +264,8 @@ export default function GestaoCredIBSCBS() {
                       <td colSpan={4} className="px-2 py-1.5 text-[11px] font-semibold text-right text-gray-700">
                         Total:
                       </td>
-                      <td className="px-2 py-1.5 text-right text-[11px] font-bold">{fmt(totalIBS)}</td>
-                      <td className="px-2 py-1.5 text-right text-[11px] font-bold">{fmt(totalCBS)}</td>
+                      <td className="px-2 py-1.5 text-right text-[11px] font-bold">{fmtNum(totalIBS)}</td>
+                      <td className="px-2 py-1.5 text-right text-[11px] font-bold">{fmtNum(totalCBS)}</td>
                       <td colSpan={3} />
                     </tr>
                   </tfoot>

@@ -85,6 +85,11 @@ function fmtBRL(v: number | null | undefined): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function fmtNum(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 
 const MODAL_LABELS: Record<string, string> = {
   '01': 'Rodoviário',
@@ -323,9 +328,9 @@ export default function ImportarXMLsCTe() {
                     <TableHead className="py-1.5 px-2 text-[11px]">Remetente</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
                     <TableHead className="py-1.5 px-2 text-[11px] text-center">Modal</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vPrest</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vPrest (R$)</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS (R$)</TableHead>
+                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS (R$)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -356,12 +361,12 @@ export default function ImportarXMLsCTe() {
                           {fmtModal(row.modal)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtBRL(row.v_prest)}</TableCell>
+                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtNum(row.v_prest)}</TableCell>
                       <TableCell className="py-0.5 px-2 text-right text-[11px]">
-                        {row.v_ibs != null ? fmtBRL(row.v_ibs) : <span className="text-muted-foreground">—</span>}
+                        {row.v_ibs != null ? fmtNum(row.v_ibs) : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="py-0.5 px-2 text-right text-[11px]">
-                        {row.v_cbs != null ? fmtBRL(row.v_cbs) : <span className="text-muted-foreground">—</span>}
+                        {row.v_cbs != null ? fmtNum(row.v_cbs) : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                     </TableRow>
                   ))}

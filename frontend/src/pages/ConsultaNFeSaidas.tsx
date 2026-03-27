@@ -70,6 +70,11 @@ function fmtBRL(v: number | null | undefined, dash = '—'): string {
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+function fmtNum(v: number | null | undefined, dash = '—'): string {
+  if (v == null) return dash;
+  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 function fmtCNPJ(v: string): string {
   if (!v) return '—';
   const d = v.replace(/\D/g, '');
@@ -452,14 +457,14 @@ export default function ConsultaNFeSaidas() {
                       <TableHead className="py-1.5 px-2 text-[11px]">Cliente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Chave</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_nf')}>
-                        Valor NF <SortIcon col="v_nf" />
+                        Valor NF (R$) <SortIcon col="v_nf" />
                       </TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_ibs')}>
-                        IBS <SortIcon col="v_ibs" />
+                        IBS (R$) <SortIcon col="v_ibs" />
                       </TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Mun.</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Mun. (R$)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_cbs')}>
-                        CBS <SortIcon col="v_cbs" />
+                        CBS (R$) <SortIcon col="v_cbs" />
                       </TableHead>
                     </TableRow>
                   </TableHeader>
@@ -494,16 +499,16 @@ export default function ConsultaNFeSaidas() {
                           <CopyChave chave={row.chave_nfe} />
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">
-                          {fmtBRL(row.v_nf)}
+                          {fmtNum(row.v_nf)}
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">
-                          {fmtBRL(row.v_ibs_uf)}
+                          {fmtNum(row.v_ibs_uf)}
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">
-                          {fmtBRL(row.v_ibs_mun)}
+                          {fmtNum(row.v_ibs_mun)}
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">
-                          {fmtBRL(row.v_cbs)}
+                          {fmtNum(row.v_cbs)}
                         </TableCell>
                       </TableRow>
                     ))}
