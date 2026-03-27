@@ -454,7 +454,8 @@ func main() {
 	http.HandleFunc("/api/cte-entradas",              withAuth(handlers.CteEntradasListHandler, ""))
 
 	// Créditos em Risco
-	http.HandleFunc("/api/apuracao/creditos-perdidos", withAuth(handlers.CreditosPerdidosHandler, ""))
+	http.HandleFunc("/api/apuracao/creditos-perdidos/notas", withAuth(handlers.CreditosPerdidosNotasHandler, ""))
+	http.HandleFunc("/api/apuracao/creditos-perdidos",       withAuth(handlers.CreditosPerdidosHandler, ""))
 
 	// Painel Apuração IBS/CBS
 	http.HandleFunc("/api/apuracao/painel", withAuth(handlers.ApuracaoPainelHandler, ""))
