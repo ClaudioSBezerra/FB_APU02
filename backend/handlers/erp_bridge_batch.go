@@ -33,6 +33,7 @@ type batchDoc struct {
 	DataAutorizacao  string  `json:"data_autorizacao"`  // "YYYY-MM-DD"
 	MesAno           string  `json:"mes_ano"`           // "MM/YYYY"
 	EmitCNPJ         string  `json:"emit_cnpj"`
+	EmitNome         string  `json:"emit_nome"`         // opcional — nome do emitente/transportadora
 	DestCNPJ         string  `json:"dest_cnpj"`
 	VTotal           float64 `json:"v_total"`
 	VBcIbsCbs        float64 `json:"v_bc_ibs_cbs"`
@@ -198,20 +199,20 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 		INSERT INTO nfe_entradas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
-			forn_cnpj, dest_cnpj_cpf,
+			forn_cnpj, forn_nome, dest_cnpj_cpf,
 			v_nf,
 			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
-			$9,$10,
-			$11,
-			$12,$13,$14,$15,$16
+			$9,$10,$11,
+			$12,
+			$13,$14,$15,$16,$17
 		)
 		ON CONFLICT ON CONSTRAINT uq_nfe_entradas_company_chave DO NOTHING`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, doc.DestCNPJ,
+		doc.EmitCNPJ, nullStr(doc.EmitNome), doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 	)
@@ -228,20 +229,20 @@ func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 		INSERT INTO cte_entradas (
 			company_id, chave_cte, modelo, serie, numero_cte,
 			data_emissao, data_autorizacao, mes_ano,
-			emit_cnpj, dest_cnpj_cpf,
+			emit_cnpj, emit_nome, dest_cnpj_cpf,
 			v_prest,
 			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
-			$9,$10,
-			$11,
-			$12,$13,$14,$15,$16
+			$9,$10,$11,
+			$12,
+			$13,$14,$15,$16,$17
 		)
 		ON CONFLICT ON CONSTRAINT uq_cte_entradas_company_chave DO NOTHING`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, doc.DestCNPJ,
+		doc.EmitCNPJ, nullStr(doc.EmitNome), doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 	)
@@ -254,6 +255,15 @@ func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 
 // nullDate converte "YYYY-MM-DD" para sql.NullString; retorna NULL se vazio.
 func nullDate(s string) interface{} {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// nullStr retorna nil para string vazia (armazena NULL no banco), caso contrário a própria string.
+func nullStr(s string) interface{} {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return nil

@@ -80,6 +80,8 @@ type credPerdCTe struct {
 }
 
 type CreditosPerdidosResponse struct {
+	MesesDisponiveis    []string         `json:"meses_disponiveis"`
+	MesSelecionado      string           `json:"mes_selecionado"`
 	Aliquotas           credPerdAliquota `json:"aliquotas"`
 	NFeSemCredito       credPerdNFe      `json:"nfe_sem_credito"`
 	SimplesNacional     credPerdSimples  `json:"simples_nacional"`
@@ -112,6 +114,33 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Filtro de período (opcional — vazio = todos os períodos)
+		mesAno := r.URL.Query().Get("mes_ano")
+
+		// Períodos disponíveis para o dropdown do frontend
+		perRows, _ := db.Query(`
+			SELECT DISTINCT mes_ano FROM (
+				SELECT mes_ano FROM nfe_entradas WHERE company_id = $1
+				UNION
+				SELECT mes_ano FROM cte_entradas WHERE company_id = $1
+			) t
+			WHERE mes_ano IS NOT NULL AND mes_ano != ''
+			ORDER BY mes_ano DESC
+		`, companyID)
+		var mesesDisp []string
+		if perRows != nil {
+			defer perRows.Close()
+			for perRows.Next() {
+				var m string
+				if perRows.Scan(&m) == nil {
+					mesesDisp = append(mesesDisp, m)
+				}
+			}
+		}
+		if mesesDisp == nil {
+			mesesDisp = []string{}
+		}
+
 		// Alíquotas 2033
 		var ibsRate, cbsRate float64
 		err = db.QueryRow(`
@@ -123,41 +152,49 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			cbsRate = 8.8
 		}
 
+		// Mês padrão = mais recente
+		if mesAno == "" && len(mesesDisp) > 0 {
+			mesAno = mesesDisp[0]
+		}
+
 		resp := CreditosPerdidosResponse{
-			Aliquotas: credPerdAliquota{Ano: 2033, IBS: ibsRate, CBS: cbsRate},
+			MesesDisponiveis: mesesDisp,
+			MesSelecionado:   mesAno,
+			Aliquotas:        credPerdAliquota{Ano: 2033, IBS: ibsRate, CBS: cbsRate},
 		}
 
 		// ── 1. NF-e sem IBS/CBS ──────────────────────────────────────────────
 		// Exclui transferências internas: mesma raiz CNPJ (8 primeiros dígitos)
-		// cobre transferências entre filiais, uso e consumo e ativo imobilizado.
 
-		// Total de notas de terceiros (excluindo intra-grupo e filiais)
+		// Total de notas de terceiros no período
 		var totalUniverse int
 		db.QueryRow(`
 			SELECT COUNT(*)
 			FROM nfe_entradas
 			WHERE company_id = $1
+			  AND ($2 = '' OR mes_ano = $2)
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
-		`, companyID).Scan(&totalUniverse)
+		`, companyID, mesAno).Scan(&totalUniverse)
 
 		// Notas sem IBS/CBS de terceiros, agrupadas por fornecedor
 		rows, err := db.Query(`
 			SELECT
 				forn_cnpj,
-				'' AS forn_nome,
+				COALESCE(forn_nome, '') AS forn_nome,
 				COUNT(*)          AS qtd_notas,
 				SUM(v_nf)         AS valor_total
 			FROM nfe_entradas
 			WHERE company_id = $1
+			  AND ($2 = '' OR mes_ano = $2)
 			  AND v_ibs = 0
 			  AND v_cbs = 0
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
-			GROUP BY forn_cnpj
+			GROUP BY forn_cnpj, forn_nome
 			ORDER BY valor_total DESC
 			LIMIT 50
-		`, companyID)
+		`, companyID, mesAno)
 		if err != nil {
 			log.Printf("CreditosPerdidos nfe query error: %v", err)
 			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar NF-e")
@@ -212,11 +249,12 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 				SUM(total_valor) AS valor_total
 			FROM mv_operacoes_simples
 			WHERE company_id = $1
+			  AND ($2 = '' OR mes_ano = $2)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = fornecedor_cnpj)
 			GROUP BY fornecedor_cnpj, fornecedor_nome
 			ORDER BY valor_total DESC
 			LIMIT 50
-		`, companyID)
+		`, companyID, mesAno)
 		if err != nil {
 			log.Printf("CreditosPerdidos simples query error: %v", err)
 			// Não aborta — retorna sem dados do Simples
@@ -259,24 +297,26 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 		db.QueryRow(`
 			SELECT COUNT(*) FROM cte_entradas
 			WHERE company_id = $1
+			  AND ($2 = '' OR mes_ano = $2)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = emit_cnpj)
-		`, companyID).Scan(&cteTotalUniverse)
+		`, companyID, mesAno).Scan(&cteTotalUniverse)
 
 		cteRows, err := db.Query(`
 			SELECT
 				emit_cnpj,
-				'' AS emit_nome,
+				COALESCE(emit_nome, '') AS emit_nome,
 				COUNT(*)        AS qtd_ctes,
 				SUM(v_prest)    AS valor_total
 			FROM cte_entradas
 			WHERE company_id = $1
+			  AND ($2 = '' OR mes_ano = $2)
 			  AND (v_ibs IS NULL OR v_ibs = 0)
 			  AND (v_cbs IS NULL OR v_cbs = 0)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = emit_cnpj)
-			GROUP BY emit_cnpj
+			GROUP BY emit_cnpj, emit_nome
 			ORDER BY valor_total DESC
 			LIMIT 50
-		`, companyID)
+		`, companyID, mesAno)
 		if err != nil {
 			log.Printf("CreditosPerdidos cte query error: %v", err)
 		}
