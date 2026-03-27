@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Settings2, Clock, CalendarDays, CheckCircle2, XCircle, Loader2, AlertTriangle, RefreshCw, Zap, Ban, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -137,8 +136,6 @@ export default function ERPBridgeConfig() {
   // ── Estado: trigger manual ────────────────────────────────────────────────
   const [triggerIni, setTriggerIni]               = useState(firstDayOfPrevMonth);
   const [triggerFim, setTriggerFim]               = useState(today);
-  const [triggerFiliais, setTriggerFiliais]       = useState<string[]>([]);   // selecionadas
-  const [servidoresDisp, setServidoresDisp]       = useState<string[]>([]);   // disponíveis
   const [triggerQueued, setTriggerQueued]         = useState(false);
 
   useEffect(() => {
@@ -149,16 +146,7 @@ export default function ERPBridgeConfig() {
     }
   }, [cfg]);
 
-  // Carrega lista de servidores conhecidos (do histórico de runs)
-  useEffect(() => {
-    if (!token || !companyId) return;
-    fetch('/api/erp-bridge/servidores', { headers: authHeaders })
-      .then(r => r.ok ? r.json() : { items: [] })
-      .then((d: { items: string[] }) => setServidoresDisp(d.items || []))
-      .catch(() => {});
-  }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const abortMutation = useMutation({
+const abortMutation = useMutation({
     mutationFn: async (runId: string) => {
       const res = await fetch(`/api/erp-bridge/runs/${runId}`, {
         method: 'PATCH',
@@ -183,7 +171,7 @@ export default function ERPBridgeConfig() {
         body: JSON.stringify({
           data_ini: triggerIni,
           data_fim: triggerFim,
-          filiais_filter: triggerFiliais,
+          filiais_filter: [],
         }),
       });
       if (res.status === 409) throw new Error('Já existe uma importação em andamento. Aguarde a conclusão.');
@@ -462,43 +450,7 @@ export default function ERPBridgeConfig() {
             </div>
           </div>
 
-          {/* Filtro de filiais */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs text-muted-foreground">
-              Filiais / Servidores
-              <span className="ml-1 text-[10px] text-muted-foreground/60">(vazio = todas)</span>
-            </label>
-            {servidoresDisp.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground italic">
-                Nenhum servidor registrado ainda. Execute uma importação para registrar os servidores disponíveis.
-                A próxima importação processará <strong>todos os servidores</strong> configurados no bridge.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-3">
-                {servidoresDisp.map(srv => {
-                  const checked = triggerFiliais.includes(srv);
-                  return (
-                    <label key={srv}
-                      className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={v => {
-                          setTriggerQueued(false);
-                          setTriggerFiliais(prev =>
-                            v ? [...prev, srv] : prev.filter(s => s !== srv)
-                          );
-                        }}
-                        disabled={triggerMutation.isPending || !!runningRun}
-                      />
-                      {srv}
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Botão + status */}
+{/* Botão + status */}
           <div className="flex items-center gap-3 pt-1">
             <Button
               size="sm"
