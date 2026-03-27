@@ -25,7 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, Copy, Check } from 'lucide-react';
+import { X, AlertTriangle, Truck, ChevronLeft, ChevronRight, Copy, Check, ChevronUp, ChevronDown as ChevronDownIcon, ChevronsUpDown } from 'lucide-react';
 import { formatCnpjComApelido, formatCNPJMasked } from '@/lib/formatFilial';
 
 const PAGE_SIZE = 100;
@@ -192,6 +192,8 @@ export default function ConsultaCTesEntradas() {
   const [filterDataDe,  setFilterDataDe]  = useState('');
   const [filterDataAte, setFilterDataAte] = useState('');
   const [filterSemIBS,  setFilterSemIBS]  = useState(false);
+  const [sortCol, setSortCol] = useState('data_emissao');
+  const [sortDir, setSortDir] = useState<'asc'|'desc'>('desc');
   const [page,          setPage]          = useState(1);
   const [filiaisOptions, setFiliaisOptions] = useState<FilialOption[]>([]);
 
@@ -201,7 +203,19 @@ export default function ConsultaCTesEntradas() {
     return () => clearTimeout(t);
   }, [filterTransp]);
 
-  useEffect(() => { setPage(1); }, [mesAno, filterFilial, transpDebounced, filterDataDe, filterDataAte, filterSemIBS]);
+  useEffect(() => { setPage(1); }, [mesAno, filterFilial, transpDebounced, filterDataDe, filterDataAte, filterSemIBS, sortCol, sortDir]);
+
+  function handleSort(col: string) {
+    if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+    else { setSortCol(col); setSortDir('desc'); }
+    setPage(1);
+  }
+  function SortIcon({ col }: { col: string }) {
+    if (sortCol !== col) return <ChevronsUpDown className="inline h-3 w-3 ml-0.5 opacity-40" />;
+    return sortDir === 'desc'
+      ? <ChevronDownIcon className="inline h-3 w-3 ml-0.5" />
+      : <ChevronUp className="inline h-3 w-3 ml-0.5" />;
+  }
 
   const [selected, setSelected] = useState<CteEntradaRow | null>(null);
   const [apelidos, setApelidos] = useState<Record<string, string>>({});
@@ -233,11 +247,13 @@ export default function ConsultaCTesEntradas() {
   }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data, isFetching, isError } = useQuery<CteEntradaResponse>({
-    queryKey: ['cte-entradas', companyId, { page, mesAno, filterFilial, transpDebounced, filterDataDe, filterDataAte, filterSemIBS }],
+    queryKey: ['cte-entradas', companyId, { page, mesAno, filterFilial, transpDebounced, filterDataDe, filterDataAte, filterSemIBS, sortCol, sortDir }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
       params.set('page_size', String(PAGE_SIZE));
+      params.set('sort_by', sortCol);
+      params.set('sort_dir', sortDir);
       if (mesAno)        params.set('mes_ano',    mesAno);
       if (filterFilial)  params.set('dest_cnpj',  filterFilial);
       if (filterDataDe)  params.set('data_de',    filterDataDe);
@@ -393,14 +409,22 @@ export default function ConsultaCTesEntradas() {
                   <TableHeader>
                     <TableRow className="hover:bg-transparent">
                       <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('data_emissao')}>
+                        Data <SortIcon col="data_emissao" />
+                      </TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Transportadora</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Destinatário (Filial)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Chave</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vPrest</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Est.</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_prest')}>
+                        vPrest <SortIcon col="v_prest" />
+                      </TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_ibs')}>
+                        IBS <SortIcon col="v_ibs" />
+                      </TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Mun.</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">CBS</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_cbs')}>
+                        CBS <SortIcon col="v_cbs" />
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

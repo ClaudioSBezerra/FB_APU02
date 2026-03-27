@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { AlertTriangle, Telescope, ChevronLeft, ChevronRight, Copy, FileText, X } from 'lucide-react';
+import { AlertTriangle, Telescope, ChevronLeft, ChevronRight, Copy, FileText, X, ChevronUp, ChevronDown as ChevronDownIcon, ChevronsUpDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatCnpjComApelido } from '@/lib/formatFilial';
 
@@ -251,6 +251,8 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
 
   const [dataDe,     setDataDe]     = useState(defaultDataDe);
   const [filterCNPJ, setFilterCNPJ] = useState('');
+  const [sortCol,    setSortCol]    = useState('data_dfe_emissao');
+  const [sortDir,    setSortDir]    = useState<'asc'|'desc'>('desc');
   const [page,       setPage]       = useState(1);
   const [cnpjDeb,    setCnpjDeb]    = useState('');
   const [selected,   setSelected]   = useState<MalhaFinaRow | null>(null);
@@ -277,13 +279,27 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     return () => clearTimeout(t);
   }, [filterCNPJ]);
 
-  useEffect(() => { setPage(1); }, [dataDe, cnpjDeb]);
+  useEffect(() => { setPage(1); }, [dataDe, cnpjDeb, sortCol, sortDir]);
+
+  function handleSort(col: string) {
+    if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
+    else { setSortCol(col); setSortDir('desc'); }
+    setPage(1);
+  }
+  function SortIcon({ col }: { col: string }) {
+    if (sortCol !== col) return <ChevronsUpDown className="inline h-3 w-3 ml-0.5 opacity-40" />;
+    return sortDir === 'desc'
+      ? <ChevronDownIcon className="inline h-3 w-3 ml-0.5" />
+      : <ChevronUp className="inline h-3 w-3 ml-0.5" />;
+  }
 
   const { data, isFetching, isError } = useQuery<MalhaFinaApiResponse>({
-    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, cnpjDeb }],
+    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, cnpjDeb, sortCol, sortDir }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
+      params.set('sort_by', sortCol);
+      params.set('sort_dir', sortDir);
       if (dataDe) params.set('data_de', dataDe);
       if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
       const res = await fetch(`/api/malha-fina/${tipo}?${params}`, { headers: authHeaders });
@@ -468,11 +484,17 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                       <TableHead className="py-1.5 px-2 text-[11px]">Chave DFe</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Mod.</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-center">Número</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px]">Emissão</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('data_dfe_emissao')}>
+                        Emissão <SortIcon col="data_dfe_emissao" />
+                      </TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Emitente</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">CNPJ Adquirente</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right">CBS Total</TableHead>
-                      <TableHead className="py-1.5 px-2 text-[11px] text-right">CBS Não Extinto</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('valor_cbs_total')}>
+                        CBS Total <SortIcon col="valor_cbs_total" />
+                      </TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('valor_cbs_nao_extinto')}>
+                        CBS Não Extinto <SortIcon col="valor_cbs_nao_extinto" />
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
