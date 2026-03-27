@@ -71,7 +71,7 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// ── Meses disponíveis (union das 3 tabelas) ──────────────────────────
+		// ── Meses disponíveis (union das 3 tabelas com dados reais) ──────────
 		rows, err := db.Query(`
 			SELECT DISTINCT mes_ano FROM (
 				SELECT mes_ano FROM nfe_saidas   WHERE company_id = $1
@@ -79,7 +79,9 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 				SELECT mes_ano FROM nfe_entradas WHERE company_id = $1
 				UNION
 				SELECT mes_ano FROM cte_entradas WHERE company_id = $1
-			) t ORDER BY mes_ano DESC
+			) t
+			WHERE mes_ano IS NOT NULL AND mes_ano != ''
+			ORDER BY mes_ano DESC
 		`, companyID)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "Erro ao listar períodos: "+err.Error())

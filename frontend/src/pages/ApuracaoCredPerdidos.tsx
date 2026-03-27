@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -80,6 +81,8 @@ interface CTeSemCredito {
 }
 
 interface CreditosPerdidosData {
+  meses_disponiveis: string[];
+  mes_selecionado: string;
   aliquotas: Aliquotas;
   nfe_sem_credito: NFeSemCredito;
   simples_nacional: SimplesNacional;
@@ -110,24 +113,33 @@ export default function ApuracaoCredPerdidos() {
   const { token, companyId } = useAuth();
   const [data, setData] = useState<CreditosPerdidosData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mesSelecionado, setMesSelecionado] = useState('');
 
   const authHeaders = {
     Authorization: `Bearer ${token}`,
     'X-Company-ID': companyId || '',
   };
 
-  const fetchData = async () => {
+  const fetchData = async (mes?: string) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/apuracao/creditos-perdidos', { headers: authHeaders });
+      const params = mes ? `?mes_ano=${encodeURIComponent(mes)}` : '';
+      const res = await fetch(`/api/apuracao/creditos-perdidos${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
-      setData(await res.json());
+      const json: CreditosPerdidosData = await res.json();
+      setData(json);
+      if (!mes && json.mes_selecionado) setMesSelecionado(json.mes_selecionado);
     } catch (err) {
       toast.error('Erro ao carregar dados: ' + String(err));
     } finally {
       setLoading(false);
     }
   };
+
+  function handleMesChange(mes: string) {
+    setMesSelecionado(mes);
+    fetchData(mes);
+  }
 
   useEffect(() => { fetchData(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -155,10 +167,24 @@ export default function ApuracaoCredPerdidos() {
             projeção com alíquotas de 2033.
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={fetchData} disabled={loading}>
-          <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
-          Atualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="w-36">
+            <Select value={mesSelecionado} onValueChange={handleMesChange} disabled={loading}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="Período" />
+              </SelectTrigger>
+              <SelectContent>
+                {(data?.meses_disponiveis ?? []).map(m => (
+                  <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => fetchData(mesSelecionado || undefined)} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       {/* ── Card de Impacto Total ─────────────────────────────────────────── */}
@@ -281,7 +307,7 @@ export default function ApuracaoCredPerdidos() {
                 <TableBody>
                   {(nfe?.por_fornecedor ?? []).map((f, i) => (
                     <TableRow key={i} className="h-8">
-                      <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || '—'}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-center">
                         <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{f.qtd_notas}</Badge>
@@ -346,7 +372,7 @@ export default function ApuracaoCredPerdidos() {
                 <TableBody>
                   {(simples?.por_fornecedor ?? []).map((f, i) => (
                     <TableRow key={i} className="h-8">
-                      <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || '—'}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-right">{fmtBRL(f.valor_total)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtBRL(f.ibs_perdido)}</TableCell>
@@ -415,7 +441,7 @@ export default function ApuracaoCredPerdidos() {
                 <TableBody>
                   {(cte?.por_transportadora ?? []).map((t, i) => (
                     <TableRow key={i} className="h-8">
-                      <TableCell className="py-1 px-3 text-[11px] font-medium">{t.emit_nome || '—'}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] font-medium">{t.emit_nome || fmtCNPJ(t.emit_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(t.emit_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-center">
                         <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{t.qtd_ctes}</Badge>
