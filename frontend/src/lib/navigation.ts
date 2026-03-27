@@ -19,10 +19,12 @@ export const modules: Record<string, ModuleConfig> = {
   notas: {
     label: 'Notas Importadas',
     tabs: [
-      { label: 'NF-e Saídas',    path: '/apuracao/saida/notas' },
-      { label: 'NF-e Entradas',  path: '/apuracao/entrada/notas' },
-      { label: 'CT-e Entradas',  path: '/apuracao/cte-entrada/notas' },
-      { label: 'NFS-e Saídas',   path: '#', disabled: true },
+      { label: 'NF-e Saídas',      path: '/apuracao/saida/notas' },
+      { label: 'NF-e Entradas',    path: '/apuracao/entrada/notas' },
+      { label: 'CT-e Entradas',    path: '/apuracao/cte-entrada/notas' },
+      { label: 'NFS-e Saídas',     path: '#', disabled: true },
+      { label: 'Importar ERP',     path: '/importacoes/erp-bridge',      adminOnly: true },
+      { label: 'Logs Importação',  path: '/importacoes/erp-bridge/logs', adminOnly: true },
     ],
   },
   apuracao: {
@@ -31,7 +33,6 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Créditos em Risco',  path: '/apuracao/creditos-perdidos', danger: true },
       { label: 'Apuração IBS',       path: '/rfb/apuracao-ibs' },
       { label: 'Apuração CBS',       path: '/rfb/apuracao-cbs' },
-      { label: 'Limpar Dados',       path: '/apuracao/limpar-dados', danger: true },
     ],
   },
   rfb: {
@@ -67,10 +68,8 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Gestores',         path: '/config/gestores' },
       { label: 'Ambiente',         path: '/config/ambiente' },
       { label: 'Credenciais RFB',    path: '/rfb/credenciais',    adminOnly: true },
-      { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',         adminOnly: true },
-      { label: 'ERP Bridge',        path: '/importacoes/erp-bridge',    adminOnly: true },
-      { label: 'Logs Bridge',       path: '/importacoes/erp-bridge/logs', adminOnly: true },
-      { label: 'Usuários',          path: '/config/usuarios',           adminOnly: true },
+      { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',  adminOnly: true },
+      { label: 'Usuários',          path: '/config/usuarios',    adminOnly: true },
       { label: 'Limpar Dados',      path: '/config/limpar-dados', danger: true, adminOnly: true },
     ],
   },
@@ -81,7 +80,9 @@ export function getActiveModule(pathname: string): string {
 
   if (pathname.includes('/notas')) return 'notas'
 
-  const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs', '/apuracao/limpar-dados']
+  if (pathname.startsWith('/importacoes/')) return 'notas'
+
+  const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
   if (apuracaoPaths.includes(pathname)) return 'apuracao'
 
   const rfbExclude = ['/rfb/credenciais', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
@@ -89,7 +90,7 @@ export function getActiveModule(pathname: string): string {
 
   if (pathname.startsWith('/malha-fina/')) return 'malha'
 
-  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais' || pathname.startsWith('/importacoes/')) return 'config'
+  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais') return 'config'
 
   return 'painel'
 }

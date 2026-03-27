@@ -88,14 +88,29 @@ const sections: NavSection[] = [
       { title: "Gestores de Relatórios",  url: "/config/gestores",          icon: Users },
       { title: "Gestão de Ambiente",      url: "/config/ambiente",          icon: Building },
       { title: "Credenciais API RFB",     url: "/rfb/credenciais",          icon: KeyRound, adminOnly: true },
-      { title: "Credenciais ERP Bridge",  url: "/config/erp-bridge",        icon: KeyRound, adminOnly: true },
-      { title: "Gestão de Usuários",      url: "/config/usuarios",          icon: Users, adminOnly: true },
+      { title: "Credenciais ERP Bridge",  url: "/config/erp-bridge",    icon: KeyRound,   adminOnly: true },
+      { title: "Gestão de Usuários",      url: "/config/usuarios",      icon: Users,      adminOnly: true },
+      { title: "Limpar Dados",            url: "/config/limpar-dados",  icon: ShieldAlert, adminOnly: true, danger: true },
+    ],
+  },
+  {
+    id: "notas",
+    title: "Notas Importadas",
+    sectionIcon: FolderInput,
+    adminOnly: true,
+    items: [
+      { title: "NF-e Saídas",         url: "/apuracao/saida/notas",           icon: FileText },
+      { title: "NF-e Entradas",       url: "/apuracao/entrada/notas",         icon: FileText },
+      { title: "CT-e Entradas",       url: "/apuracao/cte-entrada/notas",     icon: FileText },
+      { title: "NFS-e Saídas",        url: "#",                               icon: FileText, disabled: true },
+      { title: "Importar via ERP",    url: "/importacoes/erp-bridge",         icon: Upload,   adminOnly: true },
+      { title: "Logs de Importação",  url: "/importacoes/erp-bridge/logs",   icon: Download, adminOnly: true },
     ],
   },
   {
     id: "importar",
     title: "Importar XMLs",
-    sectionIcon: FolderInput,
+    sectionIcon: Upload,
     adminOnly: true,
     items: [
       { title: "Entradas Mod. 55",    url: "/apuracao/entrada",     icon: Upload },
@@ -111,11 +126,6 @@ const sections: NavSection[] = [
     sectionIcon: Calculator,
     adminOnly: true,
     items: [
-      { title: "Entradas Mod. 55",    url: "/apuracao/entrada/notas",     icon: FileText },
-      { title: "Saídas Mod. 55/65",   url: "/apuracao/saida/notas",       icon: FileText },
-      { title: "CT-e — Entradas",     url: "/apuracao/cte-entrada/notas", icon: FileText },
-      { title: "Serviços — Entradas", url: "#",                           icon: FileText, disabled: true },
-      { title: "Serviços — Saídas",   url: "#",                           icon: FileText, disabled: true },
       { title: "Créditos em Risco",   url: "/apuracao/creditos-perdidos", icon: ShieldAlert, danger: true },
       { title: "Apuração IBS — mês",  url: "/rfb/apuracao-ibs",          icon: BarChart3 },
       { title: "Apuração CBS — mês",  url: "/rfb/apuracao-cbs",          icon: BarChart3 },
@@ -161,7 +171,7 @@ export function AppSidebar() {
 
   // Estado de expansão de cada seção (todas abertas por padrão)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(sections.map((s) => [s.id, s.id === 'malha' ? true : false]))
+    () => Object.fromEntries(sections.map((s) => [s.id, false]))
   )
 
   // Estado do dialog de troca de senha
