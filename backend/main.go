@@ -439,16 +439,19 @@ func main() {
 	http.HandleFunc("/api/rfb/webhook", withDB(handlers.RFBWebhookHandler))
 
 	// NF-e Saídas
-	http.HandleFunc("/api/nfe-saidas/filiais",  withAuth(handlers.NfeSaidasFiliaisHandler, ""))
-	http.HandleFunc("/api/nfe-saidas",          withAuth(handlers.NfeSaidasListHandler, ""))
+	http.HandleFunc("/api/nfe-saidas/filiais",      withAuth(handlers.NfeSaidasFiliaisHandler, ""))
+	http.HandleFunc("/api/nfe-saidas/competencias", withAuth(handlers.NfeSaidasCompetenciasHandler, ""))
+	http.HandleFunc("/api/nfe-saidas",              withAuth(handlers.NfeSaidasListHandler, ""))
 
 	// NF-e Entradas
-	http.HandleFunc("/api/nfe-entradas/filiais",  withAuth(handlers.NfeEntradasFiliaisHandler, ""))
-	http.HandleFunc("/api/nfe-entradas",          withAuth(handlers.NfeEntradasListHandler, ""))
+	http.HandleFunc("/api/nfe-entradas/filiais",      withAuth(handlers.NfeEntradasFiliaisHandler, ""))
+	http.HandleFunc("/api/nfe-entradas/competencias", withAuth(handlers.NfeEntradasCompetenciasHandler, ""))
+	http.HandleFunc("/api/nfe-entradas",              withAuth(handlers.NfeEntradasListHandler, ""))
 
 	// CT-e Entradas
-	http.HandleFunc("/api/cte-entradas/filiais",  withAuth(handlers.CteEntradasFiliaisHandler, ""))
-	http.HandleFunc("/api/cte-entradas",          withAuth(handlers.CteEntradasListHandler, ""))
+	http.HandleFunc("/api/cte-entradas/filiais",      withAuth(handlers.CteEntradasFiliaisHandler, ""))
+	http.HandleFunc("/api/cte-entradas/competencias", withAuth(handlers.CteEntradasCompetenciasHandler, ""))
+	http.HandleFunc("/api/cte-entradas",              withAuth(handlers.CteEntradasListHandler, ""))
 
 	// Créditos em Risco
 	http.HandleFunc("/api/apuracao/creditos-perdidos", withAuth(handlers.CreditosPerdidosHandler, ""))

@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Copy, Check } from 'lucide-react';
 import { formatCnpjComApelido, formatCNPJMasked } from '@/lib/formatFilial';
 
 const PAGE_SIZE = 100;
@@ -77,6 +77,28 @@ function fmtCNPJ(v: string): string {
   return v;
 }
 
+
+// ── Chave eletrônica copiável ─────────────────────────────────────────────────
+function CopyChave({ chave }: { chave: string }) {
+  const [copied, setCopied] = useState(false);
+  if (!chave) return <span className="text-[10px] text-muted-foreground">—</span>;
+  const handle = () => {
+    navigator.clipboard.writeText(chave).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button onClick={handle}
+      title={chave}
+      className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors">
+      <span className="truncate max-w-[80px]">{chave.slice(0, 8)}…</span>
+      {copied
+        ? <Check className="h-3 w-3 text-green-500 shrink-0" />
+        : <Copy className="h-3 w-3 shrink-0" />}
+    </button>
+  );
+}
 
 // ── Paginação com input de página ─────────────────────────────────────────────
 function Pagination({
@@ -212,10 +234,9 @@ export default function ConsultaNFeSaidas() {
         setApelidos(map);
       })
       .catch(() => {});
-    fetch('/api/apuracao/painel', { headers: authHeaders })
-      .then(r => r.ok ? r.json() : { meses_disponiveis: [] })
-      .then((d: { meses_disponiveis?: string[] }) => {
-        const meses = d.meses_disponiveis || [];
+    fetch('/api/nfe-saidas/competencias', { headers: authHeaders })
+      .then(r => r.ok ? r.json() : [])
+      .then((meses: string[]) => {
         setMesAnoOptions(meses);
         setMesAno(prev => prev || meses[0] || '');
       })
@@ -408,7 +429,11 @@ export default function ConsultaNFeSaidas() {
                       <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Filial</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px]">Cliente</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Chave</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">Valor NF</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Est.</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS Mun.</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">CBS</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -433,8 +458,20 @@ export default function ConsultaNFeSaidas() {
                             {fmtCNPJ(row.dest_cnpj_cpf)}
                           </div>
                         </TableCell>
+                        <TableCell className="py-0.5 px-2" onClick={e => e.stopPropagation()}>
+                          <CopyChave chave={row.chave_nfe} />
+                        </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap">
                           {fmtBRL(row.v_nf)}
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">
+                          {fmtBRL(row.v_ibs_uf)}
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">
+                          {fmtBRL(row.v_ibs_mun)}
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">
+                          {fmtBRL(row.v_cbs)}
                         </TableCell>
                       </TableRow>
                     ))}

@@ -34,6 +34,40 @@ type nfeSaidaRow struct {
 	VCBS            float64 `json:"v_cbs"`
 }
 
+// ---------------------------------------------------------------------------
+// NfeSaidasCompetenciasHandler — GET /api/nfe-saidas/competencias
+// ---------------------------------------------------------------------------
+
+func NfeSaidasCompetenciasHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			jsonErr(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		companyID, err := GetEffectiveCompanyID(db, claims["user_id"].(string), r.Header.Get("X-Company-ID"))
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa")
+			return
+		}
+		rows, err := db.Query(`SELECT DISTINCT mes_ano FROM nfe_saidas WHERE company_id = $1 ORDER BY mes_ano DESC`, companyID)
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
+			return
+		}
+		defer rows.Close()
+		meses := []string{}
+		for rows.Next() {
+			var m string
+			if rows.Scan(&m) == nil {
+				meses = append(meses, m)
+			}
+		}
+		json.NewEncoder(w).Encode(meses)
+	}
+}
+
 func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
