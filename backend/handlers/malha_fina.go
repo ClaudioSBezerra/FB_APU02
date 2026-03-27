@@ -68,8 +68,18 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		page = 1
 	}
 
-	dataDe    := q.Get("data_de")    // YYYY-MM-DD
+	dataDe     := q.Get("data_de")    // YYYY-MM-DD
 	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
+
+	safeColsMalha := map[string]string{
+		"data_dfe_emissao":     "rd.data_dfe_emissao",
+		"valor_cbs_total":      "rd.valor_cbs_total",
+		"valor_cbs_nao_extinto": "rd.valor_cbs_nao_extinto",
+	}
+	sortCol := "rd.data_dfe_emissao"
+	if c, ok := safeColsMalha[q.Get("sort_by")]; ok { sortCol = c }
+	sortDir := "DESC"
+	if q.Get("sort_dir") == "asc" { sortDir = "ASC" }
 
 	// ── Montar WHERE ──────────────────────────────────────────────────────────
 	args := []interface{}{companyID}
@@ -137,9 +147,9 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		       COALESCE(rd.tipo_apuracao, '')
 		FROM rfb_debitos rd
 		WHERE %s
-		ORDER BY rd.data_dfe_emissao DESC NULLS LAST
+		ORDER BY %s %s NULLS LAST
 		LIMIT $%d OFFSET $%d
-	`, where, limitIdx, offsetIdx)
+	`, where, sortCol, sortDir, limitIdx, offsetIdx)
 
 	rows, err := db.Query(dataSQL, dataArgs...)
 	if err != nil {
