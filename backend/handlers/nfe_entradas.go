@@ -104,6 +104,17 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 		dataDe   := q.Get("data_de")
 		dataAte  := q.Get("data_ate")
 
+		safeColsEntrada := map[string]string{
+			"data_emissao": "data_emissao",
+			"v_nf":         "v_nf",
+			"v_ibs":        "v_ibs",
+			"v_cbs":        "v_cbs",
+		}
+		sortCol := "data_emissao"
+		if c, ok := safeColsEntrada[q.Get("sort_by")]; ok { sortCol = c }
+		sortDir := "DESC"
+		if q.Get("sort_dir") == "asc" { sortDir = "ASC" }
+
 		page, pageSize := 1, 100
 		if p, e := strconv.Atoi(q.Get("page")); e == nil && p > 0 { page = p }
 		if ps, e := strconv.Atoi(q.Get("page_size")); e == nil && ps > 0 && ps <= 500 { pageSize = ps }
@@ -150,7 +161,7 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				v_nf,
 				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
 			FROM nfe_entradas ` + where +
-			fmt.Sprintf(" ORDER BY data_emissao DESC, numero_nfe DESC LIMIT $%d OFFSET $%d", idx, idx+1)
+			fmt.Sprintf(" ORDER BY %s %s, numero_nfe DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
 
 		rows, err := db.Query(selectQ, pageArgs...)
