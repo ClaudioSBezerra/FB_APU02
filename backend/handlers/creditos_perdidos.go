@@ -125,7 +125,8 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 				SELECT mes_ano FROM cte_entradas WHERE company_id = $1
 			) t
 			WHERE mes_ano IS NOT NULL AND mes_ano != ''
-			ORDER BY mes_ano DESC
+			ORDER BY SPLIT_PART(mes_ano, '/', 2) DESC,
+			         SPLIT_PART(mes_ano, '/', 1) DESC
 		`, companyID)
 		var mesesDisp []string
 		if perRows != nil {
