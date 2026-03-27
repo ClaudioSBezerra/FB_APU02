@@ -28,7 +28,7 @@ func CteEntradasCompetenciasHandler(db *sql.DB) http.HandlerFunc {
 			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa")
 			return
 		}
-		rows, err := db.Query(`SELECT DISTINCT mes_ano FROM cte_entradas WHERE company_id = $1 ORDER BY mes_ano DESC`, companyID)
+		rows, err := db.Query(`SELECT DISTINCT mes_ano FROM cte_entradas WHERE company_id = $1 AND mes_ano ~ '^\d{2}/\d{4}$' ORDER BY TO_DATE(mes_ano, 'MM/YYYY') DESC`, companyID)
 		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
 			return
