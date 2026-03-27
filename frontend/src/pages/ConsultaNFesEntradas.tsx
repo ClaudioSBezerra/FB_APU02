@@ -39,6 +39,7 @@ interface NfeEntradaRow {
   id: string; chave_nfe: string; modelo: number; serie: string; numero_nfe: string;
   data_emissao: string; data_autorizacao: string; mes_ano: string;
   forn_cnpj: string;
+  forn_nome: string;
   dest_cnpj_cpf: string;
   v_nf: number;
   v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number;
@@ -405,10 +406,15 @@ export default function ConsultaNFesEntradas() {
                           {row.serie}/{row.numero_nfe}
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                        <TableCell className="py-0.5 px-2 max-w-[160px]">
-                          <div className="truncate text-[11px] font-mono text-muted-foreground">
-                            {fmtCNPJ(row.forn_cnpj)}
+                        <TableCell className="py-0.5 px-2 max-w-[180px]">
+                          <div className="truncate text-[11px] font-medium">
+                            {row.forn_nome || fmtCNPJ(row.forn_cnpj)}
                           </div>
+                          {row.forn_nome && (
+                            <div className="truncate text-[10px] font-mono text-muted-foreground">
+                              {fmtCNPJ(row.forn_cnpj)}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="py-0.5 px-2 max-w-[180px]">
                           <div className="truncate text-[11px]">

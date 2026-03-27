@@ -38,6 +38,7 @@ interface CteEntradaRow {
   id: string; chave_cte: string; modelo: number; serie: string; numero_cte: string;
   data_emissao: string; data_autorizacao: string; mes_ano: string;
   emit_cnpj: string;
+  emit_nome: string;
   dest_cnpj_cpf: string;
   v_prest: number;
   v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number;
@@ -411,10 +412,15 @@ export default function ConsultaCTesEntradas() {
                             {row.serie}/{row.numero_cte}
                           </TableCell>
                           <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                          <TableCell className="py-0.5 px-2 max-w-[160px]">
-                            <div className="truncate text-[11px] font-mono text-muted-foreground">
-                              {fmtCNPJ(row.emit_cnpj)}
+                          <TableCell className="py-0.5 px-2 max-w-[180px]">
+                            <div className="truncate text-[11px] font-medium">
+                              {row.emit_nome || fmtCNPJ(row.emit_cnpj)}
                             </div>
+                            {row.emit_nome && (
+                              <div className="truncate text-[10px] font-mono text-muted-foreground">
+                                {fmtCNPJ(row.emit_cnpj)}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="py-0.5 px-2 max-w-[180px]">
                             <div className="truncate text-[11px]">

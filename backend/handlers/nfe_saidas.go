@@ -26,6 +26,7 @@ type nfeSaidaRow struct {
 	MesAno          string  `json:"mes_ano"`
 	EmitCNPJ        string  `json:"emit_cnpj"`
 	DestCNPJCPF     string  `json:"dest_cnpj_cpf"`
+	DestNome        string  `json:"dest_nome"`
 	VNF             float64 `json:"v_nf"`
 	VBCIbsCbs       float64 `json:"v_bc_ibs_cbs"`
 	VIBSuf          float64 `json:"v_ibs_uf"`
@@ -139,6 +140,11 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
 				mes_ano,
 				emit_cnpj, COALESCE(dest_cnpj_cpf,''),
+				COALESCE(dest_nome, (
+					SELECT nome FROM parceiros
+					WHERE company_id = nfe_saidas.company_id AND cnpj = nfe_saidas.dest_cnpj_cpf
+					LIMIT 1
+				), '') AS dest_nome,
 				v_nf,
 				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
 			FROM nfe_saidas ` + where +
@@ -159,7 +165,7 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 			if err := rows.Scan(
 				&row.ID, &row.ChaveNFe, &row.Modelo, &row.Serie, &row.NumeroNFe,
 				&row.DataEmissao, &row.DataAutorizacao, &row.MesAno,
-				&row.EmitCNPJ, &row.DestCNPJCPF,
+				&row.EmitCNPJ, &row.DestCNPJCPF, &row.DestNome,
 				&row.VNF,
 				&row.VBCIbsCbs, &row.VIBSuf, &row.VIBSMun, &row.VIBS, &row.VCBS,
 			); err != nil {
