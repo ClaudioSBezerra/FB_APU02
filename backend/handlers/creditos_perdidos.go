@@ -90,6 +90,125 @@ type CreditosPerdidosResponse struct {
 }
 
 // ---------------------------------------------------------------------------
+// Tipos para drill-down de notas por fornecedor
+// ---------------------------------------------------------------------------
+
+type credPerdNota struct {
+	Filial      string  `json:"filial"`
+	FilialCNPJ  string  `json:"filial_cnpj"`
+	Chave       string  `json:"chave"`
+	DataEmissao string  `json:"data_emissao"`
+	Serie       string  `json:"serie"`
+	Numero      string  `json:"numero"`
+	Valor       float64 `json:"valor"`
+}
+
+// ---------------------------------------------------------------------------
+// CreditosPerdidosNotasHandler — GET /api/apuracao/creditos-perdidos/notas
+// Parâmetros: forn_cnpj, mes_ano, tipo (nfe|cte)
+// ---------------------------------------------------------------------------
+func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			jsonErr(w, http.StatusMethodNotAllowed, "Method not allowed")
+			return
+		}
+
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			jsonErr(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		userID := claims["user_id"].(string)
+		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa: "+err.Error())
+			return
+		}
+
+		fornCNPJ := r.URL.Query().Get("forn_cnpj")
+		mesAno   := r.URL.Query().Get("mes_ano")
+		tipo     := r.URL.Query().Get("tipo") // "nfe" ou "cte"
+
+		var notas []credPerdNota
+
+		if tipo == "cte" {
+			rows, err := db.Query(`
+				SELECT
+					COALESCE(fa.apelido, ce.dest_cnpj_cpf, '') AS filial,
+					COALESCE(ce.dest_cnpj_cpf, '')             AS filial_cnpj,
+					ce.chave_cte,
+					TO_CHAR(ce.data_emissao, 'DD/MM/YYYY')     AS data_emissao,
+					COALESCE(ce.serie, '')                     AS serie,
+					COALESCE(ce.numero_cte, '')                AS numero,
+					ce.v_prest
+				FROM cte_entradas ce
+				LEFT JOIN filial_apelidos fa
+					ON fa.company_id = $1 AND fa.cnpj = ce.dest_cnpj_cpf
+				WHERE ce.company_id = $1
+				  AND ($2 = '' OR ce.mes_ano = $2)
+				  AND ce.emit_cnpj = $3
+				  AND (ce.v_ibs IS NULL OR ce.v_ibs = 0)
+				  AND (ce.v_cbs IS NULL OR ce.v_cbs = 0)
+				ORDER BY ce.data_emissao DESC, ce.numero_cte DESC
+				LIMIT 500
+			`, companyID, mesAno, fornCNPJ)
+			if err != nil {
+				log.Printf("CreditosPerdidosNotas cte error: %v", err)
+				jsonErr(w, http.StatusInternalServerError, "Erro ao consultar CT-e")
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var n credPerdNota
+				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor) == nil {
+					notas = append(notas, n)
+				}
+			}
+		} else {
+			rows, err := db.Query(`
+				SELECT
+					COALESCE(fa.apelido, ne.dest_cnpj_cpf, '') AS filial,
+					COALESCE(ne.dest_cnpj_cpf, '')             AS filial_cnpj,
+					ne.chave_nfe,
+					TO_CHAR(ne.data_emissao, 'DD/MM/YYYY')     AS data_emissao,
+					COALESCE(ne.serie, '')                     AS serie,
+					COALESCE(ne.numero_nfe, '')                AS numero,
+					ne.v_nf
+				FROM nfe_entradas ne
+				LEFT JOIN filial_apelidos fa
+					ON fa.company_id = $1 AND fa.cnpj = ne.dest_cnpj_cpf
+				WHERE ne.company_id = $1
+				  AND ($2 = '' OR ne.mes_ano = $2)
+				  AND ne.forn_cnpj = $3
+				  AND ne.v_ibs = 0
+				  AND ne.v_cbs = 0
+				ORDER BY ne.data_emissao DESC, ne.numero_nfe DESC
+				LIMIT 500
+			`, companyID, mesAno, fornCNPJ)
+			if err != nil {
+				log.Printf("CreditosPerdidosNotas nfe error: %v", err)
+				jsonErr(w, http.StatusInternalServerError, "Erro ao consultar NF-e")
+				return
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var n credPerdNota
+				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor) == nil {
+					notas = append(notas, n)
+				}
+			}
+		}
+
+		if notas == nil {
+			notas = []credPerdNota{}
+		}
+		json.NewEncoder(w).Encode(notas)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // CreditosPerdidosHandler — GET /api/apuracao/creditos-perdidos
 // ---------------------------------------------------------------------------
 func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {

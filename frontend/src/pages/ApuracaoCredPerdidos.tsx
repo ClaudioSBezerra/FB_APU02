@@ -13,7 +13,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { AlertTriangle, RefreshCw, ShieldAlert, TrendingDown, Info } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { AlertTriangle, RefreshCw, ShieldAlert, TrendingDown, Info, Loader2 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,6 +96,25 @@ interface CreditosPerdidosData {
   total_credito_em_risco: number;
 }
 
+interface NotaDrillDown {
+  filial: string;
+  filial_cnpj: string;
+  chave: string;
+  data_emissao: string;
+  serie: string;
+  numero: string;
+  valor: number;
+}
+
+interface DrillDownState {
+  open: boolean;
+  titulo: string;
+  forn_cnpj: string;
+  tipo: 'nfe' | 'cte';
+  notas: NotaDrillDown[];
+  loading: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -117,11 +142,29 @@ export default function ApuracaoCredPerdidos() {
   const [data, setData] = useState<CreditosPerdidosData | null>(null);
   const [loading, setLoading] = useState(false);
   const [mesSelecionado, setMesSelecionado] = useState('');
+  const [drill, setDrill] = useState<DrillDownState>({
+    open: false, titulo: '', forn_cnpj: '', tipo: 'nfe', notas: [], loading: false,
+  });
 
   const authHeaders = {
     Authorization: `Bearer ${token}`,
     'X-Company-ID': companyId || '',
   };
+
+  async function openDrill(titulo: string, forn_cnpj: string, tipo: 'nfe' | 'cte') {
+    setDrill({ open: true, titulo, forn_cnpj, tipo, notas: [], loading: true });
+    try {
+      const params = new URLSearchParams({ forn_cnpj, tipo });
+      if (mesSelecionado) params.set('mes_ano', mesSelecionado);
+      const res = await fetch(`/api/apuracao/creditos-perdidos/notas?${params}`, { headers: authHeaders });
+      if (!res.ok) throw new Error(res.statusText);
+      const notas: NotaDrillDown[] = await res.json();
+      setDrill(d => ({ ...d, notas, loading: false }));
+    } catch (err) {
+      toast.error('Erro ao carregar notas: ' + String(err));
+      setDrill(d => ({ ...d, loading: false }));
+    }
+  }
 
   const fetchData = async (mes?: string) => {
     setLoading(true);
@@ -313,7 +356,14 @@ export default function ApuracaoCredPerdidos() {
                       <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-center">
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{f.qtd_notas}</Badge>
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] px-1.5 py-0 cursor-pointer hover:bg-orange-100 hover:text-orange-700 transition-colors"
+                          onClick={() => openDrill(f.forn_nome || fmtCNPJ(f.forn_cnpj), f.forn_cnpj, 'nfe')}
+                          title="Ver notas"
+                        >
+                          {f.qtd_notas}
+                        </Badge>
                       </TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-right">{fmtNum(f.valor_total)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtNum(f.ibs_estimado)}</TableCell>
@@ -447,7 +497,14 @@ export default function ApuracaoCredPerdidos() {
                       <TableCell className="py-1 px-3 text-[11px] font-medium">{t.emit_nome || fmtCNPJ(t.emit_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(t.emit_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-center">
-                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{t.qtd_ctes}</Badge>
+                        <Badge
+                          variant="secondary"
+                          className="text-[10px] px-1.5 py-0 cursor-pointer hover:bg-violet-100 hover:text-violet-700 transition-colors"
+                          onClick={() => openDrill(t.emit_nome || fmtCNPJ(t.emit_cnpj), t.emit_cnpj, 'cte')}
+                          title="Ver CT-es"
+                        >
+                          {t.qtd_ctes}
+                        </Badge>
                       </TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-right">{fmtNum(t.valor_total)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-right text-blue-600">{fmtNum(t.ibs_estimado)}</TableCell>
@@ -477,6 +534,80 @@ export default function ApuracaoCredPerdidos() {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Dialog de drill-down: notas por fornecedor ───────────────────── */}
+      <Dialog open={drill.open} onOpenChange={open => setDrill(d => ({ ...d, open }))}>
+        <DialogContent className="max-w-5xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold">
+              {drill.tipo === 'cte' ? 'CT-es' : 'NF-es'} sem IBS/CBS —{' '}
+              <span className="text-muted-foreground font-normal">{drill.titulo}</span>
+              {mesSelecionado && (
+                <span className="ml-2 text-[11px] text-muted-foreground font-normal">({mesSelecionado})</span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {drill.loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : drill.notas.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-8">Nenhuma nota encontrada.</p>
+          ) : (
+            <>
+              <p className="text-[11px] text-muted-foreground px-1">
+                {drill.notas.length} {drill.tipo === 'cte' ? 'CT-e(s)' : 'NF-e(s)'} — clique na chave para copiar
+              </p>
+              <div className="overflow-auto flex-1 rounded border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Filial</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center whitespace-nowrap">Série</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-center whitespace-nowrap">
+                        Nº {drill.tipo === 'cte' ? 'CT-e' : 'NF'}
+                      </TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data Emissão</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px]">Chave Eletrônica</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">
+                        {drill.tipo === 'cte' ? 'vPrest (R$)' : 'Valor NF (R$)'}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {drill.notas.map((n, i) => (
+                      <TableRow key={i} className="h-7">
+                        <TableCell className="py-0.5 px-2 text-[11px] font-medium whitespace-nowrap">
+                          {n.filial || fmtCNPJ(n.filial_cnpj)}
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{n.serie || '—'}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{n.numero || '—'}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{n.data_emissao}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[10px] font-mono text-muted-foreground">
+                          <span
+                            className="cursor-pointer hover:text-foreground transition-colors"
+                            title="Clique para copiar"
+                            onClick={() => {
+                              navigator.clipboard.writeText(n.chave);
+                              toast.success('Chave copiada!');
+                            }}
+                          >
+                            {n.chave}
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right font-semibold whitespace-nowrap tabular-nums">
+                          {fmtNum(n.valor)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
