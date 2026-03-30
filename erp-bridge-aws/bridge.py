@@ -509,6 +509,7 @@ def processar_sap(
             user=oracle_cfg["usuario"],
             password=oracle_cfg["senha"],
             dsn=oracle_cfg["dsn"],
+            expire_time=2,  # keepalive TCP a cada 2 min — evita firewall cortar conexão longa
         )
         log.info("Conectado ao Oracle SAP FCCORP (thin mode)")
     except Exception as exc:
@@ -696,6 +697,7 @@ def processar_servidor(
             user=srv["usuario"],
             password=srv["senha"],
             dsn=srv["dsn"],
+            expire_time=2,  # keepalive TCP a cada 2 min — evita firewall cortar conexão longa
         )
         log.info("Conectado ao Oracle (thin mode)")
     except Exception as exc:
