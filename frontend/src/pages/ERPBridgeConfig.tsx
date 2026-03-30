@@ -22,6 +22,8 @@ interface BridgeConfig {
   oracle_usuario: string;
   oracle_senha_set: boolean;
   api_key: string;
+  daemon_last_seen: string | null;
+  daemon_online: boolean;
 }
 
 interface BridgeRunItem {
@@ -233,23 +235,49 @@ const abortMutation = useMutation({
     return <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>;
   }
 
+  const daemonOnline = config?.daemon_online ?? false;
+  const daemonLastSeen = config?.daemon_last_seen
+    ? new Date(config.daemon_last_seen).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+    : null;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">ERP Bridge — Agendamento</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Configure o horário de importação automática dos XMLs do Oracle ERP para o FBTax.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">ERP Bridge — Agendamento</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Configure o horário de importação automática dos XMLs do Oracle ERP para o FBTax.
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 mt-1">
+          {daemonOnline ? (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Daemon online
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-red-700 bg-red-50 border border-red-200 rounded-full px-2.5 py-1" title={daemonLastSeen ? `Último contato: ${daemonLastSeen}` : 'Nunca conectou'}>
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+              Daemon offline{daemonLastSeen ? ` · ${daemonLastSeen}` : ''}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Run pendente aguardando daemon */}
       {pendingRun && !runningRun && (
-        <Card className="border border-amber-200 bg-amber-50/40">
+        <Card className={`border ${daemonOnline ? 'border-amber-200 bg-amber-50/40' : 'border-red-200 bg-red-50/40'}`}>
           <CardHeader className="py-3 px-4">
             <CardTitle className="text-sm flex items-center justify-between">
               <span className="flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
-                Aguardando o daemon Bridge...
+                {daemonOnline
+                  ? <Loader2 className="h-4 w-4 animate-spin text-amber-500" />
+                  : <AlertTriangle className="h-4 w-4 text-red-500" />
+                }
+                {daemonOnline
+                  ? 'Aguardando o daemon Bridge...'
+                  : 'Daemon offline — importação não iniciará até o daemon ser reiniciado'
+                }
               </span>
               <Button
                 size="sm" variant="ghost"
