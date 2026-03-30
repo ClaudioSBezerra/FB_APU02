@@ -270,6 +270,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   const defaultDataDe = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
 
   const [dataDe,     setDataDe]     = useState(defaultDataDe);
+  const [dataAte,    setDataAte]    = useState('');
   const [filterCNPJ, setFilterCNPJ] = useState('');
   const [sortCol,    setSortCol]    = useState('data_dfe_emissao');
   const [sortDir,    setSortDir]    = useState<'asc'|'desc'>('desc');
@@ -299,7 +300,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     return () => clearTimeout(t);
   }, [filterCNPJ]);
 
-  useEffect(() => { setPage(1); }, [dataDe, cnpjDeb, sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [dataDe, dataAte, cnpjDeb, sortCol, sortDir]);
 
   function handleSort(col: string) {
     if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
@@ -314,13 +315,14 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   }
 
   const { data, isFetching, isError } = useQuery<MalhaFinaApiResponse>({
-    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, cnpjDeb, sortCol, sortDir }],
+    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, dataAte, cnpjDeb, sortCol, sortDir }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
       params.set('sort_by', sortCol);
       params.set('sort_dir', sortDir);
       if (dataDe) params.set('data_de', dataDe);
+      if (dataAte) params.set('data_ate', dataAte);
       if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
       const res = await fetch(`/api/malha-fina/${tipo}?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
@@ -332,10 +334,11 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
 
   // Resumo por tipo (da MV) — apenas data_de, sem filtro de emitente para sempre mostrar todas as opções
   const { data: resumoData } = useQuery<MalhaFinaResumoResponse>({
-    queryKey: ['malha-fina-resumo', tipo, companyId, dataDe],
+    queryKey: ['malha-fina-resumo', tipo, companyId, dataDe, dataAte],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (dataDe) params.set('data_de', dataDe);
+      if (dataAte) params.set('data_ate', dataAte);
       const res = await fetch(`/api/malha-fina/${tipo}/resumo?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
       return res.json();
@@ -419,6 +422,16 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                 type="date"
                 value={dataDe}
                 onChange={e => { setDataDe(e.target.value); setPage(1); }}
+                className="h-8 w-40"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Data Fim</label>
+              <Input
+                type="date"
+                value={dataAte}
+                onChange={e => { setDataAte(e.target.value); setPage(1); }}
                 className="h-8 w-40"
               />
             </div>
