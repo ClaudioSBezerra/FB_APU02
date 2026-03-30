@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -43,6 +44,7 @@ interface CteEntradaRow {
   v_prest: number;
   v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number;
   v_ibs: number; v_cbs: number;
+  cancelado: string; // "S" | "N"
 }
 
 interface CteEntradaResponse {
@@ -437,10 +439,13 @@ export default function ConsultaCTesEntradas() {
                       const semCredito = (row.v_ibs == null || row.v_ibs === 0) && (row.v_cbs == null || row.v_cbs === 0);
                       return (
                         <TableRow key={row.id}
-                          className={`cursor-pointer hover:bg-muted/50 ${semCredito ? 'bg-orange-50/50 dark:bg-orange-950/10' : ''}`}
+                          className={`cursor-pointer hover:bg-muted/50 ${semCredito ? 'bg-orange-50/50 dark:bg-orange-950/10' : ''} ${row.cancelado === 'S' ? 'opacity-60' : ''}`}
                           onClick={() => setSelected(row)}>
                           <TableCell className="py-0.5 px-2 text-[11px] font-mono whitespace-nowrap">
                             {row.serie}/{row.numero_cte}
+                            {row.cancelado === 'S' && (
+                              <Badge variant="outline" className="ml-1.5 text-[9px] px-1 py-0 bg-red-50 text-red-600 border-red-200 align-middle">Cancelada</Badge>
+                            )}
                           </TableCell>
                           <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
                           <TableCell className="py-0.5 px-2 max-w-[180px]">

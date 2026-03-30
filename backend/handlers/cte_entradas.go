@@ -67,6 +67,7 @@ type cteRow struct {
 	VIbsMun         float64 `json:"v_ibs_mun"`
 	VIBS            float64 `json:"v_ibs"`
 	VCBS            float64 `json:"v_cbs"`
+	Cancelado       string  `json:"cancelado"` // "S" ou "N"
 }
 
 func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
@@ -139,8 +140,9 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		var totVPrest, totIBS, totCBS float64
+		whereTotais := where + " AND COALESCE(cancelado,'N') != 'S'"
 		db.QueryRow(
-			"SELECT COALESCE(SUM(v_prest),0), COALESCE(SUM(v_ibs),0), COALESCE(SUM(v_cbs),0) FROM cte_entradas "+where,
+			"SELECT COALESCE(SUM(v_prest),0), COALESCE(SUM(v_ibs),0), COALESCE(SUM(v_cbs),0) FROM cte_entradas "+whereTotais,
 			args...,
 		).Scan(&totVPrest, &totIBS, &totCBS)
 
@@ -159,7 +161,8 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				), '') AS emit_nome,
 				COALESCE(dest_cnpj_cpf,''),
 				v_prest,
-				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
+				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
+				COALESCE(cancelado, 'N') AS cancelado
 			FROM cte_entradas ` + where +
 			fmt.Sprintf(" ORDER BY %s %s, numero_cte DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
@@ -181,6 +184,7 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				&row.EmitCNPJ, &row.EmitNome, &row.DestCNPJCPF,
 				&row.VPrest,
 				&row.VBcIbsCbs, &row.VIbsUf, &row.VIbsMun, &row.VIBS, &row.VCBS,
+				&row.Cancelado,
 			); err != nil {
 				log.Printf("CteEntradasList scan error: %v", err)
 				continue
