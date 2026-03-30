@@ -153,7 +153,7 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
 				mes_ano,
 				emit_cnpj, COALESCE(dest_cnpj_cpf,''),
-				COALESCE(dest_nome, (
+				COALESCE((
 					SELECT nome FROM parceiros
 					WHERE company_id = nfe_saidas.company_id AND cnpj = nfe_saidas.dest_cnpj_cpf
 					LIMIT 1

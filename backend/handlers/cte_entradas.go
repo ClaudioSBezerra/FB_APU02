@@ -154,7 +154,7 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
 				mes_ano,
 				emit_cnpj,
-				COALESCE(emit_nome, (
+				COALESCE((
 					SELECT nome FROM parceiros
 					WHERE company_id = cte_entradas.company_id AND cnpj = cte_entradas.emit_cnpj
 					LIMIT 1
