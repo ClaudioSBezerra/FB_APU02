@@ -507,8 +507,9 @@ func main() {
 	http.HandleFunc("/api/erp-bridge/runs",        withAuth(handlers.ERPBridgeRunsHandler, ""))
 	http.HandleFunc("/api/erp-bridge/runs/",       withAuth(handlers.ERPBridgeRunHandler, ""))
 
-	// ERP Bridge — importação batch SAP S4/HANA e heartbeat (auth via X-API-Key, sem JWT)
-	http.HandleFunc("/api/erp-bridge/import/batch", withDB(handlers.ERPBridgeBatchImportHandler))
+	// ERP Bridge — importação batch SAP S4/HANA, parceiros e heartbeat (auth via X-API-Key, sem JWT)
+	http.HandleFunc("/api/erp-bridge/import/batch",   withDB(handlers.ERPBridgeBatchImportHandler))
+	http.HandleFunc("/api/erp-bridge/parceiros/sync", withDB(handlers.ERPBridgeParceirosSyncHandler))
 	http.Handle("/api/erp-bridge/heartbeat", handlers.ERPBridgeHeartbeatHandler(db))
 
 	// Serve frontend static files (SPA — React Router)

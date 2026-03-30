@@ -96,6 +96,45 @@ def marcar(conn, servidor, tipo, chave, status):
     """, (servidor, tipo, str(chave), datetime.now().isoformat(), status))
     conn.commit()
 
+# ── Watermark incremental SAP ─────────────────────────────────────────────────
+
+def get_watermark(dsn: str):
+    """Retorna a última data importada com sucesso para o DSN, ou None."""
+    conn = sqlite3.connect(TRACKER_DB)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sap_watermark (
+            dsn       TEXT PRIMARY KEY,
+            last_date TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    row = conn.execute(
+        "SELECT last_date FROM sap_watermark WHERE dsn = ?", (dsn,)
+    ).fetchone()
+    conn.close()
+    if row:
+        try:
+            return date.fromisoformat(row[0])
+        except ValueError:
+            return None
+    return None
+
+def set_watermark(dsn: str, last_date):
+    """Grava o watermark (última data importada) para o DSN."""
+    conn = sqlite3.connect(TRACKER_DB)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sap_watermark (
+            dsn       TEXT PRIMARY KEY,
+            last_date TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        INSERT INTO sap_watermark (dsn, last_date) VALUES (?, ?)
+        ON CONFLICT(dsn) DO UPDATE SET last_date = excluded.last_date
+    """, (dsn, last_date.isoformat()))
+    conn.commit()
+    conn.close()
+
 # ─── Normalização de XML (modo oracle_xml) ────────────────────────────────────
 
 _DECL_RE     = re.compile(r'<\?xml[^?]*\?>', re.IGNORECASE)
@@ -220,6 +259,30 @@ GROUP BY
 ORDER BY nn.CREDAT, nn.NFEID
 """
 
+# ─── Query parceiros SAP (FORN + CLIE do período) ────────────────────────────
+# Busca fornecedores e clientes cujos CNPJs aparecem nos movimentos do período.
+# Usa subquery para evitar ORA-01795 (sem listas Python de CNPJs).
+
+PARCEIROS_QUERY = """
+SELECT CGC AS cnpj, MIN(RAZSOC) AS nome
+FROM FORN
+WHERE CGC IN (
+    SELECT DISTINCT CNPJ_EMIT FROM s4i_nfe
+    WHERE TRUNC(CREDAT) BETWEEN :data_ini AND :data_fim
+      AND DIRECT = '1' AND LENGTH(NFEID) = 44
+)
+GROUP BY CGC
+UNION
+SELECT CGCCPF AS cnpj, MIN(RAZSOC) AS nome
+FROM CLIE
+WHERE CGCCPF IN (
+    SELECT DISTINCT CNPJ_DEST FROM s4i_nfe
+    WHERE TRUNC(CREDAT) BETWEEN :data_ini AND :data_fim
+      AND DIRECT = '2' AND LENGTH(NFEID) = 44
+)
+GROUP BY CGCCPF
+"""
+
 # ─── Cliente FBTax ────────────────────────────────────────────────────────────
 
 class FBTaxClient:
@@ -269,6 +332,20 @@ class FBTaxClient:
         if not resp.ok:
             log.error("enviar_batch HTTP %d: %s", resp.status_code, resp.text[:300])
             resp.raise_for_status()
+        return resp.json()
+
+    def sync_parceiros(self, parceiros: list) -> dict:
+        """Envia lista de {cnpj, nome} para /api/erp-bridge/parceiros/sync (auth X-API-Key)."""
+        url = f"{self.base_url}/api/erp-bridge/parceiros/sync"
+        resp = requests.post(
+            url,
+            headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
+            json={"parceiros": parceiros},
+            timeout=60,
+        )
+        if not resp.ok:
+            log.warning("sync_parceiros HTTP %d: %s", resp.status_code, resp.text[:200])
+            return {}
         return resp.json()
 
     # ── Métodos de reporte de execução via API ─────────────────────────────────
@@ -537,45 +614,26 @@ def processar_sap(
         if not rows:
             return stats
 
-        # ── Busca nomes de parceiros em queries separadas (por CNPJ único) ──
-        # Evita JOIN/GROUP BY em tabelas grandes (ORA-01652 temp tablespace)
-        emit_cnpjs = list({str(r.get("emit_cnpj") or "").strip()
-                           for r in rows if r.get("direct") == "1" and r.get("emit_cnpj")})
-        dest_cnpjs = list({str(r.get("dest_cnpj") or "").strip()
-                           for r in rows if r.get("direct") == "2" and r.get("dest_cnpj")})
+        # ── Etapa 1: sincronizar parceiros (FORN/CLIE) antes dos movimentos ──
+        # Query separada via subquery — sem listas Python, sem ORA-01795
+        try:
+            cur_p = conn_ora.cursor()
+            cur_p.execute(PARCEIROS_QUERY, data_ini=data_ini, data_fim=data_fim_inc)
+            parceiros = [
+                {"cnpj": str(row[0]).strip(), "nome": str(row[1]).strip() if row[1] else ""}
+                for row in cur_p.fetchall() if row[0]
+            ]
+            cur_p.close()
+            if parceiros:
+                result_p = fbtax.sync_parceiros(parceiros)
+                log.info("[Parceiros] Sincronizados: %d (upserted=%d)",
+                         len(parceiros), result_p.get("upserted", 0))
+            else:
+                log.info("[Parceiros] Nenhum parceiro encontrado no período.")
+        except Exception as exc:
+            log.warning("[Parceiros] Erro na sincronização (não bloqueia movimentos): %s", exc)
 
-        def _query_names_chunked(conn, cnpjs, table, cnpj_col):
-            """Busca CNPJ→nome em lotes de 999 para evitar ORA-01795 (limite 1000)."""
-            result = {}
-            chunk_size = 999
-            cnpjs_valid = [c for c in cnpjs if c]
-            for i in range(0, len(cnpjs_valid), chunk_size):
-                chunk = cnpjs_valid[i:i + chunk_size]
-                ph = ",".join(f"'{c}'" for c in chunk)
-                cur = conn.cursor()
-                cur.execute(f"SELECT {cnpj_col}, MIN(RAZSOC) FROM {table} WHERE {cnpj_col} IN ({ph}) GROUP BY {cnpj_col}")
-                for row in cur.fetchall():
-                    result[str(row[0]).strip()] = str(row[1]).strip() if row[1] else ""
-                cur.close()
-            return result
-
-        forn_names: dict = {}
-        if emit_cnpjs:
-            try:
-                forn_names = _query_names_chunked(conn_ora, emit_cnpjs, "FORN", "CGC")
-                log.info("Nomes fornecedores carregados: %d", len(forn_names))
-            except Exception as exc:
-                log.warning("Nao foi possivel carregar nomes de fornecedores: %s", exc)
-
-        clie_names: dict = {}
-        if dest_cnpjs:
-            try:
-                clie_names = _query_names_chunked(conn_ora, dest_cnpjs, "CLIE", "CGCCPF")
-                log.info("Nomes clientes carregados: %d", len(clie_names))
-            except Exception as exc:
-                log.warning("Nao foi possivel carregar nomes de clientes: %s", exc)
-
-        # Converte tipos Oracle para Python nativo
+        # ── Etapa 2: converter movimentos (sem lookup de nomes) ──────────────
         documents = []
         for r in rows:
             def s(v):
@@ -598,8 +656,7 @@ def processar_sap(
                 "emit_cnpj":        s(r.get("emit_cnpj")),
                 "dest_cnpj":        s(r.get("dest_cnpj")),
                 "cancelado":        s(r.get("cancelado")) or "N",
-                "nome_parceiro":    (forn_names.get(s(r.get("emit_cnpj")), "") if s(r.get("direct")) == "1"
-                                     else clie_names.get(s(r.get("dest_cnpj")), "")),
+                "nome_parceiro":    "",  # resolvido via tabela parceiros no backend
                 "v_total":          f(r.get("v_total")),
                 "v_bc_ibs_cbs":     f(r.get("v_bc_ibs_cbs")),
                 "v_ibs_uf":         f(r.get("v_ibs_uf")),
@@ -668,6 +725,11 @@ def processar_sap(
         log.info("=" * 60)
         log.info("SAP FCCORP — inseridos=%d  ignorados=%d  erros=%d",
                  total_inserted, total_ignored, total_errors)
+
+        # ── Atualiza watermark para importação incremental ────────────────────
+        if total_errors == 0:
+            set_watermark(oracle_cfg.get("dsn", "sap"), data_fim_inc)
+            log.info("[Watermark] Atualizado para %s", data_fim_inc)
 
     except Exception as exc:
         log.error("Erro durante processamento SAP: %s", exc)
@@ -1015,19 +1077,33 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                     _time.sleep(60)
                     continue
 
+                erp_type_curr = cfg.get("erp_type", "oracle_xml")
                 dias_retro = bridge_cfg.get("dias_retroativos", 1)
-                data_ini = hoje - timedelta(days=dias_retro)
-                data_fim = hoje + timedelta(days=1)
 
-                log.info("[Daemon] Horario %s atingido — iniciando importacao (%d dia(s) retroativo(s))",
-                         agora_hhmm, dias_retro)
+                # SAP: usa watermark incremental se disponível
+                if erp_type_curr == "sap_s4hana":
+                    dsn = cfg.get("oracle", {}).get("dsn", "sap_default")
+                    watermark = get_watermark(dsn)
+                    if watermark:
+                        data_ini_sched = watermark
+                        data_fim_sched = hoje + timedelta(days=1)
+                        log.info("[Daemon] SAP incremental desde %s (watermark)", watermark)
+                    else:
+                        data_ini_sched = hoje - timedelta(days=dias_retro)
+                        data_fim_sched = hoje + timedelta(days=1)
+                        log.info("[Daemon] SAP sem watermark — retroativo %d dia(s)", dias_retro)
+                else:
+                    data_ini_sched = hoje - timedelta(days=dias_retro)
+                    data_fim_sched = hoje + timedelta(days=1)
+                    log.info("[Daemon] Horario %s atingido — retroativo %d dia(s)",
+                             agora_hhmm, dias_retro)
 
                 try:
                     executar_importacao(
                         cfg=cfg,
                         fbtax=fbtax,
-                        data_ini=data_ini,
-                        data_fim=data_fim,
+                        data_ini=data_ini_sched,
+                        data_fim=data_fim_sched,
                         origem="scheduler",
                     )
                     ultimo_run_data = hoje
