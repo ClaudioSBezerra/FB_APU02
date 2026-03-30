@@ -188,11 +188,6 @@ SELECT
     nn.CNPJ_EMIT                                                AS emit_cnpj,
     nn.CNPJ_DEST                                                AS dest_cnpj,
     nn.CANCELADO                                                AS cancelado,
-    CASE
-      WHEN nn.DIRECT = '1' THEN forn.RAZSOC
-      WHEN nn.DIRECT = '2' THEN clie.RAZSOC
-      ELSE NULL
-    END                                                         AS nome_parceiro,
     nn.NFTOT                                                    AS v_total,
     MAX(CASE WHEN ni.TAXTYP = 'CBS3' THEN ni.BASE  ELSE 0 END) AS v_bc_ibs_cbs,
     SUM(CASE WHEN ni.TAXTYP = 'IB3S' THEN ni.TAXVAL ELSE 0 END) AS v_ibs_uf,
@@ -207,10 +202,6 @@ JOIN s4i_nfe_impostos ni
 JOIN s4i_nfe_it it
   ON it.NFEID = ni.NFEID
  AND it.ITMNUM = ni.ITMNUM
-LEFT JOIN (SELECT CGC, MIN(RAZSOC) AS RAZSOC FROM FORN WHERE CGC IS NOT NULL AND CGC != ' ' GROUP BY CGC) forn
-  ON forn.CGC = nn.CNPJ_EMIT AND nn.DIRECT = '1' AND nn.CNPJ_EMIT IS NOT NULL AND nn.CNPJ_EMIT != ' '
-LEFT JOIN (SELECT CGCCPF, MIN(RAZSOC) AS RAZSOC FROM CLIE WHERE CGCCPF IS NOT NULL AND CGCCPF != ' ' GROUP BY CGCCPF) clie
-  ON clie.CGCCPF = nn.CNPJ_DEST AND nn.DIRECT = '2' AND nn.CNPJ_DEST IS NOT NULL AND nn.CNPJ_DEST != ' '
 WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
   AND LPAD(it.cfop, 4, '1') NOT IN (
     '1151','1152','1153','1154',
@@ -224,8 +215,7 @@ WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
   )
 GROUP BY
     nn.DIRECT, nn.NFEID, nn.SERIES, nn.NFENUM,
-    nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.CANCELADO, nn.NFTOT,
-    forn.RAZSOC, clie.RAZSOC
+    nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.CANCELADO, nn.NFTOT
 ORDER BY nn.CREDAT, nn.NFEID
 """
 
@@ -545,6 +535,39 @@ def processar_sap(
         if not rows:
             return stats
 
+        # ── Busca nomes de parceiros em queries separadas (por CNPJ único) ──
+        # Evita JOIN/GROUP BY em tabelas grandes (ORA-01652 temp tablespace)
+        emit_cnpjs = list({str(r.get("emit_cnpj") or "").strip()
+                           for r in rows if r.get("direct") == "1" and r.get("emit_cnpj")})
+        dest_cnpjs = list({str(r.get("dest_cnpj") or "").strip()
+                           for r in rows if r.get("direct") == "2" and r.get("dest_cnpj")})
+
+        forn_names: dict = {}
+        if emit_cnpjs:
+            try:
+                ph = ",".join(f"'{c}'" for c in emit_cnpjs if c)
+                cur2 = conn_ora.cursor()
+                cur2.execute(f"SELECT CGC, MIN(RAZSOC) FROM FORN WHERE CGC IN ({ph}) GROUP BY CGC")
+                forn_names = {str(row[0]).strip(): str(row[1]).strip() if row[1] else ""
+                              for row in cur2.fetchall()}
+                cur2.close()
+                log.info("Nomes fornecedores carregados: %d", len(forn_names))
+            except Exception as exc:
+                log.warning("Nao foi possivel carregar nomes de fornecedores: %s", exc)
+
+        clie_names: dict = {}
+        if dest_cnpjs:
+            try:
+                ph = ",".join(f"'{c}'" for c in dest_cnpjs if c)
+                cur2 = conn_ora.cursor()
+                cur2.execute(f"SELECT CGCCPF, MIN(RAZSOC) FROM CLIE WHERE CGCCPF IN ({ph}) GROUP BY CGCCPF")
+                clie_names = {str(row[0]).strip(): str(row[1]).strip() if row[1] else ""
+                              for row in cur2.fetchall()}
+                cur2.close()
+                log.info("Nomes clientes carregados: %d", len(clie_names))
+            except Exception as exc:
+                log.warning("Nao foi possivel carregar nomes de clientes: %s", exc)
+
         # Converte tipos Oracle para Python nativo
         documents = []
         for r in rows:
@@ -568,7 +591,8 @@ def processar_sap(
                 "emit_cnpj":        s(r.get("emit_cnpj")),
                 "dest_cnpj":        s(r.get("dest_cnpj")),
                 "cancelado":        s(r.get("cancelado")) or "N",
-                "nome_parceiro":    s(r.get("nome_parceiro")),
+                "nome_parceiro":    (forn_names.get(s(r.get("emit_cnpj")), "") if s(r.get("direct")) == "1"
+                                     else clie_names.get(s(r.get("dest_cnpj")), "")),
                 "v_total":          f(r.get("v_total")),
                 "v_bc_ibs_cbs":     f(r.get("v_bc_ibs_cbs")),
                 "v_ibs_uf":         f(r.get("v_ibs_uf")),
