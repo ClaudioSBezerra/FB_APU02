@@ -189,8 +189,8 @@ SELECT
     nn.CNPJ_DEST                                                AS dest_cnpj,
     nn.CANCELADO                                                AS cancelado,
     CASE
-      WHEN nn.DIRECT = '1' THEN (SELECT f.RAZSOC FROM FORN f WHERE f.CGC = nn.CNPJ_EMIT AND ROWNUM = 1)
-      WHEN nn.DIRECT = '2' THEN (SELECT c.RAZSOC FROM CLIE c WHERE c.CGCCPF = nn.CNPJ_DEST AND ROWNUM = 1)
+      WHEN nn.DIRECT = '1' THEN forn.RAZSOC
+      WHEN nn.DIRECT = '2' THEN clie.RAZSOC
       ELSE NULL
     END                                                         AS nome_parceiro,
     nn.NFTOT                                                    AS v_total,
@@ -207,6 +207,10 @@ JOIN s4i_nfe_impostos ni
 JOIN s4i_nfe_it it
   ON it.NFEID = ni.NFEID
  AND it.ITMNUM = ni.ITMNUM
+LEFT JOIN (SELECT CGC, MIN(RAZSOC) AS RAZSOC FROM FORN WHERE CGC IS NOT NULL AND CGC != ' ' GROUP BY CGC) forn
+  ON forn.CGC = nn.CNPJ_EMIT AND nn.DIRECT = '1' AND nn.CNPJ_EMIT IS NOT NULL AND nn.CNPJ_EMIT != ' '
+LEFT JOIN (SELECT CGCCPF, MIN(RAZSOC) AS RAZSOC FROM CLIE WHERE CGCCPF IS NOT NULL AND CGCCPF != ' ' GROUP BY CGCCPF) clie
+  ON clie.CGCCPF = nn.CNPJ_DEST AND nn.DIRECT = '2' AND nn.CNPJ_DEST IS NOT NULL AND nn.CNPJ_DEST != ' '
 WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
   AND LPAD(it.cfop, 4, '1') NOT IN (
     '1151','1152','1153','1154',
@@ -220,7 +224,8 @@ WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
   )
 GROUP BY
     nn.DIRECT, nn.NFEID, nn.SERIES, nn.NFENUM,
-    nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.CANCELADO, nn.NFTOT
+    nn.DOCDAT, nn.CREDAT, nn.CNPJ_EMIT, nn.CNPJ_DEST, nn.CANCELADO, nn.NFTOT,
+    forn.RAZSOC, clie.RAZSOC
 ORDER BY nn.CREDAT, nn.NFEID
 """
 
