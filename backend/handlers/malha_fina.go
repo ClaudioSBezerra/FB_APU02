@@ -71,6 +71,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	}
 
 	dataDe     := q.Get("data_de")    // YYYY-MM-DD
+	dataAte    := q.Get("data_ate")   // YYYY-MM-DD
 	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
 
 	safeColsMalha := map[string]string{
@@ -102,6 +103,10 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	if dataDe != "" {
 		args = append(args, dataDe)
 		where += fmt.Sprintf(" AND rd.data_dfe_emissao >= $%d::date", len(args))
+	}
+	if dataAte != "" {
+		args = append(args, dataAte)
+		where += fmt.Sprintf(" AND rd.data_dfe_emissao <= $%d::date", len(args))
 	}
 	if filterCNPJ != "" {
 		args = append(args, filterCNPJ+"%")
@@ -241,6 +246,7 @@ func malhaFinaResumoFromMV(db *sql.DB, w http.ResponseWriter, r *http.Request, t
 
 	q       := r.URL.Query()
 	dataDe  := q.Get("data_de")
+	dataAte := q.Get("data_ate")
 
 	args  := []interface{}{companyID, tipo}
 	where := "company_id = $1 AND tipo = $2"
@@ -248,6 +254,10 @@ func malhaFinaResumoFromMV(db *sql.DB, w http.ResponseWriter, r *http.Request, t
 	if dataDe != "" {
 		args = append(args, dataDe)
 		where += fmt.Sprintf(" AND data_emissao >= $%d::date", len(args))
+	}
+	if dataAte != "" {
+		args = append(args, dataAte)
+		where += fmt.Sprintf(" AND data_emissao <= $%d::date", len(args))
 	}
 
 	rows, err := db.Query(fmt.Sprintf(`
@@ -329,13 +339,18 @@ func MalhaFinaResumoGeralHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		q      := r.URL.Query()
-		dataDe := q.Get("data_de")
+		dataDe  := q.Get("data_de")
+		dataAte := q.Get("data_ate")
 
 		args  := []interface{}{companyID}
 		where := "company_id = $1"
 		if dataDe != "" {
 			args = append(args, dataDe)
 			where += fmt.Sprintf(" AND data_emissao >= $%d::date", len(args))
+		}
+		if dataAte != "" {
+			args = append(args, dataAte)
+			where += fmt.Sprintf(" AND data_emissao <= $%d::date", len(args))
 		}
 
 		rows, err := db.Query(fmt.Sprintf(`
