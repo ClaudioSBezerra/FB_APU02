@@ -203,6 +203,7 @@ JOIN s4i_nfe_it it
   ON it.NFEID = ni.NFEID
  AND it.ITMNUM = ni.ITMNUM
 WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
+  AND LENGTH(nn.NFEID) = 44
   AND LPAD(it.cfop, 4, '1') NOT IN (
     '1151','1152','1153','1154',
     '1408','1409','1658','1659',
@@ -543,15 +544,25 @@ def processar_sap(
         dest_cnpjs = list({str(r.get("dest_cnpj") or "").strip()
                            for r in rows if r.get("direct") == "2" and r.get("dest_cnpj")})
 
+        def _query_names_chunked(conn, cnpjs, table, cnpj_col):
+            """Busca CNPJ→nome em lotes de 999 para evitar ORA-01795 (limite 1000)."""
+            result = {}
+            chunk_size = 999
+            cnpjs_valid = [c for c in cnpjs if c]
+            for i in range(0, len(cnpjs_valid), chunk_size):
+                chunk = cnpjs_valid[i:i + chunk_size]
+                ph = ",".join(f"'{c}'" for c in chunk)
+                cur = conn.cursor()
+                cur.execute(f"SELECT {cnpj_col}, MIN(RAZSOC) FROM {table} WHERE {cnpj_col} IN ({ph}) GROUP BY {cnpj_col}")
+                for row in cur.fetchall():
+                    result[str(row[0]).strip()] = str(row[1]).strip() if row[1] else ""
+                cur.close()
+            return result
+
         forn_names: dict = {}
         if emit_cnpjs:
             try:
-                ph = ",".join(f"'{c}'" for c in emit_cnpjs if c)
-                cur2 = conn_ora.cursor()
-                cur2.execute(f"SELECT CGC, MIN(RAZSOC) FROM FORN WHERE CGC IN ({ph}) GROUP BY CGC")
-                forn_names = {str(row[0]).strip(): str(row[1]).strip() if row[1] else ""
-                              for row in cur2.fetchall()}
-                cur2.close()
+                forn_names = _query_names_chunked(conn_ora, emit_cnpjs, "FORN", "CGC")
                 log.info("Nomes fornecedores carregados: %d", len(forn_names))
             except Exception as exc:
                 log.warning("Nao foi possivel carregar nomes de fornecedores: %s", exc)
@@ -559,12 +570,7 @@ def processar_sap(
         clie_names: dict = {}
         if dest_cnpjs:
             try:
-                ph = ",".join(f"'{c}'" for c in dest_cnpjs if c)
-                cur2 = conn_ora.cursor()
-                cur2.execute(f"SELECT CGCCPF, MIN(RAZSOC) FROM CLIE WHERE CGCCPF IN ({ph}) GROUP BY CGCCPF")
-                clie_names = {str(row[0]).strip(): str(row[1]).strip() if row[1] else ""
-                              for row in cur2.fetchall()}
-                cur2.close()
+                clie_names = _query_names_chunked(conn_ora, dest_cnpjs, "CLIE", "CGCCPF")
                 log.info("Nomes clientes carregados: %d", len(clie_names))
             except Exception as exc:
                 log.warning("Nao foi possivel carregar nomes de clientes: %s", exc)
