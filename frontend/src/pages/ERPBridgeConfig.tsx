@@ -235,9 +235,9 @@ const abortMutation = useMutation({
     return <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center"><Loader2 className="h-4 w-4 animate-spin" />Carregando...</div>;
   }
 
-  const daemonOnline = config?.daemon_online ?? false;
-  const daemonLastSeen = config?.daemon_last_seen
-    ? new Date(config.daemon_last_seen).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+  const daemonOnline = cfg?.daemon_online ?? false;
+  const daemonLastSeen = cfg?.daemon_last_seen
+    ? new Date(cfg.daemon_last_seen).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
     : null;
 
   return (
