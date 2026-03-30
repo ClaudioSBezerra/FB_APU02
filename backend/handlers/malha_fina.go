@@ -96,8 +96,11 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 
 	// Mostrar notas que estão na RFB mas não têm registro NORMAL na empresa.
 	// Notas importadas como canceladas (cancelado='S') ainda aparecem aqui com status CANCELADA.
+	// NOT EXISTS adicional garante dedup caso a mesma chave exista em múltiplos request_ids.
 	where := fmt.Sprintf(
-		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != '' AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe AND COALESCE(t.cancelado,'N') != 'S')",
+		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != ''"+
+			" AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe AND COALESCE(t.cancelado,'N') != 'S')"+
+			" AND NOT EXISTS (SELECT 1 FROM rfb_debitos rd2 WHERE rd2.company_id = $1 AND rd2.chave_dfe = rd.chave_dfe AND rd2.created_at > rd.created_at)",
 		strings.Join(modeloPlaceholders, ","), excludeTable, excludeChaveCol,
 	)
 

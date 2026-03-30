@@ -286,6 +286,18 @@ func insertDebito(exec dbExecutor, requestID, companyID, tipoApuracao string, d 
 			valor_cbs_total, valor_cbs_extinto, valor_cbs_nao_extinto,
 			situacao_debito, formas_extincao, eventos)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		ON CONFLICT (company_id, chave_dfe) WHERE chave_dfe IS NOT NULL AND chave_dfe != ''
+		DO UPDATE SET
+			request_id            = EXCLUDED.request_id,
+			tipo_apuracao         = EXCLUDED.tipo_apuracao,
+			data_dfe_emissao      = EXCLUDED.data_dfe_emissao,
+			data_apuracao         = EXCLUDED.data_apuracao,
+			valor_cbs_total       = EXCLUDED.valor_cbs_total,
+			valor_cbs_extinto     = EXCLUDED.valor_cbs_extinto,
+			valor_cbs_nao_extinto = EXCLUDED.valor_cbs_nao_extinto,
+			situacao_debito       = EXCLUDED.situacao_debito,
+			formas_extincao       = EXCLUDED.formas_extincao,
+			eventos               = EXCLUDED.eventos
 	`, requestID, companyID, tipoApuracao,
 		string(d.ModeloDfe), string(d.NumeroDfe), string(d.ChaveDfe), dataEmissao, d.DataApuracao,
 		string(d.NiEmitente), string(d.NiAdquirente),
