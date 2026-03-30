@@ -285,6 +285,14 @@ func ERPBridgeRunsHandler(db *sql.DB) http.HandlerFunc {
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(map[string]string{"id": id})
 
+		case http.MethodDelete:
+			// Limpa runs finalizados (não remove running/pending)
+			db.Exec(`
+				DELETE FROM erp_bridge_runs
+				WHERE company_id = $1 AND status NOT IN ('running','pending')
+			`, companyID)
+			w.WriteHeader(http.StatusNoContent)
+
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
