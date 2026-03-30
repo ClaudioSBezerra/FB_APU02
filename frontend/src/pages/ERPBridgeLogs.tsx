@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle, AlertTriangle,
-  Clock, RefreshCw,
+  Clock, RefreshCw, Trash2, StopCircle,
 } from 'lucide-react';
 
 interface BridgeRunItem {
@@ -61,10 +61,11 @@ const TIPO_LABELS: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, { label: string; className: string }> = {
-    running:  { label: 'Em andamento', className: 'bg-blue-100 text-blue-700 border-blue-200' },
-    success:  { label: 'Sucesso',      className: 'bg-green-100 text-green-700 border-green-200' },
-    partial:  { label: 'Parcial',      className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-    error:    { label: 'Erro',         className: 'bg-red-100 text-red-700 border-red-200' },
+    running:   { label: 'Em andamento', className: 'bg-blue-100 text-blue-700 border-blue-200' },
+    success:   { label: 'Sucesso',      className: 'bg-green-100 text-green-700 border-green-200' },
+    partial:   { label: 'Parcial',      className: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+    error:     { label: 'Erro',         className: 'bg-red-100 text-red-700 border-red-200' },
+    cancelled: { label: 'Cancelado',    className: 'bg-gray-100 text-gray-600 border-gray-300' },
     ok:               { label: 'OK',          className: 'bg-green-50 text-green-600 border-green-200' },
     erro_conexao:     { label: 'Erro conexão', className: 'bg-red-100 text-red-600 border-red-200' },
     erro_query:       { label: 'Erro query',  className: 'bg-red-100 text-red-600 border-red-200' },
@@ -77,16 +78,38 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === 'running') return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
-  if (status === 'success') return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
-  if (status === 'error')   return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+  if (status === 'running')   return <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />;
+  if (status === 'success')   return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
+  if (status === 'error')     return <XCircle className="h-3.5 w-3.5 text-red-500" />;
+  if (status === 'cancelled') return <StopCircle className="h-3.5 w-3.5 text-gray-400" />;
   return <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />;
 }
 
 // ── Row expandível ─────────────────────────────────────────────────────────────
 
-function RunRow({ run, authHeaders }: { run: BridgeRun; authHeaders: Record<string, string> }) {
+function RunRow({ run, authHeaders, onRefresh }: {
+  run: BridgeRun;
+  authHeaders: Record<string, string>;
+  onRefresh: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  async function handleCancel(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm('Cancelar esta importação?')) return;
+    setCancelling(true);
+    try {
+      await fetch(`/api/erp-bridge/runs/${run.id}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'cancelled' }),
+      });
+      onRefresh();
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   const { data: detail, isFetching } = useQuery<BridgeRun>({
     queryKey: ['erp-bridge-run-detail', run.id],
@@ -146,12 +169,27 @@ function RunRow({ run, authHeaders }: { run: BridgeRun; authHeaders: Record<stri
             {fmtDuration(run.iniciado_em, run.finalizado_em)}
           </span>
         </td>
+        <td className="py-1.5 px-2">
+          {(run.status === 'running' || run.status === 'pending') && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              title="Cancelar importação"
+              className="text-red-400 hover:text-red-600 disabled:opacity-40 p-0.5 rounded"
+            >
+              {cancelling
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <StopCircle className="h-3.5 w-3.5" />
+              }
+            </button>
+          )}
+        </td>
       </tr>
 
       {/* Detalhe expandido */}
       {expanded && (
         <tr className="border-b bg-muted/20">
-          <td colSpan={9} className="px-6 py-3">
+          <td colSpan={10} className="px-6 py-3">
             {isFetching && items.length === 0 ? (
               <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
                 <Loader2 className="h-3 w-3 animate-spin" /> Carregando detalhes...
@@ -227,6 +265,8 @@ function RunRow({ run, authHeaders }: { run: BridgeRun; authHeaders: Record<stri
 export default function ERPBridgeLogs() {
   const { token, companyId } = useAuth();
   const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
+  const queryClient = useQueryClient();
+  const [clearing, setClearing] = useState(false);
 
   const { data, isLoading, isFetching, refetch } = useQuery<{ items: BridgeRun[]; total: number }>({
     queryKey: ['erp-bridge-runs', companyId],
@@ -241,6 +281,17 @@ export default function ERPBridgeLogs() {
 
   const runs = data?.items ?? [];
 
+  async function handleClearLogs() {
+    if (!confirm('Limpar todo o histórico de execuções finalizadas?')) return;
+    setClearing(true);
+    try {
+      await fetch('/api/erp-bridge/runs', { method: 'DELETE', headers: authHeaders });
+      queryClient.invalidateQueries({ queryKey: ['erp-bridge-runs'] });
+    } finally {
+      setClearing(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -250,10 +301,17 @@ export default function ERPBridgeLogs() {
             Execuções do bridge Oracle → FBTax. Clique em uma linha para ver o detalhe por servidor/tipo.
           </p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching} className="mt-1">
-          <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isFetching ? 'animate-spin' : ''}`} />
-          Atualizar
-        </Button>
+        <div className="flex gap-2 mt-1">
+          <Button size="sm" variant="outline" onClick={handleClearLogs} disabled={clearing || isFetching}
+            className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200">
+            {clearing ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5 mr-1.5" />}
+            Limpar
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${isFetching ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -285,11 +343,12 @@ export default function ERPBridgeLogs() {
                     <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">Ignorados</th>
                     <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">Erros</th>
                     <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">Duração</th>
+                    <th className="py-1.5 px-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {runs.map(run => (
-                    <RunRow key={run.id} run={run} authHeaders={authHeaders} />
+                    <RunRow key={run.id} run={run} authHeaders={authHeaders} onRefresh={refetch} />
                   ))}
                 </tbody>
               </table>
