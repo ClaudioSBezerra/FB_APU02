@@ -152,6 +152,7 @@ export default function ERPBridgeConfig() {
   const [triggerIni, setTriggerIni]               = useState(firstDayOfPrevMonth);
   const [triggerFim, setTriggerFim]               = useState(today);
   const [triggerQueued, setTriggerQueued]         = useState(false);
+  const [onlyParceiros, setOnlyParceiros]         = useState(false);
 
   useEffect(() => {
     if (cfg) {
@@ -187,6 +188,7 @@ const abortMutation = useMutation({
           data_ini: triggerIni,
           data_fim: triggerFim,
           filiais_filter: [],
+          only_parceiros: onlyParceiros,
         }),
       });
       if (res.status === 409) throw new Error('Já existe uma importação em andamento. Aguarde a conclusão.');
@@ -495,6 +497,22 @@ const abortMutation = useMutation({
                 disabled={triggerMutation.isPending || !!activeRun} />
             </div>
           </div>
+
+          {/* Apenas Parceiros — visível somente para SAP S/4HANA */}
+          {cfg?.erp_type === 'sap_s4hana' && (
+            <label className="flex items-center gap-2 cursor-pointer w-fit">
+              <input
+                type="checkbox"
+                checked={onlyParceiros}
+                onChange={e => { setOnlyParceiros(e.target.checked); setTriggerQueued(false); }}
+                disabled={triggerMutation.isPending || !!activeRun}
+                className="h-3.5 w-3.5 accent-amber-500"
+              />
+              <span className="text-xs text-muted-foreground">
+                Apenas Parceiros (FORN/CLIE) — sem importar movimentos
+              </span>
+            </label>
+          )}
 
 {/* Botão + status */}
           <div className="flex items-center gap-3 pt-1">

@@ -1029,10 +1029,11 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
             # ── 1. Runs pendentes criados pela UI ─────────────────────────────
             pending = fbtax.get_pending_runs()
             for run in pending:
-                run_id     = run["id"]
-                data_ini_s = run.get("data_ini")
-                data_fim_s = run.get("data_fim")
-                filiais_json = run.get("filiais_filter")
+                run_id        = run["id"]
+                data_ini_s    = run.get("data_ini")
+                data_fim_s    = run.get("data_fim")
+                filiais_json  = run.get("filiais_filter")
+                only_parc     = run.get("only_parceiros", False)
 
                 if not data_ini_s or not data_fim_s:
                     log.warning("[Daemon] Run pendente %s sem datas — ignorado", run_id)
@@ -1050,11 +1051,45 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                 data_ini_run = date.fromisoformat(data_ini_s[:10])
                 data_fim_run = date.fromisoformat(data_fim_s[:10]) + timedelta(days=1)
 
+                fbtax.start_run(run_id)
+
+                # ── Modo apenas parceiros ─────────────────────────────────────
+                if only_parc:
+                    log.info("[Daemon] Run parceiros %s: %s → %s", run_id, data_ini_s, data_fim_s)
+                    oracle_cfg = cfg.get("oracle", {})
+                    try:
+                        conn_ora = oracledb.connect(
+                            user=oracle_cfg["usuario"],
+                            password=oracle_cfg["senha"],
+                            dsn=oracle_cfg["dsn"],
+                            expire_time=2,
+                        )
+                        data_fim_inc = data_fim_run - timedelta(days=1)
+                        cur_p = conn_ora.cursor()
+                        cur_p.execute(PARCEIROS_QUERY, data_ini=data_ini_run, data_fim=data_fim_inc)
+                        parceiros = [
+                            {"cnpj": str(row[0]).strip(), "nome": str(row[1]).strip() if row[1] else ""}
+                            for row in cur_p.fetchall() if row[0]
+                        ]
+                        cur_p.close()
+                        conn_ora.close()
+                        log.info("[Daemon] Parceiros encontrados: %d", len(parceiros))
+                        upserted = 0
+                        if parceiros:
+                            result_p = fbtax.sync_parceiros(parceiros)
+                            upserted = result_p.get("upserted", 0)
+                            log.info("[Daemon] Parceiros sincronizados: upserted=%d", upserted)
+                        fbtax.finalize_run(run_id, {"enviados": upserted, "ignorados": 0, "erros": 0})
+                    except Exception as exc:
+                        log.error("[Daemon] Erro no run parceiros %s: %s", run_id, exc)
+                        fbtax.finalize_run(run_id, {"enviados": 0, "ignorados": 0, "erros": 1},
+                                           erro_msg=str(exc))
+                    continue
+
+                # ── Importação normal ─────────────────────────────────────────
                 filiais_desc = ", ".join(filtro_servidores) if filtro_servidores else "todas"
                 log.info("[Daemon] Run manual %s: %s → %s | filiais: %s",
                          run_id, data_ini_s, data_fim_s, filiais_desc)
-
-                fbtax.start_run(run_id)
 
                 try:
                     executar_importacao(
