@@ -864,9 +864,10 @@ def parse_args():
     p.add_argument("--data-fim",  metavar="YYYY-MM-DD", help="Data final (exclusiva)")
     p.add_argument("--mes",       metavar="YYYY-MM",    help="Mes completo")
     p.add_argument("--servidor",  metavar="NOME",       help="Processa apenas este servidor (oracle_xml)")
-    p.add_argument("--dry-run",   action="store_true",  help="Consulta Oracle mas nao envia")
-    p.add_argument("--daemon",    action="store_true",  help="Modo daemon")
-    p.add_argument("--origin",    metavar="ORIGEM",     default="manual", help="Origem do run")
+    p.add_argument("--dry-run",        action="store_true",  help="Consulta Oracle mas nao envia")
+    p.add_argument("--daemon",         action="store_true",  help="Modo daemon")
+    p.add_argument("--origin",         metavar="ORIGEM",     default="manual", help="Origem do run")
+    p.add_argument("--only-parceiros", action="store_true",  help="Sincroniza apenas parceiros (FORN/CLIE), sem importar movimentos")
     return p.parse_args()
 
 
@@ -1195,6 +1196,44 @@ def main() -> int:
         except Exception as exc:
             log.error("Falha ao autenticar no FBTax: %s", exc)
             return 1
+
+    # Modo --only-parceiros: sincroniza apenas FORN/CLIE sem importar movimentos
+    if args.only_parceiros:
+        if erp_type != "sap_s4hana":
+            log.error("--only-parceiros disponível apenas para erp_type=sap_s4hana")
+            return 1
+        oracle_cfg = cfg.get("oracle", {})
+        if not oracle_cfg.get("dsn"):
+            log.error("oracle.dsn nao configurado em config.yaml")
+            return 1
+        log.info("=" * 60)
+        log.info("Modo: apenas parceiros (FORN/CLIE)")
+        log.info("Periodo: %s -> %s", data_ini, data_fim - timedelta(days=1))
+        log.info("=" * 60)
+        try:
+            conn_ora = oracledb.connect(
+                user=oracle_cfg["usuario"],
+                password=oracle_cfg["senha"],
+                dsn=oracle_cfg["dsn"],
+                expire_time=2,
+            )
+            data_fim_inc = data_fim - timedelta(days=1)
+            cur_p = conn_ora.cursor()
+            cur_p.execute(PARCEIROS_QUERY, data_ini=data_ini, data_fim=data_fim_inc)
+            parceiros = [
+                {"cnpj": str(row[0]).strip(), "nome": str(row[1]).strip() if row[1] else ""}
+                for row in cur_p.fetchall() if row[0]
+            ]
+            cur_p.close()
+            conn_ora.close()
+            log.info("Parceiros encontrados: %d", len(parceiros))
+            if parceiros and not args.dry_run:
+                result_p = fbtax.sync_parceiros(parceiros)
+                log.info("Parceiros sincronizados: upserted=%d", result_p.get("upserted", 0))
+        except Exception as exc:
+            log.error("Erro na sincronização de parceiros: %s", exc)
+            return 1
+        return 0
 
     return executar_importacao(
         cfg=cfg,
