@@ -266,7 +266,8 @@ ORDER BY nn.CREDAT, nn.NFEID
 PARCEIROS_QUERY = """
 SELECT CGC AS cnpj, MIN(RAZSOC) AS nome
 FROM FORN
-WHERE CGC IN (
+WHERE LENGTH(CGC) = 14
+  AND CGC IN (
     SELECT DISTINCT CNPJ_EMIT FROM s4i_nfe
     WHERE TRUNC(CREDAT) BETWEEN :data_ini AND :data_fim
       AND DIRECT = '1' AND LENGTH(NFEID) = 44
@@ -275,7 +276,8 @@ GROUP BY CGC
 UNION
 SELECT CGCCPF AS cnpj, MIN(RAZSOC) AS nome
 FROM CLIE
-WHERE CGCCPF IN (
+WHERE LENGTH(CGCCPF) = 14
+  AND CGCCPF IN (
     SELECT DISTINCT CNPJ_DEST FROM s4i_nfe
     WHERE TRUNC(CREDAT) BETWEEN :data_ini AND :data_fim
       AND DIRECT = '2' AND LENGTH(NFEID) = 44
@@ -334,19 +336,23 @@ class FBTaxClient:
             resp.raise_for_status()
         return resp.json()
 
-    def sync_parceiros(self, parceiros: list) -> dict:
-        """Envia lista de {cnpj, nome} para /api/erp-bridge/parceiros/sync (auth X-API-Key)."""
+    def sync_parceiros(self, parceiros: list, chunk_size: int = 500) -> dict:
+        """Envia lista de {cnpj, nome} em lotes para /api/erp-bridge/parceiros/sync."""
         url = f"{self.base_url}/api/erp-bridge/parceiros/sync"
-        resp = requests.post(
-            url,
-            headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
-            json={"parceiros": parceiros},
-            timeout=60,
-        )
-        if not resp.ok:
-            log.warning("sync_parceiros HTTP %d: %s", resp.status_code, resp.text[:200])
-            return {}
-        return resp.json()
+        total_upserted = 0
+        for i in range(0, len(parceiros), chunk_size):
+            lote = parceiros[i:i + chunk_size]
+            resp = requests.post(
+                url,
+                headers={"X-API-Key": self.api_key, "Content-Type": "application/json"},
+                json={"parceiros": lote},
+                timeout=120,
+            )
+            if not resp.ok:
+                log.warning("sync_parceiros HTTP %d: %s", resp.status_code, resp.text[:200])
+                continue
+            total_upserted += resp.json().get("upserted", 0)
+        return {"upserted": total_upserted}
 
     # ── Métodos de reporte de execução via API ─────────────────────────────────
 
