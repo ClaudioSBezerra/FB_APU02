@@ -157,7 +157,22 @@ function RunRow({ run, authHeaders }: { run: BridgeRun; authHeaders: Record<stri
                 <Loader2 className="h-3 w-3 animate-spin" /> Carregando detalhes...
               </div>
             ) : items.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-1">Nenhum detalhe disponível.</p>
+              <div className="space-y-1.5 py-1">
+                {run.total_enviados > 0 || run.total_ignorados > 0 ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Totais registrados — env: <strong>{run.total_enviados}</strong> · ign: <strong>{run.total_ignorados}</strong> · err: <strong>{run.total_erros}</strong>
+                    {' '}(detalhe por servidor não disponível — versão antiga do daemon)
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Nenhum detalhe disponível.</p>
+                )}
+                {run.erro_msg && (
+                  <div className="flex items-start gap-1.5 text-[11px] text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                    <XCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                    <span>{run.erro_msg}</span>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="space-y-3">
                 {Object.entries(byServer).map(([servidor, serverItems]) => (

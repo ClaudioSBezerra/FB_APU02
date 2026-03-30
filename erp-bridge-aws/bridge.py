@@ -363,6 +363,21 @@ class FBTaxClient:
             log.warning("Nao foi possivel criar run na API: %s", exc)
         return None
 
+    def heartbeat(self) -> bool:
+        """Envia sinal de vida ao backend e limpa runs presos."""
+        if not self.api_key:
+            return False
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/api/erp-bridge/heartbeat",
+                headers={"X-API-Key": self.api_key},
+                timeout=10,
+            )
+            return resp.ok
+        except Exception as exc:
+            log.warning("Heartbeat falhou: %s", exc)
+        return False
+
     def get_pending_runs(self) -> list:
         try:
             resp = self.session.get(f"{self.base_url}/api/erp-bridge/pending", timeout=10)
@@ -868,7 +883,10 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
             agora_hhmm = now.strftime("%H:%M")
             hoje = now.date()
 
-            # ── 0. Reset tracker ──────────────────────────────────────────────
+            # ── 0. Heartbeat — sinaliza ao backend que o daemon está ativo ────
+            fbtax.heartbeat()
+
+            # ── 1. Reset tracker ──────────────────────────────────────────────
             bridge_cfg_check = fbtax.get_bridge_config()
             if bridge_cfg_check and bridge_cfg_check.get("reset_tracker"):
                 log.info("[Daemon] reset_tracker detectado — limpando tracker.db...")

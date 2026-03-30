@@ -31,6 +31,8 @@ type ERPBridgeConfig struct {
 	OracleUsuario      string     `json:"oracle_usuario"`
 	OracleSenhaSet     bool       `json:"oracle_senha_set"`
 	APIKey             string     `json:"api_key"`
+	DaemonLastSeen     *time.Time `json:"daemon_last_seen"`
+	DaemonOnline       bool       `json:"daemon_online"`
 }
 
 type ERPBridgeRun struct {
@@ -93,11 +95,13 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				SELECT company_id, ativo, TO_CHAR(horario, 'HH24:MI'), dias_retroativos,
 				       ultimo_run_em, updated_at, reset_tracker,
 				       COALESCE(erp_type, 'oracle_xml'),
-				       fbtax_email, fbtax_password, oracle_dsn, oracle_usuario, oracle_senha, api_key
+				       fbtax_email, fbtax_password, oracle_dsn, oracle_usuario, oracle_senha, api_key,
+				       daemon_last_seen
 				FROM erp_bridge_config WHERE company_id = $1
 			`, companyID).Scan(&cfg.CompanyID, &cfg.Ativo, &horario,
 				&cfg.DiasRetroativos, &cfg.UltimoRunEm, &cfg.UpdatedAt, &cfg.ResetTracker,
-				&erpType, &fbtaxEmail, &fbtaxPassword, &oracleDsn, &oracleUsuario, &oracleSenha, &apiKey)
+				&erpType, &fbtaxEmail, &fbtaxPassword, &oracleDsn, &oracleUsuario, &oracleSenha, &apiKey,
+				&cfg.DaemonLastSeen)
 			if err == sql.ErrNoRows {
 				cfg = ERPBridgeConfig{
 					CompanyID:       companyID,
@@ -131,6 +135,10 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				cfg.OracleSenhaSet = oracleSenha.Valid && oracleSenha.String != ""
 				if apiKey.Valid && apiKey.String != "" {
 					cfg.APIKey = DecryptFieldWithFallback(apiKey.String)
+				}
+				// Daemon está online se fez heartbeat nos últimos 3 minutos
+				if cfg.DaemonLastSeen != nil {
+					cfg.DaemonOnline = time.Since(*cfg.DaemonLastSeen) < 3*time.Minute
 				}
 			}
 			json.NewEncoder(w).Encode(cfg)
@@ -710,4 +718,58 @@ func ERPBridgePendingHandler(db *sql.DB) http.HandlerFunc {
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{"items": items})
 	}
+}
+
+// ── POST /api/erp-bridge/heartbeat ───────────────────────────────────────────
+// Chamado pelo daemon a cada ciclo para indicar que está ativo.
+// Aproveita para limpar runs presos em pending/running por mais de 2 horas.
+
+func ERPBridgeHeartbeatHandler(db *sql.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Autenticação via X-API-Key (mesmo padrão de /credentials e /pending)
+		apiKey := r.Header.Get("X-API-Key")
+		if apiKey == "" {
+			http.Error(w, "X-API-Key obrigatório", http.StatusUnauthorized)
+			return
+		}
+		hash := sha256.Sum256([]byte(apiKey))
+		hashHex := hex.EncodeToString(hash[:])
+
+		var companyID string
+		err := db.QueryRow(`
+			SELECT company_id FROM erp_bridge_config WHERE api_key_hash = $1
+		`, hashHex).Scan(&companyID)
+		if err == sql.ErrNoRows {
+			http.Error(w, "API key inválida", http.StatusUnauthorized)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Atualiza daemon_last_seen
+		db.Exec(`
+			UPDATE erp_bridge_config SET daemon_last_seen = NOW() WHERE company_id = $1
+		`, companyID)
+
+		// Limpa runs presos: pending/running por mais de 2 horas → error
+		db.Exec(`
+			UPDATE erp_bridge_runs
+			SET status = 'error',
+			    finalizado_em = NOW(),
+			    erro_msg = 'Run abandonado: daemon reiniciado ou timeout de 2h'
+			WHERE company_id = $1
+			  AND status IN ('pending', 'running')
+			  AND iniciado_em < NOW() - INTERVAL '2 hours'
+		`, companyID)
+
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
 }
