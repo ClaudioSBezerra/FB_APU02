@@ -53,6 +53,7 @@ interface NfeSaidaRow {
   v_ibs_mun: number;
   v_ibs: number;
   v_cbs: number;
+  cancelado: string; // "S" | "N"
 }
 
 interface NfeSaidaResponse {
@@ -471,13 +472,16 @@ export default function ConsultaNFeSaidas() {
                   <TableBody>
                     {items.map(row => (
                       <TableRow key={row.id}
-                        className="cursor-pointer hover:bg-muted/50"
+                        className={`cursor-pointer hover:bg-muted/50 ${row.cancelado === 'S' ? 'opacity-60' : ''}`}
                         onClick={() => setSelected(row)}>
                         <TableCell className="py-0.5 px-2 text-center">
                           <Badge variant="outline" className="text-[10px] px-1 py-0">{row.modelo}</Badge>
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] font-mono whitespace-nowrap">
                           {row.serie}/{row.numero_nfe}
+                          {row.cancelado === 'S' && (
+                            <Badge variant="outline" className="ml-1.5 text-[9px] px-1 py-0 bg-red-50 text-red-600 border-red-200 align-middle">Cancelada</Badge>
+                          )}
                         </TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
                         <TableCell className="py-0.5 px-2 max-w-[180px]">

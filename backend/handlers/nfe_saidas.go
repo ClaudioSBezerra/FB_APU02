@@ -33,6 +33,7 @@ type nfeSaidaRow struct {
 	VIBSMun         float64 `json:"v_ibs_mun"`
 	VIBS            float64 `json:"v_ibs"`
 	VCBS            float64 `json:"v_cbs"`
+	Cancelado       string  `json:"cancelado"` // "S" ou "N"
 }
 
 // ---------------------------------------------------------------------------
@@ -138,8 +139,9 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		var totVNF, totIBS, totCBS float64
+		whereTotais := where + " AND COALESCE(cancelado,'N') != 'S'"
 		db.QueryRow(
-			"SELECT COALESCE(SUM(v_nf),0), COALESCE(SUM(v_ibs),0), COALESCE(SUM(v_cbs),0) FROM nfe_saidas "+where,
+			"SELECT COALESCE(SUM(v_nf),0), COALESCE(SUM(v_ibs),0), COALESCE(SUM(v_cbs),0) FROM nfe_saidas "+whereTotais,
 			args...,
 		).Scan(&totVNF, &totIBS, &totCBS)
 
@@ -157,7 +159,8 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 					LIMIT 1
 				), '') AS dest_nome,
 				v_nf,
-				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs
+				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
+				COALESCE(cancelado, 'N') AS cancelado
 			FROM nfe_saidas ` + where +
 			fmt.Sprintf(" ORDER BY %s %s, numero_nfe DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
@@ -179,6 +182,7 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 				&row.EmitCNPJ, &row.DestCNPJCPF, &row.DestNome,
 				&row.VNF,
 				&row.VBCIbsCbs, &row.VIBSuf, &row.VIBSMun, &row.VIBS, &row.VCBS,
+				&row.Cancelado,
 			); err != nil {
 				log.Printf("NfeSaidasList scan error: %v", err)
 				continue
