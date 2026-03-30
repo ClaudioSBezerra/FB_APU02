@@ -72,6 +72,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 
 	dataDe     := q.Get("data_de")    // YYYY-MM-DD
 	dataAte    := q.Get("data_ate")   // YYYY-MM-DD
+	statusFilt := q.Get("status")     // "ausente" | "cancelada" | "" = todas
 	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
 
 	safeColsMalha := map[string]string{
@@ -107,6 +108,12 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	if dataAte != "" {
 		args = append(args, dataAte)
 		where += fmt.Sprintf(" AND rd.data_dfe_emissao <= $%d::date", len(args))
+	}
+	switch statusFilt {
+	case "ausente":
+		where += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)", excludeTable, excludeChaveCol)
+	case "cancelada":
+		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)", excludeTable, excludeChaveCol)
 	}
 	if filterCNPJ != "" {
 		args = append(args, filterCNPJ+"%")

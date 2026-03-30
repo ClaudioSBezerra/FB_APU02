@@ -271,6 +271,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
 
   const [dataDe,     setDataDe]     = useState(defaultDataDe);
   const [dataAte,    setDataAte]    = useState('');
+  const [statusFilt, setStatusFilt] = useState('');
   const [filterCNPJ, setFilterCNPJ] = useState('');
   const [sortCol,    setSortCol]    = useState('data_dfe_emissao');
   const [sortDir,    setSortDir]    = useState<'asc'|'desc'>('desc');
@@ -300,7 +301,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     return () => clearTimeout(t);
   }, [filterCNPJ]);
 
-  useEffect(() => { setPage(1); }, [dataDe, dataAte, cnpjDeb, sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [dataDe, dataAte, statusFilt, cnpjDeb, sortCol, sortDir]);
 
   function handleSort(col: string) {
     if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
@@ -315,7 +316,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   }
 
   const { data, isFetching, isError } = useQuery<MalhaFinaApiResponse>({
-    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, dataAte, cnpjDeb, sortCol, sortDir }],
+    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, dataAte, statusFilt, cnpjDeb, sortCol, sortDir }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
@@ -323,6 +324,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
       params.set('sort_dir', sortDir);
       if (dataDe) params.set('data_de', dataDe);
       if (dataAte) params.set('data_ate', dataAte);
+      if (statusFilt) params.set('status', statusFilt);
       if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
       const res = await fetch(`/api/malha-fina/${tipo}?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
@@ -434,6 +436,20 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                 onChange={e => { setDataAte(e.target.value); setPage(1); }}
                 className="h-8 w-40"
               />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Status</label>
+              <Select value={statusFilt || 'todas'} onValueChange={v => { setStatusFilt(v === 'todas' ? '' : v); setPage(1); }}>
+                <SelectTrigger className="h-8 w-36 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas" className="text-xs">Todas</SelectItem>
+                  <SelectItem value="ausente" className="text-xs">Ausentes</SelectItem>
+                  <SelectItem value="cancelada" className="text-xs">Canceladas</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="flex flex-col gap-1">
