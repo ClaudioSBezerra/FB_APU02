@@ -182,25 +182,23 @@ func batchInsertNFeSaida(db *sql.DB, companyID string, doc batchDoc, modelo stri
 		INSERT INTO nfe_saidas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
-			emit_cnpj, dest_cnpj_cpf, dest_nome,
+			emit_cnpj, dest_cnpj_cpf,
 			v_nf,
 			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
 			cancelado
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
-			$9,$10,$11,
-			$12,
-			$13,$14,$15,$16,$17,
-			$18
+			$9,$10,
+			$11,
+			$12,$13,$14,$15,$16,
+			$17
 		)
 		ON CONFLICT ON CONSTRAINT uq_nfe_saidas_company_chave
-		DO UPDATE SET
-			cancelado  = EXCLUDED.cancelado,
-			dest_nome  = COALESCE(EXCLUDED.dest_nome, nfe_saidas.dest_nome)`,
+		DO UPDATE SET cancelado = EXCLUDED.cancelado`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, doc.DestCNPJ, nullStr(doc.NomeParceiro),
+		doc.EmitCNPJ, doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 		cancelado,
@@ -220,25 +218,23 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 		INSERT INTO nfe_entradas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
-			forn_cnpj, forn_nome, dest_cnpj_cpf,
+			forn_cnpj, dest_cnpj_cpf,
 			v_nf,
 			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
 			cancelado
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
-			$9,$10,$11,
-			$12,
-			$13,$14,$15,$16,$17,
-			$18
+			$9,$10,
+			$11,
+			$12,$13,$14,$15,$16,
+			$17
 		)
 		ON CONFLICT ON CONSTRAINT uq_nfe_entradas_company_chave
-		DO UPDATE SET
-			cancelado  = EXCLUDED.cancelado,
-			forn_nome  = COALESCE(EXCLUDED.forn_nome, nfe_entradas.forn_nome)`,
+		DO UPDATE SET cancelado = EXCLUDED.cancelado`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, nullStr(doc.NomeParceiro), doc.DestCNPJ,
+		doc.EmitCNPJ, doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 		cancelado,
@@ -258,25 +254,23 @@ func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 		INSERT INTO cte_entradas (
 			company_id, chave_cte, modelo, serie, numero_cte,
 			data_emissao, data_autorizacao, mes_ano,
-			emit_cnpj, emit_nome, dest_cnpj_cpf,
+			emit_cnpj, dest_cnpj_cpf,
 			v_prest,
 			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
 			cancelado
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
-			$9,$10,$11,
-			$12,
-			$13,$14,$15,$16,$17,
-			$18
+			$9,$10,
+			$11,
+			$12,$13,$14,$15,$16,
+			$17
 		)
 		ON CONFLICT ON CONSTRAINT uq_cte_entradas_company_chave
-		DO UPDATE SET
-			cancelado  = EXCLUDED.cancelado,
-			emit_nome  = COALESCE(EXCLUDED.emit_nome, cte_entradas.emit_nome)`,
+		DO UPDATE SET cancelado = EXCLUDED.cancelado`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
-		doc.EmitCNPJ, nullStr(doc.NomeParceiro), doc.DestCNPJ,
+		doc.EmitCNPJ, doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
 		cancelado,
