@@ -572,15 +572,39 @@ def processar_sap(
                 "v_cbs":            f(r.get("v_cbs")),
             })
 
+        # ── Sumário antes do envio ──────────────────────────────────────────
+        _modelos_nfe = {"55", "62", "65"}
+        _modelos_cte = {"57", "66", "67"}
+        _cnt = {"nfe_saidas": 0, "nfe_entradas": 0, "cte_entradas": 0, "outros": 0}
+        _canceladas = 0
+        for d in documents:
+            if d.get("cancelado") == "S":
+                _canceladas += 1
+            direct = d.get("direct", "")
+            modelo = d.get("modelo", "")
+            if direct == "2":
+                _cnt["nfe_saidas"] += 1
+            elif direct == "1" and modelo in _modelos_nfe:
+                _cnt["nfe_entradas"] += 1
+            elif direct == "1" and modelo in _modelos_cte:
+                _cnt["cte_entradas"] += 1
+            else:
+                _cnt["outros"] += 1
+        log.info("-" * 60)
+        log.info("[SAP] Composição — NF-e Saídas: %d  NF-e Entradas: %d  CT-e Entradas: %d  Outros: %d  Canceladas: %d",
+                 _cnt["nfe_saidas"], _cnt["nfe_entradas"], _cnt["cte_entradas"], _cnt["outros"], _canceladas)
+        log.info("-" * 60)
+
         # Envia em lotes de 1000 para não sobrecarregar
         BATCH_SIZE = 1000
         total_inserted = 0
         total_ignored  = 0
         total_errors   = 0
+        _prog_ts = _time.monotonic()  # timestamp do último log de progresso
 
         for i in range(0, len(documents), BATCH_SIZE):
             lote = documents[i:i + BATCH_SIZE]
-            log.info("Enviando lote %d-%d/%d...", i + 1, min(i + BATCH_SIZE, len(documents)), len(documents))
+            processados = min(i + BATCH_SIZE, len(documents))
             try:
                 result = fbtax.enviar_batch(lote)
                 total_inserted += result.get("inserted", 0)
@@ -589,15 +613,17 @@ def processar_sap(
                 if result.get("error_details"):
                     for err in result["error_details"][:5]:
                         log.warning("  Detalhe erro: %s", err)
-                log.info(
-                    "  Lote: inserted=%d ignored=%d errors=%d",
-                    result.get("inserted", 0),
-                    result.get("ignored", 0),
-                    result.get("errors", 0),
-                )
             except Exception as exc:
                 log.error("Erro ao enviar lote %d: %s", i // BATCH_SIZE + 1, exc)
                 total_errors += len(lote)
+
+            # Log de progresso a cada 2 minutos
+            if _time.monotonic() - _prog_ts >= 120:
+                pct = processados / len(documents) * 100
+                log.info("[Progresso] %d/%d docs (%.0f%%) — env=%d  ign=%d  err=%d",
+                         processados, len(documents), pct,
+                         total_inserted, total_ignored, total_errors)
+                _prog_ts = _time.monotonic()
 
         stats["sap_batch"]["enviados"]  = total_inserted
         stats["sap_batch"]["ignorados"] = total_ignored
