@@ -243,7 +243,7 @@ LEFT JOIN s4i_nfe_it it
  AND it.ITMNUM = ni.ITMNUM
 WHERE TRUNC(nn.CREDAT) BETWEEN :data_ini AND :data_fim
   AND LENGTH(nn.NFEID) = 44
-  AND (it.cfop IS NULL OR LPAD(it.cfop, 4, '1') NOT IN (
+  AND (it.cfop IS NULL OR SUBSTR(it.cfop, 1, 4) NOT IN (
     '1151','1152','1153','1154',
     '1408','1409','1658','1659',
     '2151','2152','2153','2154',
