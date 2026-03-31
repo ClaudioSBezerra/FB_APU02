@@ -39,19 +39,9 @@ export const modules: Record<string, ModuleConfig> = {
   apuracao: {
     label: 'Apuração IBS / CBS',
     tabs: [
-      { label: 'Créditos em Risco',    path: '/apuracao/creditos-perdidos', danger: true },
-      { label: 'NF-e — IBS',           path: '/rfb/apuracao-ibs' },
-      { label: 'NF-e — CBS',           path: '/rfb/apuracao-cbs' },
-      { label: 'CT-e — IBS/CBS',       path: '#', disabled: true },
-      { label: 'NFS-e Ent. — IBS/CBS', path: '#', disabled: true },
-      { label: 'NFS-e Saí. — IBS/CBS', path: '#', disabled: true },
-      { label: 'BP-e — IBS/CBS',       path: '#', disabled: true },
-      { label: 'NF3-e — IBS/CBS',      path: '#', disabled: true },
-      { label: 'NFCom-e — IBS/CBS',    path: '#', disabled: true },
-      { label: 'NFag-e — IBS/CBS',     path: '#', disabled: true },
-      { label: 'NF-e ABI — IBS/CBS',   path: '#', disabled: true },
-      { label: 'ND-e — IBS/CBS',       path: '#', disabled: true },
-      { label: 'NC-e — IBS/CBS',       path: '#', disabled: true },
+      { label: 'Créditos em Risco',  path: '/apuracao/creditos-perdidos', danger: true },
+      { label: 'Apuração IBS',       path: '/rfb/apuracao-ibs' },
+      { label: 'Apuração CBS',       path: '/rfb/apuracao-cbs' },
     ],
   },
   rfb: {
