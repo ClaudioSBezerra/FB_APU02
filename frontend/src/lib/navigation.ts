@@ -59,7 +59,6 @@ export const modules: Record<string, ModuleConfig> = {
   malha: {
     label: 'Malha Fina',
     tabs: [
-      { label: 'Resumo Geral',     path: '/malha-fina/resumo-geral' },
       { label: 'NF-e Entradas',    path: '/malha-fina/nfe-entradas' },
       { label: 'NF-e Saídas',      path: '/malha-fina/nfe-saidas' },
       { label: 'CT-e Entradas',    path: '/malha-fina/cte' },

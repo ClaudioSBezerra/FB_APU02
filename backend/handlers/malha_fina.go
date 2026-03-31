@@ -95,12 +95,11 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	}
 
 	// Mostrar notas que estão na RFB mas não têm registro NORMAL na empresa.
-	// Notas importadas como canceladas (cancelado='S') ainda aparecem aqui com status CANCELADA.
-	// NOT EXISTS adicional garante dedup caso a mesma chave exista em múltiplos request_ids.
+	// Notas importadas como canceladas (cancelado='S') ainda aparecem com status CANCELADA.
+	// Dedup por created_at removido: índice único em (company_id, chave_dfe) já garante unicidade.
 	where := fmt.Sprintf(
 		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != ''"+
-			" AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe AND COALESCE(t.cancelado,'N') != 'S')"+
-			" AND NOT EXISTS (SELECT 1 FROM rfb_debitos rd2 WHERE rd2.company_id = $1 AND rd2.chave_dfe = rd.chave_dfe AND rd2.created_at > rd.created_at)",
+			" AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe AND COALESCE(t.cancelado,'N') != 'S')",
 		strings.Join(modeloPlaceholders, ","), excludeTable, excludeChaveCol,
 	)
 
@@ -123,13 +122,28 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		where += fmt.Sprintf(" AND rd.ni_emitente LIKE $%d", len(args))
 	}
 
-	// ── COUNT ─────────────────────────────────────────────────────────────────
-	var total int
-	if err := db.QueryRow(
-		fmt.Sprintf("SELECT COUNT(*) FROM rfb_debitos rd WHERE %s", where), args...,
-	).Scan(&total); err != nil {
-		log.Printf("malha_fina count error: %v", err)
-		jsonErr(w, http.StatusInternalServerError, "Erro ao contar registros")
+	// ── COUNT + TOTAIS em 1 query (CTE com EXISTS pré-computado) ─────────────
+	// Substitui 3 queries separadas por uma única passagem sobre os dados.
+	statsSQL := fmt.Sprintf(`
+		WITH base AS (
+			SELECT rd.valor_cbs_total,
+			       rd.valor_cbs_nao_extinto,
+			       EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe) AS is_cancelada
+			FROM rfb_debitos rd
+			WHERE %s
+		)
+		SELECT COUNT(*),
+		       COALESCE(SUM(valor_cbs_total), 0),
+		       COALESCE(SUM(valor_cbs_nao_extinto), 0),
+		       COUNT(*) FILTER (WHERE is_cancelada)
+		FROM base
+	`, excludeTable, excludeChaveCol, where)
+
+	var total, canceladasCount int
+	var totCBSTotal, totCBSNaoExtinto float64
+	if err := db.QueryRow(statsSQL, args...).Scan(&total, &totCBSTotal, &totCBSNaoExtinto, &canceladasCount); err != nil {
+		log.Printf("malha_fina stats error: %v", err)
+		jsonErr(w, http.StatusInternalServerError, "Erro ao calcular totais")
 		return
 	}
 
@@ -137,19 +151,6 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	if totalPages < 1 {
 		totalPages = 1
 	}
-
-	// ── TOTAIS ────────────────────────────────────────────────────────────────
-	var totCBSTotal, totCBSNaoExtinto float64
-	_ = db.QueryRow(
-		fmt.Sprintf("SELECT COALESCE(SUM(rd.valor_cbs_total),0), COALESCE(SUM(rd.valor_cbs_nao_extinto),0) FROM rfb_debitos rd WHERE %s", where),
-		args...,
-	).Scan(&totCBSTotal, &totCBSNaoExtinto)
-
-	var canceladasCount int
-	_ = db.QueryRow(
-		fmt.Sprintf("SELECT COUNT(*) FROM rfb_debitos rd WHERE %s AND EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)", where, excludeTable, excludeChaveCol),
-		args...,
-	).Scan(&canceladasCount)
 
 	// ── DADOS ─────────────────────────────────────────────────────────────────
 	limitIdx := len(args) + 1
