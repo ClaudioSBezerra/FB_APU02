@@ -79,7 +79,7 @@ function ModuleTabs() {
   const visibleTabs = moduleCfg.tabs.filter(t => !t.adminOnly || isAdmin)
 
   return (
-    <div className="border-b bg-white px-4 flex items-center gap-0.5 overflow-x-auto shrink-0 h-10">
+    <div key={moduleId} className="border-b bg-white px-4 flex items-center gap-0.5 overflow-x-auto shrink-0 h-10">
       {visibleTabs.map(tab => {
         const isActive   = location.pathname === tab.path
         const isDisabled = tab.disabled
