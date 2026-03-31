@@ -210,33 +210,34 @@ FONTES = {
 }
 
 # ─── Query SAP S4/HANA ────────────────────────────────────────────────────────
-# Retorna 1 linha por documento com pivot dos impostos CBS3/IB3M/IB3S.
+# Retorna 1 linha por documento com pivot dos impostos CBS/IBS.
+# CBS1/CBS2/CBS3 = CBS | IB1M/IB2M/IB3M = IBS Municipal | IB1S/IB2S/IB3S = IBS Estadual (UF)
 # DIRECT=1 → entrada | DIRECT=2 → saída
 # modelo derivado da posição 21-22 da chave de 44 dígitos (1-indexed Oracle)
 
 SAP_QUERY = """
 SELECT
     nn.DIRECT,
-    nn.NFEID                                                    AS chave,
-    SUBSTR(nn.NFEID, 21, 2)                                     AS modelo,
-    nn.SERIES                                                   AS serie,
-    nn.NFENUM                                                   AS numero,
-    TO_CHAR(TRUNC(nn.DOCDAT), 'YYYY-MM-DD')                    AS data_emissao,
-    TO_CHAR(TRUNC(nn.CREDAT), 'YYYY-MM-DD')                    AS data_autorizacao,
-    TO_CHAR(TRUNC(nn.DOCDAT), 'MM/YYYY')                       AS mes_ano,
-    nn.CNPJ_EMIT                                                AS emit_cnpj,
-    nn.CNPJ_DEST                                                AS dest_cnpj,
-    nn.CANCELADO                                                AS cancelado,
-    nn.NFTOT                                                    AS v_total,
-    MAX(CASE WHEN ni.TAXTYP = 'CBS3' THEN ni.BASE  ELSE 0 END) AS v_bc_ibs_cbs,
-    SUM(CASE WHEN ni.TAXTYP = 'IB3S' THEN ni.TAXVAL ELSE 0 END) AS v_ibs_uf,
-    SUM(CASE WHEN ni.TAXTYP = 'IB3M' THEN ni.TAXVAL ELSE 0 END) AS v_ibs_mun,
-    SUM(CASE WHEN ni.TAXTYP IN ('IB3S','IB3M') THEN ni.TAXVAL ELSE 0 END) AS v_ibs,
-    SUM(CASE WHEN ni.TAXTYP = 'CBS3' THEN ni.TAXVAL ELSE 0 END) AS v_cbs
+    nn.NFEID                                                                         AS chave,
+    SUBSTR(nn.NFEID, 21, 2)                                                          AS modelo,
+    nn.SERIES                                                                        AS serie,
+    nn.NFENUM                                                                        AS numero,
+    TO_CHAR(TRUNC(nn.DOCDAT), 'YYYY-MM-DD')                                         AS data_emissao,
+    TO_CHAR(TRUNC(nn.CREDAT), 'YYYY-MM-DD')                                         AS data_autorizacao,
+    TO_CHAR(TRUNC(nn.DOCDAT), 'MM/YYYY')                                             AS mes_ano,
+    nn.CNPJ_EMIT                                                                     AS emit_cnpj,
+    nn.CNPJ_DEST                                                                     AS dest_cnpj,
+    nn.CANCELADO                                                                     AS cancelado,
+    nn.NFTOT                                                                         AS v_total,
+    MAX(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.BASE  ELSE 0 END)     AS v_bc_ibs_cbs,
+    SUM(CASE WHEN ni.TAXTYP IN ('IB1S','IB2S','IB3S') THEN ni.TAXVAL ELSE 0 END)   AS v_ibs_uf,
+    SUM(CASE WHEN ni.TAXTYP IN ('IB1M','IB2M','IB3M') THEN ni.TAXVAL ELSE 0 END)   AS v_ibs_mun,
+    SUM(CASE WHEN ni.TAXTYP IN ('IB1S','IB2S','IB3S','IB1M','IB2M','IB3M') THEN ni.TAXVAL ELSE 0 END) AS v_ibs,
+    SUM(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.TAXVAL ELSE 0 END)    AS v_cbs
 FROM s4i_nfe nn
 LEFT JOIN s4i_nfe_impostos ni
   ON ni.NFEID = nn.NFEID
- AND ni.TAXTYP IN ('CBS3','IB3M','IB3S')
+ AND ni.TAXTYP IN ('CBS1','CBS2','CBS3','IB1M','IB2M','IB3M','IB1S','IB2S','IB3S')
  AND ni.TAXVAL > 0
 LEFT JOIN s4i_nfe_it it
   ON it.NFEID = nn.NFEID
