@@ -25,12 +25,12 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 	}
 
 	// 2. Verificar slot automático (máx 1/dia, deixa 1 para uso manual)
-	// Usa fuso de Brasília para que "hoje" seja correto independente do clock do servidor
+	// Conta TODAS as tentativas do dia (inclusive erros) para não retentar
+	// após 429 (rate limit) ou 400 — a RFB conta a tentativa independente do resultado.
 	var todayCount int
 	db.QueryRow(`
 		SELECT COUNT(*) FROM rfb_requests
 		WHERE company_id = $1
-		  AND status != 'error'
 		  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 	`, companyID).Scan(&todayCount)
 	if todayCount >= 1 {
