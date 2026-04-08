@@ -92,15 +92,17 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Manual requests: full 2/day limit (timezone-correct)
+		// Manual requests: count ALL attempts today (including scheduler errors)
+		// The RFB API counts failed attempts against the daily quota — a scheduler error
+		// at 08:30 consuming 1 slot will cause a 429 on the second manual attempt.
 		var todayCount int
 		db.QueryRow(`
 			SELECT COUNT(*) FROM rfb_requests
-			WHERE company_id = $1 AND status != 'error'
+			WHERE company_id = $1
 			  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 		`, companyID).Scan(&todayCount)
 		if todayCount >= 2 {
-			http.Error(w, "Limite diário atingido (máximo 2 solicitações por dia)", http.StatusTooManyRequests)
+			http.Error(w, "Limite diário atingido (máximo 2 solicitações por dia — inclui tentativas automáticas com erro)", http.StatusTooManyRequests)
 			return
 		}
 

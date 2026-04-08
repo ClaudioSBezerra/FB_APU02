@@ -194,6 +194,20 @@ func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
 	body, _ := io.ReadAll(resp.Body)
 	log.Printf("[RFB] Assessment response (HTTP %d): %s", resp.StatusCode, string(body))
 
+	// Log rate-limit and diagnostic headers when request fails
+	if resp.StatusCode != http.StatusCreated {
+		rateLimitHeaders := []string{
+			"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset",
+			"Retry-After", "X-Quota-Limit", "X-Quota-Remaining",
+			"X-Request-ID", "X-Correlation-ID",
+		}
+		for _, h := range rateLimitHeaders {
+			if v := resp.Header.Get(h); v != "" {
+				log.Printf("[RFB] Header %s: %s", h, v)
+			}
+		}
+	}
+
 	var apuracaoResp RFBApuracaoResponse
 	if err := json.Unmarshal(body, &apuracaoResp); err != nil {
 		return "", fmt.Errorf("failed to parse assessment response: %w", err)
