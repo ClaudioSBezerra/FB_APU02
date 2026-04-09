@@ -75,15 +75,15 @@ const Login = () => {
 
         {/* ── Conteúdo principal ── */}
         <div className="relative z-10">
-          {/* Logo Ferreira Costa — fundo vermelho da marca */}
+          {/* Logo Fortes Bezerra */}
           <div className="mb-12">
             <div
               className="inline-block rounded-2xl px-5 py-3"
-              style={{ background: "#DA0812" }}
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
             >
               <img
-                src="/logo-ferreira-costa.png"
-                alt="Ferreira Costa Home Center"
+                src="/logo.png"
+                alt="Fortes Bezerra"
                 className="h-14 w-auto object-contain"
               />
             </div>
