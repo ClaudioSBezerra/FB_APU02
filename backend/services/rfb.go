@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,33 @@ var rfbTokenCache = struct {
 	mu     sync.Mutex
 	tokens map[string]rfbCachedToken
 }{tokens: make(map[string]rfbCachedToken)}
+
+// rfbRateLimitCache stores when the RFB API rate-limit block expires per cnpjBase.
+// The block is set from the Retry-After response header on HTTP 429 and prevents
+// further requests until the window expires (typically midnight UTC = 21h BRT).
+var rfbRateLimitCache = struct {
+	mu    sync.Mutex
+	until map[string]time.Time
+}{until: make(map[string]time.Time)}
+
+// IsRateLimited reports whether the given cnpjBase is currently blocked by the
+// RFB API rate limit. Returns (true, expiry) while the block is active.
+func IsRateLimited(cnpjBase string) (bool, time.Time) {
+	rfbRateLimitCache.mu.Lock()
+	defer rfbRateLimitCache.mu.Unlock()
+	if t, ok := rfbRateLimitCache.until[cnpjBase]; ok && time.Now().Before(t) {
+		return true, t
+	}
+	return false, time.Time{}
+}
+
+// SetRateLimitUntil records an externally-computed rate-limit expiry (e.g. restored
+// from the DB on container restart) for the given cnpjBase.
+func SetRateLimitUntil(cnpjBase string, until time.Time) {
+	rfbRateLimitCache.mu.Lock()
+	rfbRateLimitCache.until[cnpjBase] = until
+	rfbRateLimitCache.mu.Unlock()
+}
 
 type rfbCachedToken struct {
 	token     string
@@ -206,6 +234,22 @@ func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
 				log.Printf("[RFB] Header %s: %s", h, v)
 			}
 		}
+	}
+
+	// Handle 429 — parse Retry-After and set in-memory block so subsequent
+	// calls (scheduler or manual) are rejected locally without hitting the API again.
+	if resp.StatusCode == http.StatusTooManyRequests {
+		retryAfterStr := resp.Header.Get("Retry-After")
+		if secs, err2 := strconv.Atoi(retryAfterStr); err2 == nil && secs > 0 {
+			until := time.Now().Add(time.Duration(secs) * time.Second)
+			SetRateLimitUntil(cnpjBase, until)
+			brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
+			log.Printf("[RFB] Rate limit ativo para CNPJ %s — bloqueado até %s BRT (Retry-After: %ds)",
+				cnpjBase, until.In(brtLoc).Format("02/01 15:04"), secs)
+			return "", fmt.Errorf("RATE_LIMIT_429|retry_until=%s|API rate limit exceeded (Retry-After: %ds — tente após %s BRT)",
+				until.UTC().Format(time.RFC3339), secs, until.In(brtLoc).Format("15:04"))
+		}
+		return "", fmt.Errorf("RATE_LIMIT_429|API rate limit exceeded: %s", string(body))
 	}
 
 	var apuracaoResp RFBApuracaoResponse

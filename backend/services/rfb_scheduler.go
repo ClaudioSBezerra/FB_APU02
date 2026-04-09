@@ -4,8 +4,35 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 )
+
+// restoreRateLimitFromDB recarrega o bloqueio de rate-limit do banco após restart do container.
+// O error_message de registros RATE_LIMIT contém "retry_until=RFC3339|..." para persistência.
+func restoreRateLimitFromDB(db *sql.DB, companyID, cnpjBase string) {
+	var msg sql.NullString
+	db.QueryRow(`
+		SELECT error_message FROM rfb_requests
+		WHERE company_id = $1 AND error_code = 'RATE_LIMIT'
+		ORDER BY created_at DESC LIMIT 1
+	`, companyID).Scan(&msg)
+	if !msg.Valid {
+		return
+	}
+	for _, part := range strings.Split(msg.String, "|") {
+		if strings.HasPrefix(part, "retry_until=") {
+			t, err := time.Parse(time.RFC3339, strings.TrimPrefix(part, "retry_until="))
+			if err == nil && time.Now().Before(t) {
+				SetRateLimitUntil(cnpjBase, t)
+				brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
+				log.Printf("[RFB] Rate limit restaurado do banco para CNPJ %s — bloqueado até %s BRT",
+					cnpjBase, t.In(brtLoc).Format("02/01 15:04"))
+			}
+			return
+		}
+	}
+}
 
 // SolicitarApuracaoParaEmpresa executa uma solicitação de apuração CBS para a empresa.
 // Usada pelo scheduler (limite: 1/dia, preserva 1 slot manual) e pelo handler HTTP.
@@ -24,9 +51,22 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 		return fmt.Errorf("erro ao buscar credenciais: %w", err)
 	}
 
-	// 2. Verificar slot automático (máx 1/dia, deixa 1 para uso manual)
-	// Conta TODAS as tentativas do dia (inclusive erros) para não retentar
-	// após 429 (rate limit) ou 400 — a RFB conta a tentativa independente do resultado.
+	// 2. Extrair CNPJ base (8 dígitos)
+	cnpjBase := cnpjMatriz
+	if len(cnpjBase) > 8 {
+		cnpjBase = cnpjBase[:8]
+	}
+
+	// 3. Verificar bloqueio de rate-limit da RFB (restaura do banco após restart)
+	restoreRateLimitFromDB(db, companyID, cnpjBase)
+	if blocked, until := IsRateLimited(cnpjBase); blocked {
+		brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
+		return fmt.Errorf("RATE_LIMIT: RFB bloqueada por rate-limit para CNPJ %s — aguardar até %s BRT",
+			cnpjBase, until.In(brtLoc).Format("02/01 15:04"))
+	}
+
+	// 4. Verificar slot do dia (conta TODAS as tentativas, inclusive erros)
+	// A RFB contabiliza a tentativa independente do resultado (400 ou 429).
 	var todayCount int
 	db.QueryRow(`
 		SELECT COUNT(*) FROM rfb_requests
@@ -37,13 +77,7 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 		return fmt.Errorf("slot automático já utilizado hoje para company_id=%s (count=%d)", companyID, todayCount)
 	}
 
-	// 3. Extrair CNPJ base (8 dígitos)
-	cnpjBase := cnpjMatriz
-	if len(cnpjBase) > 8 {
-		cnpjBase = cnpjBase[:8]
-	}
-
-	// 4. Obter token OAuth2
+	// 5. Obter token OAuth2
 	rfbClient := NewRFBClient()
 	rfbClient.SetAmbiente(ambiente)
 	token, err := rfbClient.GetToken(clientID, clientSecret)
@@ -55,17 +89,22 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 		return fmt.Errorf("TOKEN_ERROR: %w", err)
 	}
 
-	// 5. Solicitar apuração CBS
+	// 6. Solicitar apuração CBS
 	tiquete, err := rfbClient.SolicitarApuracao(token, cnpjBase)
 	if err != nil {
+		errMsg := err.Error()
+		errorCode := "REQUEST_ERROR"
+		if strings.HasPrefix(errMsg, "RATE_LIMIT_429|") {
+			errorCode = "RATE_LIMIT"
+		}
 		db.Exec(`
 			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message)
-			VALUES ($1, $2, 'error', 'REQUEST_ERROR', $3)
-		`, companyID, cnpjBase, err.Error())
-		return fmt.Errorf("REQUEST_ERROR: %w", err)
+			VALUES ($1, $2, 'error', $3, $4)
+		`, companyID, cnpjBase, errorCode, errMsg)
+		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
-	// 6. Persistir registro da solicitação
+	// 7. Persistir registro da solicitação
 	var requestID string
 	err = db.QueryRow(`
 		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status)

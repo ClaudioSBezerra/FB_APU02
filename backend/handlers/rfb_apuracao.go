@@ -113,6 +113,8 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 				http.Error(w, "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.", http.StatusBadRequest)
 			case strings.Contains(msg, "slot automático já utilizado"):
 				http.Error(w, "Limite diário atingido (máximo 2 solicitações por dia)", http.StatusTooManyRequests)
+			case strings.Contains(msg, "RATE_LIMIT"):
+				http.Error(w, msg, http.StatusTooManyRequests)
 			case strings.Contains(msg, "TOKEN_ERROR"):
 				http.Error(w, "Erro ao obter token da RFB: "+msg, http.StatusBadGateway)
 			case strings.Contains(msg, "REQUEST_ERROR"):
