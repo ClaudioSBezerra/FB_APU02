@@ -322,6 +322,9 @@ func main() {
 	http.HandleFunc("/api/admin/users/promote", withAuth(handlers.PromoteUserHandler, "admin"))
 	http.HandleFunc("/api/admin/users/delete", withAuth(handlers.DeleteUserHandler, "admin"))
 	http.HandleFunc("/api/admin/users/reassign", withAuth(handlers.ReassignUserHandler, "admin"))
+	http.HandleFunc("/api/activity/log",                withAuth(handlers.LogActivityHandler, ""))
+	http.HandleFunc("/api/admin/user-activity",         withAuth(handlers.ListUserActivityHandler, "admin"))
+	http.HandleFunc("/api/admin/user-activity/modules", withAuth(handlers.ListModuleActivityHandler, "admin"))
 
 	// Configuration Endpoints
 	http.HandleFunc("/api/config/aliquotas", withAuth(handlers.GetTaxRatesHandler, ""))

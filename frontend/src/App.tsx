@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from '@/components/ui/sonner'
@@ -24,6 +25,7 @@ import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
 import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
 import MalhaFinaCTe from './pages/MalhaFinaCTe'
 import AdminUsers from './pages/AdminUsers'
+import UserActivity from './pages/UserActivity'
 import LimparDadosApuracao from './pages/LimparDadosApuracao'
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -63,6 +65,54 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   if (!isAuthenticated) return <Navigate to="/login" state={{ from: location }} replace />
   if (user?.role !== 'admin') return <Navigate to="/" replace />
   return <>{children}</>
+}
+
+// ── Tracking de atividade por rota ───────────────────────────────────────────
+function getModuleLabel(pathname: string): string | null {
+  for (const moduleConfig of Object.values(modules)) {
+    const tab = moduleConfig.tabs.find(t => t.path === pathname && !t.disabled)
+    if (tab) return tab.label
+  }
+  const moduleId = getActiveModule(pathname)
+  if (moduleId === 'painel') return null
+  return modules[moduleId]?.label ?? null
+}
+
+function useRouteActivityLogger() {
+  const location  = useLocation()
+  const prevPath  = useRef(location.pathname)
+  const startTime = useRef(Date.now())
+
+  useEffect(() => {
+    if (prevPath.current === location.pathname) return
+    const duration = Math.floor((Date.now() - startTime.current) / 1000)
+    const label    = getModuleLabel(prevPath.current)
+    if (label && duration >= 3) {
+      fetch('/api/activity/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module: label, duration_seconds: duration }),
+        keepalive: true,
+      }).catch(() => {})
+    }
+    prevPath.current  = location.pathname
+    startTime.current = Date.now()
+  }, [location.pathname])
+
+  useEffect(() => {
+    return () => {
+      const duration = Math.floor((Date.now() - startTime.current) / 1000)
+      const label    = getModuleLabel(prevPath.current)
+      if (label && duration >= 3) {
+        fetch('/api/activity/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ module: label, duration_seconds: duration }),
+          keepalive: true,
+        }).catch(() => {})
+      }
+    }
+  }, [])
 }
 
 // ── Barra de abas por módulo ─────────────────────────────────────────────────
@@ -133,6 +183,7 @@ function AppHeader() {
 
 // ── Layout principal ─────────────────────────────────────────────────────────
 function AppLayout() {
+  useRouteActivityLogger()
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <AppRail />
@@ -152,6 +203,7 @@ function AppLayout() {
               <Route path="/config/gestores"        element={<Managers />} />
               <Route path="/config/ambiente"        element={<ProtectedRoute><GestaoAmbiente /></ProtectedRoute>} />
               <Route path="/config/usuarios"        element={<AdminRoute><AdminUsers /></AdminRoute>} />
+              <Route path="/config/user-activity"   element={<AdminRoute><UserActivity /></AdminRoute>} />
               <Route path="/config/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
               <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
               <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
