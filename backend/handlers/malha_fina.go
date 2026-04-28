@@ -85,7 +85,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	sortDir := "DESC"
 	if q.Get("sort_dir") == "asc" { sortDir = "ASC" }
 
-	// ── Montar WHERE ──────────────────────────────────────────────────────────
+	// ── Montar args, FROM e WHERE ─────────────────────────────────────────────
 	args := []interface{}{companyID}
 
 	modeloPlaceholders := make([]string, len(modelosDFe))
@@ -94,13 +94,17 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		modeloPlaceholders[i] = fmt.Sprintf("$%d", len(args))
 	}
 
-	// Mostrar notas que estão na RFB mas não têm registro NORMAL na empresa.
-	// Notas importadas como canceladas (cancelado='S') ainda aparecem com status CANCELADA.
-	// Dedup por created_at removido: índice único em (company_id, chave_dfe) já garante unicidade.
+	// LEFT JOIN substitui duplo NOT EXISTS/EXISTS: 1 varredura em vez de 2 subconsultas por linha.
+	// UNIQUE constraint em (company_id, chave_nfe/chave_cte) garante no máximo 1 linha no JOIN.
+	fromClause := fmt.Sprintf(
+		"rfb_debitos rd LEFT JOIN %s excl ON excl.company_id = $1 AND excl.%s = rd.chave_dfe",
+		excludeTable, excludeChaveCol,
+	)
+
 	where := fmt.Sprintf(
 		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != ''"+
-			" AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.company_id = $1 AND t.%s = rd.chave_dfe AND COALESCE(t.cancelado,'N') != 'S')",
-		strings.Join(modeloPlaceholders, ","), excludeTable, excludeChaveCol,
+			" AND (excl.%s IS NULL OR COALESCE(excl.cancelado,'N') = 'S')",
+		strings.Join(modeloPlaceholders, ","), excludeChaveCol,
 	)
 
 	if dataDe != "" {
@@ -113,31 +117,24 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	}
 	switch statusFilt {
 	case "ausente":
-		where += fmt.Sprintf(" AND NOT EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)", excludeTable, excludeChaveCol)
+		where += fmt.Sprintf(" AND excl.%s IS NULL", excludeChaveCol)
 	case "cancelada":
-		where += fmt.Sprintf(" AND EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)", excludeTable, excludeChaveCol)
+		where += fmt.Sprintf(" AND excl.%s IS NOT NULL", excludeChaveCol)
 	}
 	if filterCNPJ != "" {
 		args = append(args, filterCNPJ+"%")
 		where += fmt.Sprintf(" AND rd.ni_emitente LIKE $%d", len(args))
 	}
 
-	// ── COUNT + TOTAIS em 1 query (CTE com EXISTS pré-computado) ─────────────
-	// Substitui 3 queries separadas por uma única passagem sobre os dados.
+	// ── COUNT + TOTAIS em 1 query (LEFT JOIN — sem CTE, sem subconsultas) ─────
 	statsSQL := fmt.Sprintf(`
-		WITH base AS (
-			SELECT rd.valor_cbs_total,
-			       rd.valor_cbs_nao_extinto,
-			       EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe) AS is_cancelada
-			FROM rfb_debitos rd
-			WHERE %s
-		)
 		SELECT COUNT(*),
-		       COALESCE(SUM(valor_cbs_total), 0),
-		       COALESCE(SUM(valor_cbs_nao_extinto), 0),
-		       COUNT(*) FILTER (WHERE is_cancelada)
-		FROM base
-	`, excludeTable, excludeChaveCol, where)
+		       COALESCE(SUM(rd.valor_cbs_total), 0),
+		       COALESCE(SUM(rd.valor_cbs_nao_extinto), 0),
+		       COUNT(*) FILTER (WHERE excl.%s IS NOT NULL)
+		FROM %s
+		WHERE %s
+	`, excludeChaveCol, fromClause, where)
 
 	var total, canceladasCount int
 	var totCBSTotal, totCBSNaoExtinto float64
@@ -171,13 +168,12 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		       COALESCE(rd.valor_cbs_nao_extinto, 0),
 		       COALESCE(rd.situacao_debito, ''),
 		       COALESCE(rd.tipo_apuracao, ''),
-		       CASE WHEN EXISTS (SELECT 1 FROM %s t2 WHERE t2.company_id = $1 AND t2.%s = rd.chave_dfe)
-		            THEN 'CANCELADA' ELSE 'AUSENTE' END AS status_nota
-		FROM rfb_debitos rd
+		       CASE WHEN excl.%s IS NOT NULL THEN 'CANCELADA' ELSE 'AUSENTE' END AS status_nota
+		FROM %s
 		WHERE %s
 		ORDER BY %s %s NULLS LAST
 		LIMIT $%d OFFSET $%d
-	`, excludeTable, excludeChaveCol, where, sortCol, sortDir, limitIdx, offsetIdx)
+	`, excludeChaveCol, fromClause, where, sortCol, sortDir, limitIdx, offsetIdx)
 
 	rows, err := db.Query(dataSQL, dataArgs...)
 	if err != nil {
