@@ -59,7 +59,8 @@ type RFBApuracaoJSON struct {
 }
 
 type RFBGrupoDebitos struct {
-	Debitos []RFBDebito `json:"debitos"`
+	Debitos  []RFBDebito  `json:"debitos"`
+	Creditos []RFBCredito `json:"creditos"`
 }
 
 type RFBDebito struct {
@@ -181,6 +182,10 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	var valorTotal, valorExtinto, valorNaoExtinto float64
 	var dataApuracao string
 
+	// Créditos embutidos na mesma resposta
+	var totalCreditosCorrente, totalCreditosAjuste int
+	var valorCreditosTotal, valorCreditosExtinto, valorCreditosNaoExtinto float64
+
 	if apuracao.ApuracaoCorrente != nil {
 		for _, d := range apuracao.ApuracaoCorrente.Debitos {
 			if err := insertDebito(tx, requestID, companyID, "corrente", d); err != nil {
@@ -196,6 +201,16 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 				}
 			}
 		}
+		for _, c := range apuracao.ApuracaoCorrente.Creditos {
+			if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
+				log.Printf("[RFB Processor] Error inserting corrente credito (chave=%s): %v", c.ChaveDfe, err)
+			} else {
+				totalCreditosCorrente++
+				valorCreditosTotal += c.ValorCBSTotal
+				valorCreditosExtinto += c.ValorCBSExtinto
+				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+			}
+		}
 	}
 
 	if apuracao.ApuracaoAjuste != nil {
@@ -208,6 +223,16 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 				valorTotal += d.ValorCBSTotal
 				valorExtinto += d.ValorCBSExtinto
 				valorNaoExtinto += d.ValorCBSNaoExtinto
+			}
+		}
+		for _, c := range apuracao.ApuracaoAjuste.Creditos {
+			if err := insertCredito(tx, requestID, companyID, "ajuste", c); err != nil {
+				log.Printf("[RFB Processor] Error inserting ajuste credito (chave=%s): %v", c.ChaveDfe, err)
+			} else {
+				totalCreditosAjuste++
+				valorCreditosTotal += c.ValorCBSTotal
+				valorCreditosExtinto += c.ValorCBSExtinto
+				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
 	}
@@ -227,6 +252,7 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	}
 
 	totalDebitos := totalCorrente + totalAjuste + totalExtemporaneo
+	totalCreditos := totalCreditosCorrente + totalCreditosAjuste
 
 	// Upsert summary in the same transaction
 	_, err = tx.Exec(`
@@ -245,6 +271,26 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 		tx.Rollback()
 		updateRequestError(db, requestID, "DB_ERROR", "Falha ao salvar resumo: "+err.Error())
 		return fmt.Errorf("failed to upsert summary: %w", err)
+	}
+
+	// Upsert créditos resumo se houver créditos na resposta
+	if totalCreditos > 0 {
+		if _, credErr := tx.Exec(`
+			INSERT INTO rfb_creditos_resumo (request_id, company_id, data_apuracao, total_creditos,
+				valor_cbs_total, valor_cbs_extinto, valor_cbs_nao_extinto, total_corrente, total_ajuste)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (company_id, data_apuracao)
+			DO UPDATE SET request_id = $1, total_creditos = $4,
+				valor_cbs_total = $5, valor_cbs_extinto = $6, valor_cbs_nao_extinto = $7,
+				total_corrente = $8, total_ajuste = $9
+		`, requestID, companyID, dataApuracao, totalCreditos,
+			valorCreditosTotal, valorCreditosExtinto, valorCreditosNaoExtinto,
+			totalCreditosCorrente, totalCreditosAjuste); credErr != nil {
+			log.Printf("[RFB Processor] WARNING: failed to upsert credits summary: %v", credErr)
+		} else {
+			log.Printf("[RFB Processor] Credits found: %d (%d corrente, %d ajuste), CBS total: %.2f",
+				totalCreditos, totalCreditosCorrente, totalCreditosAjuste, valorCreditosTotal)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -360,10 +406,17 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		updateRequestError(db, requestID, "DB_ERROR", "Falha ao limpar débitos anteriores: "+err.Error())
 		return fmt.Errorf("failed to delete existing debits: %w", err)
 	}
+	if _, err = tx.Exec(`DELETE FROM rfb_creditos WHERE request_id = $1`, requestID); err != nil {
+		tx.Rollback()
+		updateRequestError(db, requestID, "DB_ERROR", "Falha ao limpar créditos anteriores: "+err.Error())
+		return fmt.Errorf("failed to delete existing credits: %w", err)
+	}
 
 	var totalCorrente, totalAjuste, totalExtemporaneo, insertErrors int
 	var valorTotal, valorExtinto, valorNaoExtinto float64
 	var dataApuracao string
+	var totalCreditosCorrente, totalCreditosAjuste int
+	var valorCreditosTotal, valorCreditosExtinto, valorCreditosNaoExtinto float64
 
 	if apuracao.ApuracaoCorrente != nil {
 		for _, d := range apuracao.ApuracaoCorrente.Debitos {
@@ -380,6 +433,16 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				}
 			}
 		}
+		for _, c := range apuracao.ApuracaoCorrente.Creditos {
+			if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
+				log.Printf("[RFB Reprocess] Error inserting corrente credito: %v", err)
+			} else {
+				totalCreditosCorrente++
+				valorCreditosTotal += c.ValorCBSTotal
+				valorCreditosExtinto += c.ValorCBSExtinto
+				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+			}
+		}
 	}
 
 	if apuracao.ApuracaoAjuste != nil {
@@ -392,6 +455,16 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorTotal += d.ValorCBSTotal
 				valorExtinto += d.ValorCBSExtinto
 				valorNaoExtinto += d.ValorCBSNaoExtinto
+			}
+		}
+		for _, c := range apuracao.ApuracaoAjuste.Creditos {
+			if err := insertCredito(tx, requestID, companyID, "ajuste", c); err != nil {
+				log.Printf("[RFB Reprocess] Error inserting ajuste credito: %v", err)
+			} else {
+				totalCreditosAjuste++
+				valorCreditosTotal += c.ValorCBSTotal
+				valorCreditosExtinto += c.ValorCBSExtinto
+				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
 	}
@@ -411,8 +484,9 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	}
 
 	totalDebitos := totalCorrente + totalAjuste + totalExtemporaneo
+	totalCreditos := totalCreditosCorrente + totalCreditosAjuste
 
-	_, err = tx.Exec(`
+	if _, err = tx.Exec(`
 		INSERT INTO rfb_resumo (request_id, company_id, data_apuracao, total_debitos,
 			valor_cbs_total, valor_cbs_extinto, valor_cbs_nao_extinto,
 			total_corrente, total_ajuste, total_extemporaneo)
@@ -423,11 +497,26 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 			total_corrente = $8, total_ajuste = $9, total_extemporaneo = $10
 	`, requestID, companyID, dataApuracao, totalDebitos,
 		valorTotal, valorExtinto, valorNaoExtinto,
-		totalCorrente, totalAjuste, totalExtemporaneo)
-	if err != nil {
+		totalCorrente, totalAjuste, totalExtemporaneo); err != nil {
 		tx.Rollback()
 		updateRequestError(db, requestID, "DB_ERROR", "Falha ao salvar resumo: "+err.Error())
 		return fmt.Errorf("failed to upsert summary: %w", err)
+	}
+
+	if totalCreditos > 0 {
+		if _, credErr := tx.Exec(`
+			INSERT INTO rfb_creditos_resumo (request_id, company_id, data_apuracao, total_creditos,
+				valor_cbs_total, valor_cbs_extinto, valor_cbs_nao_extinto, total_corrente, total_ajuste)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (company_id, data_apuracao)
+			DO UPDATE SET request_id = $1, total_creditos = $4,
+				valor_cbs_total = $5, valor_cbs_extinto = $6, valor_cbs_nao_extinto = $7,
+				total_corrente = $8, total_ajuste = $9
+		`, requestID, companyID, dataApuracao, totalCreditos,
+			valorCreditosTotal, valorCreditosExtinto, valorCreditosNaoExtinto,
+			totalCreditosCorrente, totalCreditosAjuste); credErr != nil {
+			log.Printf("[RFB Reprocess] WARNING: failed to upsert credits summary: %v", credErr)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -439,8 +528,8 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	if insertErrors > 0 {
 		log.Printf("[RFB Reprocess] WARN: %d debits failed to insert out of total attempted", insertErrors)
 	}
-	log.Printf("[RFB Reprocess] Request %s completed: %d debits (%d corrente, %d ajuste, %d extemporaneo, %d errors), CBS total: %.2f",
-		requestID, totalDebitos, totalCorrente, totalAjuste, totalExtemporaneo, insertErrors, valorTotal)
+	log.Printf("[RFB Reprocess] Request %s completed: %d debits, %d credits, CBS total: %.2f",
+		requestID, totalDebitos, totalCreditos, valorTotal)
 	return nil
 }
 

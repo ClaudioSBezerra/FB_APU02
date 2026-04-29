@@ -438,12 +438,8 @@ func main() {
 	http.HandleFunc("/api/rfb/apuracao/status", withAuth(handlers.StatusApuracaoHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/", withAuth(handlers.DetalheApuracaoHandler, ""))
 
-	// RFB Créditos CBS
-	http.HandleFunc("/api/rfb/creditos/solicitar",    withAuth(handlers.SolicitarCreditosHandler, ""))
-	http.HandleFunc("/api/rfb/creditos/status",       withAuth(handlers.StatusCreditosHandler, ""))
-	http.HandleFunc("/api/rfb/creditos/download",     withAuth(handlers.DownloadManualCreditosHandler, ""))
-	http.HandleFunc("/api/rfb/creditos/clear-errors", withAuth(handlers.ClearCreditosErrorsHandler, ""))
-	http.HandleFunc("/api/rfb/creditos/",             withAuth(handlers.DeleteCreditoRequestHandler, ""))
+	// RFB Créditos CBS — extraídos da mesma importação de débitos (sem solicitação separada)
+	http.HandleFunc("/api/rfb/creditos/status", withAuth(handlers.StatusCreditosHandler, ""))
 
 	// RFB Webhook (PUBLIC - no JWT auth)
 	http.HandleFunc("/api/rfb/webhook", withDB(handlers.RFBWebhookHandler))

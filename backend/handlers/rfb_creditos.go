@@ -117,6 +117,7 @@ func StatusCreditosHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Créditos são extraídos da mesma importação de débitos — filtra por tipo='debito' concluídos
 		rows, err := db.Query(`
 			SELECT r.id, r.company_id, r.cnpj_base, COALESCE(r.tiquete, ''), r.tiquete_download,
 				r.status, r.ambiente,
@@ -126,7 +127,7 @@ func StatusCreditosHandler(db *sql.DB) http.HandlerFunc {
 				res.total_corrente, res.total_ajuste
 			FROM rfb_requests r
 			LEFT JOIN rfb_creditos_resumo res ON res.request_id = r.id
-			WHERE r.company_id = $1 AND r.tipo = 'credito'
+			WHERE r.company_id = $1 AND r.tipo = 'debito' AND r.status = 'completed'
 			ORDER BY r.created_at DESC
 			LIMIT 20
 		`, companyID)
