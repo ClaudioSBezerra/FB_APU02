@@ -25,6 +25,9 @@ const Login = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
 
+  const sessionExpired = localStorage.getItem('session_expired') === '1';
+  if (sessionExpired) localStorage.removeItem('session_expired');
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -142,6 +145,13 @@ const Login = () => {
               <CardDescription className="text-xs">Entre com suas credenciais para continuar</CardDescription>
             </CardHeader>
             <CardContent>
+              {sessionExpired && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Sessão expirada</AlertTitle>
+                  <AlertDescription>Seu token expirou. Faça novo login para continuar.</AlertDescription>
+                </Alert>
+              )}
               {errorMsg && (
                 <Alert variant="destructive" className="mb-4">
                   <AlertCircle className="h-4 w-4" />

@@ -102,7 +102,7 @@ func ListUserActivityHandler(db *sql.DB) http.HandlerFunc {
 				u.full_name,
 				u.email,
 				COALESCE(c.name, '') AS company_name,
-				COALESCE(STRING_AGG(DISTINCT ual.module, '|' ORDER BY ual.module), '') AS modules,
+				COALESCE(STRING_AGG(DISTINCT ual.module, '|'), '') AS modules,
 				COUNT(*)::int AS visit_count,
 				COALESCE(SUM(ual.duration_seconds), 0)::int AS total_duration_seconds,
 				TO_CHAR(MAX(ual.visited_at) AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS last_visited_at

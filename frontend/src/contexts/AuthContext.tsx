@@ -43,10 +43,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => { tokenRef.current = token; }, [token]);
   useEffect(() => { companyIdRef.current = companyId; }, [companyId]);
 
-  // Interceptor global de fetch: injeta Authorization e X-Company-ID em todas as chamadas
+  // Interceptor global de fetch: injeta Authorization e X-Company-ID e trata 401 (token expirado)
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);
-    window.fetch = (input: RequestInfo | URL, init: RequestInit = {}) => {
+    window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const headers = new Headers(init.headers || {});
       if (!headers.has('Authorization') && tokenRef.current) {
         headers.set('Authorization', `Bearer ${tokenRef.current}`);
@@ -54,7 +54,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (companyIdRef.current) {
         headers.set('X-Company-ID', companyIdRef.current);
       }
-      return originalFetch(input, { ...init, headers });
+      const response = await originalFetch(input, { ...init, headers });
+
+      // Token expirado: redireciona para login com aviso
+      const url = typeof input === 'string' ? input : (input as Request).url ?? '';
+      const isApiCall  = url.includes('/api/');
+      const isAuthCall = url.includes('/api/auth/');
+      if (response.status === 401 && isApiCall && !isAuthCall && tokenRef.current) {
+        const prefs: Record<string, string> = {};
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key?.startsWith('pref_company_')) prefs[key] = localStorage.getItem(key) || '';
+        }
+        localStorage.clear();
+        Object.entries(prefs).forEach(([k, v]) => localStorage.setItem(k, v));
+        localStorage.setItem('session_expired', '1');
+        window.location.href = '/login';
+      }
+
+      return response;
     };
     return () => { window.fetch = originalFetch; };
   }, []);
