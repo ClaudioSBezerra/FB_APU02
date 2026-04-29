@@ -92,17 +92,16 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Manual requests: count ALL attempts today (including scheduler errors)
-		// The RFB API counts failed attempts against the daily quota — a scheduler error
-		// at 08:30 consuming 1 slot will cause a 429 on the second manual attempt.
+		// Manual requests: count débito attempts today (scheduler + manual, including errors)
 		var todayCount int
 		db.QueryRow(`
 			SELECT COUNT(*) FROM rfb_requests
 			WHERE company_id = $1
+			  AND tipo = 'debito'
 			  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 		`, companyID).Scan(&todayCount)
 		if todayCount >= 2 {
-			http.Error(w, "Limite diário atingido (máximo 2 solicitações por dia — inclui tentativas automáticas com erro)", http.StatusTooManyRequests)
+			http.Error(w, "Limite diário atingido (máximo 2 solicitações de débitos por dia — inclui tentativas automáticas com erro)", http.StatusTooManyRequests)
 			return
 		}
 
@@ -425,11 +424,11 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Find the request by tiqueteSolicitacao
-		var requestID string
+		// Find the request by tiqueteSolicitacao (also fetch tipo to route correctly)
+		var requestID, tipo string
 		err = db.QueryRow(`
-			SELECT id FROM rfb_requests WHERE tiquete = $1 AND status = 'requested'
-		`, tiqueteSolicitacao).Scan(&requestID)
+			SELECT id, COALESCE(tipo, 'debito') FROM rfb_requests WHERE tiquete = $1 AND status = 'requested'
+		`, tiqueteSolicitacao).Scan(&requestID, &tipo)
 		if err != nil {
 			log.Printf("[RFB Webhook] Request not found for tiqueteSolicitacao %s: %v", tiqueteSolicitacao, err)
 			w.WriteHeader(http.StatusOK)
@@ -449,15 +448,21 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 
 		log.Printf("[RFB Webhook] Request %s updated — tiqueteDownload saved, triggering download", requestID)
 
-		// Trigger async download and processing
+		// Trigger async download — route to the correct processor based on tipo
+		reqTipo := tipo
 		go func() {
 			rfbClient := services.NewRFBClient()
-			if err := services.ProcessarDownloadRFB(db, rfbClient, requestID); err != nil {
-				log.Printf("[RFB Webhook] Error processing download for request %s: %v", requestID, err)
-				return
+			if reqTipo == "credito" {
+				if err := services.ProcessarDownloadCreditosRFB(db, rfbClient, requestID); err != nil {
+					log.Printf("[RFB Webhook] Error processing credits for request %s: %v", requestID, err)
+				}
+			} else {
+				if err := services.ProcessarDownloadRFB(db, rfbClient, requestID); err != nil {
+					log.Printf("[RFB Webhook] Error processing download for request %s: %v", requestID, err)
+					return
+				}
+				RefreshMalhaFinaMV(db)
 			}
-			// Atualiza a MV de resumo após novos débitos serem processados
-			RefreshMalhaFinaMV(db)
 		}()
 
 		w.WriteHeader(http.StatusOK)

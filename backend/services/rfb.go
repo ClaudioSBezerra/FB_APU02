@@ -273,6 +273,66 @@ func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
 	return apuracaoResp.Tiquete, nil
 }
 
+// SolicitarCredito sends a CBS credits request to the RFB API using /creditos-cbs/v1/.
+// cnpjBase must be 8 digits. Returns the tiquete for later download.
+func (c *RFBClient) SolicitarCredito(token, cnpjBase string) (string, error) {
+	endpoint := fmt.Sprintf("%s/%s/creditos-cbs/v1/%s", c.baseURL, c.pathPrefix, cnpjBase)
+	log.Printf("[RFB] Requesting CBS credits: POST %s (webhook: %s, prefix: %s)", endpoint, c.webhookURL, c.pathPrefix)
+
+	payload := map[string]string{"urlRetorno": c.webhookURL}
+	payloadJSON, _ := json.Marshal(payload)
+
+	req, err := http.NewRequest("POST", endpoint, strings.NewReader(string(payloadJSON)))
+	if err != nil {
+		return "", fmt.Errorf("failed to create credits request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("credits request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("[RFB] Credits response (HTTP %d): %s", resp.StatusCode, string(body))
+
+	if resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retryAfterStr := resp.Header.Get("Retry-After")
+			if secs, err2 := strconv.Atoi(retryAfterStr); err2 == nil && secs > 0 {
+				until := time.Now().Add(time.Duration(secs) * time.Second)
+				SetRateLimitUntil(cnpjBase, until)
+				brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
+				return "", fmt.Errorf("RATE_LIMIT_429|retry_until=%s|API rate limit exceeded (Retry-After: %ds — tente após %s BRT)",
+					until.UTC().Format(time.RFC3339), secs, until.In(brtLoc).Format("15:04"))
+			}
+			return "", fmt.Errorf("RATE_LIMIT_429|API rate limit exceeded: %s", string(body))
+		}
+	}
+
+	var apuracaoResp RFBApuracaoResponse
+	if err := json.Unmarshal(body, &apuracaoResp); err != nil {
+		return "", fmt.Errorf("failed to parse credits response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		errMsg := apuracaoResp.MensagemErro
+		if errMsg == "" {
+			errMsg = string(body)
+		}
+		return "", fmt.Errorf("credits returned HTTP %d: [%s] %s", resp.StatusCode, apuracaoResp.CodigoErro, errMsg)
+	}
+
+	if apuracaoResp.Tiquete == "" {
+		return "", fmt.Errorf("empty tiquete in credits response")
+	}
+
+	log.Printf("[RFB] Credits requested successfully, tiquete: %s", apuracaoResp.Tiquete)
+	return apuracaoResp.Tiquete, nil
+}
+
 // DownloadArquivo downloads the CBS assessment JSON file using the ticket.
 // Returns the raw JSON bytes. Note: each ticket can only be downloaded ONCE.
 func (c *RFBClient) DownloadArquivo(token, tiquete string) ([]byte, error) {

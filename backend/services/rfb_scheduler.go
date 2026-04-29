@@ -65,12 +65,12 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 			cnpjBase, until.In(brtLoc).Format("02/01 15:04"))
 	}
 
-	// 4. Verificar slot do dia (conta TODAS as tentativas, inclusive erros)
-	// A RFB contabiliza a tentativa independente do resultado (400 ou 429).
+	// 4. Verificar slot do dia para débitos (max 1 automático, deixa 1 slot para manual)
 	var todayCount int
 	db.QueryRow(`
 		SELECT COUNT(*) FROM rfb_requests
 		WHERE company_id = $1
+		  AND tipo = 'debito'
 		  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 	`, companyID).Scan(&todayCount)
 	if todayCount >= 1 {
@@ -116,6 +116,74 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 	}
 
 	log.Printf("[RFB Scheduler] Solicitação criada: requestID=%s tiquete=%s companyID=%s",
+		requestID, tiquete, companyID)
+	return nil
+}
+
+// SolicitarCreditoParaEmpresa executa uma solicitação de créditos CBS para a empresa.
+// Usada pelo handler HTTP manual (limite: 2/dia separados dos débitos).
+func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
+	var clientID, clientSecret, cnpjMatriz, ambiente string
+	err := db.QueryRow(`
+		SELECT client_id, client_secret, cnpj_matriz, COALESCE(ambiente, 'producao')
+		FROM rfb_credentials
+		WHERE company_id = $1 AND ativo = true
+	`, companyID).Scan(&clientID, &clientSecret, &cnpjMatriz, &ambiente)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("credenciais RFB não encontradas para company_id=%s", companyID)
+	}
+	if err != nil {
+		return fmt.Errorf("erro ao buscar credenciais: %w", err)
+	}
+
+	cnpjBase := cnpjMatriz
+	if len(cnpjBase) > 8 {
+		cnpjBase = cnpjBase[:8]
+	}
+
+	restoreRateLimitFromDB(db, companyID, cnpjBase)
+	if blocked, until := IsRateLimited(cnpjBase); blocked {
+		brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
+		return fmt.Errorf("RATE_LIMIT: RFB bloqueada para CNPJ %s — aguardar até %s BRT",
+			cnpjBase, until.In(brtLoc).Format("02/01 15:04"))
+	}
+
+	rfbClient := NewRFBClient()
+	rfbClient.SetAmbiente(ambiente)
+	token, err := rfbClient.GetToken(clientID, clientSecret)
+	if err != nil {
+		db.Exec(`
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message)
+			VALUES ($1, $2, 'error', 'credito', 'TOKEN_ERROR', $3)
+		`, companyID, cnpjBase, err.Error())
+		return fmt.Errorf("TOKEN_ERROR: %w", err)
+	}
+
+	tiquete, err := rfbClient.SolicitarCredito(token, cnpjBase)
+	if err != nil {
+		errMsg := err.Error()
+		errorCode := "REQUEST_ERROR"
+		if strings.HasPrefix(errMsg, "RATE_LIMIT_429|") {
+			errorCode = "RATE_LIMIT"
+		}
+		db.Exec(`
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message)
+			VALUES ($1, $2, 'error', 'credito', $3, $4)
+		`, companyID, cnpjBase, errorCode, errMsg)
+		return fmt.Errorf("%s: %w", errorCode, err)
+	}
+
+	var requestID string
+	err = db.QueryRow(`
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo)
+		VALUES ($1, $2, $3, 'requested', 'credito')
+		RETURNING id
+	`, companyID, cnpjBase, tiquete).Scan(&requestID)
+	if err != nil {
+		return fmt.Errorf("erro ao salvar solicitação de créditos: %w", err)
+	}
+
+	log.Printf("[RFB Creditos] Solicitação criada: requestID=%s tiquete=%s companyID=%s",
 		requestID, tiquete, companyID)
 	return nil
 }

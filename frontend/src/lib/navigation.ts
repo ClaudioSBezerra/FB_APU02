@@ -50,7 +50,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Gestão IBS/CBS',      path: '/rfb/gestao-creditos' },
       { label: 'Importar Débitos',    path: '/rfb/apuracao' },
       { label: 'Débitos mês',         path: '/rfb/debitos' },
-      { label: 'Créditos CBS',        path: '/rfb/creditos-cbs',            disabled: true },
+      { label: 'Créditos CBS',        path: '/rfb/creditos-cbs' },
       { label: 'Pagamentos CBS',      path: '/rfb/pagamentos-cbs',          disabled: true },
       { label: 'Pgtos Fornecedores',       path: '/rfb/pagamentos-fornecedores',  disabled: true },
       { label: 'Gestão Eventos Cred/Deb.', path: '/rfb/gestao-eventos-cred-deb', disabled: true },
