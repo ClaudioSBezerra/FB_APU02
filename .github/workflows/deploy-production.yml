@@ -165,6 +165,9 @@ jobs:
           docker compose --project-directory /opt/apps/fbtax/cliente-aws logs api --tail 50
           exit 1
 
+      - name: Reload nginx proxy
+        run: docker exec nginx_proxy nginx -s reload
+
   # Notificação (Coolify deploya automaticamente via webhook próprio)
   notify:
     needs: [build-and-push, build-installer-images, deploy-cliente-aws]
