@@ -76,9 +76,10 @@ type RFBDebito struct {
 	ValorCBSTotal      float64         `json:"valorCBSTotal"`
 	ValorCBSExtinto    float64         `json:"valorCBSExtinto"`
 	ValorCBSNaoExtinto float64         `json:"valorCBSNaoExtinto"`
-	SituacaoDebito     FlexString      `json:"situacaoDebito"`
+	SituacaoDebito     FlexString      `json:"situacao"`
 	FormasExtincao     json.RawMessage `json:"formasExtincao"`
 	Eventos            json.RawMessage `json:"eventos"`
+	CreditosCBS        []RFBCredito    `json:"creditosCBS"`
 }
 
 // ProcessarDownloadRFB downloads and processes the RFB CBS assessment JSON.
@@ -200,6 +201,16 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 					dataApuracao = d.DataApuracao
 				}
 			}
+			for _, c := range d.CreditosCBS {
+				if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
+					log.Printf("[RFB Processor] Error inserting corrente creditoCBS (chave=%s): %v", c.ChaveDfe, err)
+				} else {
+					totalCreditosCorrente++
+					valorCreditosTotal += c.ValorCBSTotal
+					valorCreditosExtinto += c.ValorCBSExtinto
+					valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+				}
+			}
 		}
 		for _, c := range apuracao.ApuracaoCorrente.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
@@ -223,6 +234,16 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 				valorTotal += d.ValorCBSTotal
 				valorExtinto += d.ValorCBSExtinto
 				valorNaoExtinto += d.ValorCBSNaoExtinto
+			}
+			for _, c := range d.CreditosCBS {
+				if err := insertCredito(tx, requestID, companyID, "ajuste", c); err != nil {
+					log.Printf("[RFB Processor] Error inserting ajuste creditoCBS (chave=%s): %v", c.ChaveDfe, err)
+				} else {
+					totalCreditosAjuste++
+					valorCreditosTotal += c.ValorCBSTotal
+					valorCreditosExtinto += c.ValorCBSExtinto
+					valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+				}
 			}
 		}
 		for _, c := range apuracao.ApuracaoAjuste.Creditos {
@@ -248,12 +269,22 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 				valorExtinto += d.ValorCBSExtinto
 				valorNaoExtinto += d.ValorCBSNaoExtinto
 			}
+			for _, c := range d.CreditosCBS {
+				if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
+					log.Printf("[RFB Processor] Error inserting extemporaneo creditoCBS (chave=%s): %v", c.ChaveDfe, err)
+				} else {
+					totalCreditosCorrente++
+					valorCreditosTotal += c.ValorCBSTotal
+					valorCreditosExtinto += c.ValorCBSExtinto
+					valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+				}
+			}
 		}
 		for _, c := range apuracao.DebitosExtemporaneos.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
 				log.Printf("[RFB Processor] Error inserting extemporaneo credito (chave=%s): %v", c.ChaveDfe, err)
 			} else {
-				totalCreditosCorrente++ // conta junto com corrente no resumo
+				totalCreditosCorrente++
 				valorCreditosTotal += c.ValorCBSTotal
 				valorCreditosExtinto += c.ValorCBSExtinto
 				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
@@ -481,8 +512,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 
 	if apuracao.ApuracaoCorrente != nil {
 		nd := len(apuracao.ApuracaoCorrente.Debitos)
-		nc := len(apuracao.ApuracaoCorrente.Creditos)
-		log.Printf("[RFB Reprocess] ApuracaoCorrente: %d débitos, %d créditos", nd, nc)
+		log.Printf("[RFB Reprocess] ApuracaoCorrente: %d débitos (créditos embutidos serão contados no loop)", nd)
 		for _, d := range apuracao.ApuracaoCorrente.Debitos {
 			if err := insertDebito(tx, requestID, companyID, "corrente", d); err != nil {
 				log.Printf("[RFB Reprocess] ERRO débito corrente (chave=%s): %v", d.ChaveDfe, err)
@@ -496,6 +526,16 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 					dataApuracao = d.DataApuracao
 				}
 			}
+			for _, c := range d.CreditosCBS {
+				if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
+					log.Printf("[RFB Reprocess] ERRO creditoCBS corrente (chave=%s): %v", c.ChaveDfe, err)
+				} else {
+					totalCreditosCorrente++
+					valorCreditosTotal += c.ValorCBSTotal
+					valorCreditosExtinto += c.ValorCBSExtinto
+					valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+				}
+			}
 		}
 		for _, c := range apuracao.ApuracaoCorrente.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
@@ -507,14 +547,13 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
-		log.Printf("[RFB Reprocess] ApuracaoCorrente inserida: %d/%d débitos, %d/%d créditos",
-			totalCorrente, nd, totalCreditosCorrente, nc)
+		log.Printf("[RFB Reprocess] ApuracaoCorrente inserida: %d/%d débitos, %d créditos CBS",
+			totalCorrente, nd, totalCreditosCorrente)
 	}
 
 	if apuracao.ApuracaoAjuste != nil {
 		nd := len(apuracao.ApuracaoAjuste.Debitos)
-		nc := len(apuracao.ApuracaoAjuste.Creditos)
-		log.Printf("[RFB Reprocess] ApuracaoAjuste: %d débitos, %d créditos", nd, nc)
+		log.Printf("[RFB Reprocess] ApuracaoAjuste: %d débitos", nd)
 		ajusteDebAntes := totalAjuste
 		ajusteCrAntes := totalCreditosAjuste
 		for _, d := range apuracao.ApuracaoAjuste.Debitos {
@@ -527,6 +566,16 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorExtinto += d.ValorCBSExtinto
 				valorNaoExtinto += d.ValorCBSNaoExtinto
 			}
+			for _, c := range d.CreditosCBS {
+				if err := insertCredito(tx, requestID, companyID, "ajuste", c); err != nil {
+					log.Printf("[RFB Reprocess] ERRO creditoCBS ajuste (chave=%s): %v", c.ChaveDfe, err)
+				} else {
+					totalCreditosAjuste++
+					valorCreditosTotal += c.ValorCBSTotal
+					valorCreditosExtinto += c.ValorCBSExtinto
+					valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+				}
+			}
 		}
 		for _, c := range apuracao.ApuracaoAjuste.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "ajuste", c); err != nil {
@@ -538,14 +587,13 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
-		log.Printf("[RFB Reprocess] ApuracaoAjuste inserida: %d/%d débitos, %d/%d créditos",
-			totalAjuste-ajusteDebAntes, nd, totalCreditosAjuste-ajusteCrAntes, nc)
+		log.Printf("[RFB Reprocess] ApuracaoAjuste inserida: %d/%d débitos, %d créditos CBS",
+			totalAjuste-ajusteDebAntes, nd, totalCreditosAjuste-ajusteCrAntes)
 	}
 
 	if apuracao.DebitosExtemporaneos != nil {
 		nd := len(apuracao.DebitosExtemporaneos.Debitos)
-		nc := len(apuracao.DebitosExtemporaneos.Creditos)
-		log.Printf("[RFB Reprocess] DebitosExtemporaneos: %d débitos, %d créditos", nd, nc)
+		log.Printf("[RFB Reprocess] DebitosExtemporaneos: %d débitos", nd)
 		extDebAntes := totalExtemporaneo
 		extCrAntes := totalCreditosCorrente
 		for _, d := range apuracao.DebitosExtemporaneos.Debitos {
@@ -558,6 +606,16 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorExtinto += d.ValorCBSExtinto
 				valorNaoExtinto += d.ValorCBSNaoExtinto
 			}
+			for _, c := range d.CreditosCBS {
+				if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
+					log.Printf("[RFB Reprocess] ERRO creditoCBS extemporaneo (chave=%s): %v", c.ChaveDfe, err)
+				} else {
+					totalCreditosCorrente++
+					valorCreditosTotal += c.ValorCBSTotal
+					valorCreditosExtinto += c.ValorCBSExtinto
+					valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+				}
+			}
 		}
 		for _, c := range apuracao.DebitosExtemporaneos.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
@@ -569,8 +627,8 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
-		log.Printf("[RFB Reprocess] DebitosExtemporaneos inseridos: %d/%d débitos, %d/%d créditos",
-			totalExtemporaneo-extDebAntes, nd, totalCreditosCorrente-extCrAntes, nc)
+		log.Printf("[RFB Reprocess] DebitosExtemporaneos inseridos: %d/%d débitos, %d créditos CBS",
+			totalExtemporaneo-extDebAntes, nd, totalCreditosCorrente-extCrAntes)
 	}
 
 	// Fallback: se nenhum débito forneceu dataApuracao, tenta extrair dos créditos
