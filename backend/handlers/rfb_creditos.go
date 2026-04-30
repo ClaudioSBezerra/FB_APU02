@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -290,6 +291,154 @@ func DeleteCreditoRequestHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// ListarCreditosHandler — GET /api/rfb/creditos/lista
+func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := claims["user_id"].(string)
+
+		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		q := r.URL.Query()
+		situacao := q.Get("situacao")
+		periodo := q.Get("periodo")
+		niEmitente := q.Get("ni_emitente")
+		pageStr := q.Get("page")
+		page := 1
+		if p, err2 := strconv.Atoi(pageStr); err2 == nil && p > 1 {
+			page = p
+		}
+		const pageSize = 50
+		offset := (page - 1) * pageSize
+
+		args := []interface{}{companyID}
+		where := []string{"company_id = $1"}
+		idx := 2
+
+		if situacao != "" {
+			where = append(where, "situacao_credito = $"+strconv.Itoa(idx))
+			args = append(args, situacao)
+			idx++
+		}
+		if periodo != "" {
+			where = append(where, "data_apuracao = $"+strconv.Itoa(idx))
+			args = append(args, periodo)
+			idx++
+		}
+		if niEmitente != "" {
+			where = append(where, "ni_emitente ILIKE $"+strconv.Itoa(idx))
+			args = append(args, "%"+niEmitente+"%")
+			idx++
+		}
+
+		whereClause := strings.Join(where, " AND ")
+
+		var total int
+		db.QueryRow("SELECT COUNT(*) FROM rfb_creditos WHERE "+whereClause, args...).Scan(&total)
+
+		args = append(args, pageSize, offset)
+		limitIdx := strconv.Itoa(idx)
+		offsetIdx := strconv.Itoa(idx + 1)
+
+		rows, err := db.Query(`
+			SELECT id, request_id, tipo_apuracao, modelo_dfe, numero_dfe, chave_dfe,
+				data_dfe_emissao, data_apuracao, ni_emitente, ni_adquirente,
+				valor_cbs_total, valor_cbs_extinto, valor_cbs_nao_extinto,
+				COALESCE(situacao_credito, ''), COALESCE(formas_extincao, ''), created_at
+			FROM rfb_creditos
+			WHERE `+whereClause+`
+			ORDER BY data_dfe_emissao DESC NULLS LAST, created_at DESC
+			LIMIT $`+limitIdx+` OFFSET $`+offsetIdx,
+			args...,
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		type CreditoItem struct {
+			ID                 string   `json:"id"`
+			RequestID          string   `json:"request_id"`
+			TipoApuracao       string   `json:"tipo_apuracao"`
+			ModeloDfe          string   `json:"modelo_dfe"`
+			NumeroDfe          string   `json:"numero_dfe"`
+			ChaveDfe           string   `json:"chave_dfe"`
+			DataDfeEmissao     *string  `json:"data_dfe_emissao"`
+			DataApuracao       string   `json:"data_apuracao"`
+			NiEmitente         string   `json:"ni_emitente"`
+			NiAdquirente       string   `json:"ni_adquirente"`
+			ValorCBSTotal      float64  `json:"valor_cbs_total"`
+			ValorCBSExtinto    float64  `json:"valor_cbs_extinto"`
+			ValorCBSNaoExtinto float64  `json:"valor_cbs_nao_extinto"`
+			SituacaoCredito    string   `json:"situacao_credito"`
+			FormasExtincao     string   `json:"formas_extincao"`
+			CreatedAt          time.Time `json:"created_at"`
+		}
+
+		var creditos []CreditoItem
+		for rows.Next() {
+			var c CreditoItem
+			var dataEmissao sql.NullTime
+			if err := rows.Scan(
+				&c.ID, &c.RequestID, &c.TipoApuracao, &c.ModeloDfe, &c.NumeroDfe, &c.ChaveDfe,
+				&dataEmissao, &c.DataApuracao, &c.NiEmitente, &c.NiAdquirente,
+				&c.ValorCBSTotal, &c.ValorCBSExtinto, &c.ValorCBSNaoExtinto,
+				&c.SituacaoCredito, &c.FormasExtincao, &c.CreatedAt,
+			); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if dataEmissao.Valid {
+				s := dataEmissao.Time.Format("2006-01-02")
+				c.DataDfeEmissao = &s
+			}
+			creditos = append(creditos, c)
+		}
+
+		// Totais por situação
+		type SituacaoTotais struct {
+			Situacao    string  `json:"situacao"`
+			Quantidade  int     `json:"quantidade"`
+			ValorTotal  float64 `json:"valor_total"`
+		}
+		var totais []SituacaoTotais
+		totaisRows, err2 := db.Query(`
+			SELECT COALESCE(situacao_credito, 'SEM_SITUACAO'), COUNT(*), SUM(valor_cbs_total)
+			FROM rfb_creditos
+			WHERE company_id = $1
+			GROUP BY situacao_credito
+			ORDER BY situacao_credito
+		`, companyID)
+		if err2 == nil {
+			defer totaisRows.Close()
+			for totaisRows.Next() {
+				var t SituacaoTotais
+				totaisRows.Scan(&t.Situacao, &t.Quantidade, &t.ValorTotal)
+				totais = append(totais, t)
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"creditos":   creditos,
+			"total":      total,
+			"page":       page,
+			"page_size":  pageSize,
+			"totais":     totais,
+		})
 	}
 }
 

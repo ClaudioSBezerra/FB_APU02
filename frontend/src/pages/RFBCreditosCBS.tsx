@@ -1,29 +1,42 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { TrendingUp, RefreshCw, CheckCircle2, Info } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { TrendingUp, RefreshCw, Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-interface RFBCreditoResumo {
-  total_creditos: number;
-  valor_cbs_total: number;
-  valor_cbs_nao_extinto: number;
-  total_corrente: number;
-  total_ajuste: number;
-  data_apuracao: string;
+interface SituacaoTotais {
+  situacao: string;
+  quantidade: number;
+  valor_total: number;
 }
 
-interface RFBCreditoRequest {
+interface CreditoItem {
   id: string;
-  cnpj_base: string;
-  status: string;
+  request_id: string;
+  tipo_apuracao: string;
+  modelo_dfe: string;
+  numero_dfe: string;
+  chave_dfe: string;
+  data_dfe_emissao: string | null;
+  data_apuracao: string;
+  ni_emitente: string;
+  ni_adquirente: string;
+  valor_cbs_total: number;
+  valor_cbs_extinto: number;
+  valor_cbs_nao_extinto: number;
+  situacao_credito: string;
+  formas_extincao: string;
   created_at: string;
-  resumo?: RFBCreditoResumo;
 }
 
-function formatCNPJBase(cnpj: string): string {
-  if (cnpj.length === 8) return `${cnpj.slice(0, 2)}.${cnpj.slice(2, 5)}.${cnpj.slice(5)}`;
-  return cnpj;
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+}
+
+function formatDate(d: string | null): string {
+  if (!d) return '—';
+  return new Date(d + 'T00:00:00').toLocaleDateString('pt-BR');
 }
 
 function formatPeriodo(p: string): string {
@@ -31,28 +44,68 @@ function formatPeriodo(p: string): string {
   return p || '—';
 }
 
-function formatNumber(n: number): string {
-  return new Intl.NumberFormat('pt-BR').format(n);
+function formatNI(ni: string): string {
+  if (!ni) return '—';
+  const d = ni.replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  if (d.length === 11) return d.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  return ni;
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+const SITUACAO_LABELS: Record<string, string> = {
+  A_APROPRIAR: 'A Apropriar',
+  APROPRIADO: 'Apropriado',
+  COMPENSADO: 'Compensado',
+};
+
+const SITUACAO_COLORS: Record<string, string> = {
+  A_APROPRIAR: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+  APROPRIADO: 'bg-green-100 text-green-800 border-green-300',
+  COMPENSADO: 'bg-blue-100 text-blue-800 border-blue-300',
+};
+
+const CARD_COLORS: Record<string, { bg: string; title: string; value: string; count: string }> = {
+  A_APROPRIAR: { bg: 'border-yellow-200 bg-yellow-50', title: 'text-yellow-800', value: 'text-yellow-900', count: 'text-yellow-700' },
+  APROPRIADO:  { bg: 'border-green-200 bg-green-50',  title: 'text-green-800',  value: 'text-green-900',  count: 'text-green-700'  },
+  COMPENSADO:  { bg: 'border-blue-200 bg-blue-50',    title: 'text-blue-800',   value: 'text-blue-900',   count: 'text-blue-700'   },
+};
+
+function SituacaoBadge({ situacao }: { situacao: string }) {
+  const classes = SITUACAO_COLORS[situacao] ?? 'bg-gray-100 text-gray-700 border-gray-300';
+  const label = SITUACAO_LABELS[situacao] ?? situacao;
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded border text-xs font-medium ${classes}`}>
+      {label}
+    </span>
+  );
 }
 
 export default function RFBCreditosCBS() {
-  const [requests, setRequests] = useState<RFBCreditoRequest[]>([]);
+  const [creditos, setCreditos] = useState<CreditoItem[]>([]);
+  const [totais, setTotais] = useState<SituacaoTotais[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [filterSituacao, setFilterSituacao] = useState('');
+  const [filterPeriodo, setFilterPeriodo] = useState('');
 
-  const fetchRequests = useCallback(async () => {
+  const fetchCreditos = useCallback(async (p: number, sit: string, per: string) => {
+    setLoading(true);
     try {
       const token = localStorage.getItem('token');
       const companyId = localStorage.getItem('companyId');
-      const response = await fetch('/api/rfb/creditos/status', {
+      const params = new URLSearchParams({ page: String(p) });
+      if (sit) params.set('situacao', sit);
+      if (per) params.set('periodo', per);
+
+      const response = await fetch(`/api/rfb/creditos/lista?${params}`, {
         headers: { 'Authorization': `Bearer ${token}`, 'X-Company-ID': companyId || '' },
       });
       if (response.ok) {
         const data = await response.json();
-        setRequests(data.requests || []);
+        setCreditos(data.creditos || []);
+        setTotal(data.total || 0);
+        setTotais(data.totais || []);
       }
     } catch {
       // silent
@@ -61,18 +114,22 @@ export default function RFBCreditosCBS() {
     }
   }, []);
 
-  useEffect(() => { fetchRequests(); }, [fetchRequests]);
+  useEffect(() => {
+    fetchCreditos(page, filterSituacao, filterPeriodo);
+  }, [fetchCreditos, page, filterSituacao, filterPeriodo]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
-  }
+  const handleSituacaoFilter = (sit: string) => {
+    setFilterSituacao(prev => prev === sit ? '' : sit);
+    setPage(1);
+  };
+
+  const totalPages = Math.ceil(total / 50);
+
+  const totalGeral = totais.reduce((acc, t) => ({ qty: acc.qty + t.quantidade, val: acc.val + t.valor_total }), { qty: 0, val: 0 });
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
+    <div className="max-w-6xl mx-auto px-4 py-6">
+      {/* Header */}
       <div className="md:flex md:items-center md:justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -80,96 +137,172 @@ export default function RFBCreditosCBS() {
             Créditos CBS
           </h2>
           <p className="mt-1 text-sm text-gray-600">
-            Créditos CBS extraídos automaticamente das importações de débitos da Receita Federal.
+            Créditos CBS extraídos das importações de débitos — apuração assistida RFB.
           </p>
         </div>
-        <Button variant="outline" onClick={fetchRequests}>
+        <Button variant="outline" onClick={() => fetchCreditos(page, filterSituacao, filterPeriodo)}>
           <RefreshCw className="mr-2 h-4 w-4" /> Atualizar
         </Button>
       </div>
 
-      <div className="mb-4 flex items-start gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-blue-800">
+      {/* Art. 48 notice */}
+      <div className="mb-5 flex items-start gap-3 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-blue-800">
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <p className="text-sm">
-          A Receita Federal retorna créditos e débitos no mesmo arquivo de apuração CBS.
-          Os créditos são extraídos automaticamente em cada importação. Para solicitar uma nova
-          importação, acesse{' '}
+          <strong>Art. 48 — LC 214/2025:</strong> Em 2026, o split payment ainda não é obrigatório.
+          Os créditos são registrados a partir do destaque na NF-e sem aguardar a extinção do débito do fornecedor.
+          Para solicitar uma nova importação, acesse{' '}
           <Link to="/rfb/apuracao" className="font-semibold underline hover:no-underline">
             Importar Débitos
           </Link>.
         </p>
       </div>
 
+      {/* Summary cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        {['A_APROPRIAR', 'APROPRIADO', 'COMPENSADO'].map((sit) => {
+          const t = totais.find(x => x.situacao === sit);
+          const c = CARD_COLORS[sit];
+          const active = filterSituacao === sit;
+          return (
+            <button
+              key={sit}
+              onClick={() => handleSituacaoFilter(sit)}
+              className={`text-left rounded-lg border p-4 transition-all ${c.bg} ${active ? 'ring-2 ring-offset-1 ring-gray-400' : 'hover:shadow-sm'}`}
+            >
+              <div className={`text-xs font-semibold uppercase tracking-wide mb-1 ${c.title}`}>
+                {SITUACAO_LABELS[sit]}
+              </div>
+              <div className={`text-xl font-bold ${c.value}`}>
+                {t ? formatCurrency(t.valor_total) : 'R$ 0,00'}
+              </div>
+              <div className={`text-xs mt-1 ${c.count}`}>
+                {t ? t.quantidade : 0} {t?.quantidade === 1 ? 'crédito' : 'créditos'}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-600">Período:</label>
+          <input
+            type="text"
+            placeholder="AAAAMM"
+            maxLength={6}
+            value={filterPeriodo}
+            onChange={e => { setFilterPeriodo(e.target.value); setPage(1); }}
+            className="border rounded px-2 py-1 text-sm w-28 focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+        </div>
+        {filterSituacao && (
+          <button
+            onClick={() => { setFilterSituacao(''); setPage(1); }}
+            className="text-xs text-gray-500 hover:text-gray-800 underline"
+          >
+            Limpar filtro: {SITUACAO_LABELS[filterSituacao]}
+          </button>
+        )}
+        <span className="ml-auto text-sm text-muted-foreground">
+          {total} registro{total !== 1 ? 's' : ''}
+          {totalGeral.qty > 0 && ` · Total: ${formatCurrency(totalGeral.val)}`}
+        </span>
+      </div>
+
+      {/* Table */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Créditos por Importação</CardTitle>
-          <CardDescription>
-            Resumo de créditos CBS encontrados em cada importação concluída.
-          </CardDescription>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Créditos Individuais</CardTitle>
+          <CardDescription>Clique em uma situação acima para filtrar.</CardDescription>
         </CardHeader>
-        <CardContent>
-          {requests.length === 0 ? (
-            <div className="py-8 text-center text-muted-foreground">
-              <TrendingUp className="mx-auto h-12 w-12 mb-3 opacity-30" />
-              <p>Nenhuma importação com créditos CBS encontrada.</p>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="flex items-center justify-center h-40">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
+            </div>
+          ) : creditos.length === 0 ? (
+            <div className="py-12 text-center text-muted-foreground">
+              <TrendingUp className="mx-auto h-10 w-10 mb-3 opacity-30" />
+              <p className="text-sm">Nenhum crédito CBS encontrado.</p>
               <p className="text-xs mt-1">
-                Os créditos aparecem após a conclusão de uma{' '}
+                Os créditos aparecem após concluir uma{' '}
                 <Link to="/rfb/apuracao" className="text-primary hover:underline">
                   importação de débitos
                 </Link>.
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {requests.map((req) => {
-                const { resumo } = req;
-                const hasCredits = resumo && resumo.total_creditos > 0;
-
-                return (
-                  <div key={req.id} className="rounded-lg border overflow-hidden">
-                    <div className="flex items-center justify-between p-4">
-                      <div className="flex items-center gap-3">
-                        <CheckCircle2 className="h-5 w-5 text-green-600 shrink-0" />
-                        <div>
-                          <span className="font-medium text-sm">CNPJ: {formatCNPJBase(req.cnpj_base)}</span>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            Importado em {new Date(req.created_at).toLocaleString('pt-BR')}
-                          </p>
-                        </div>
-                      </div>
-                      {!hasCredits && (
-                        <span className="text-xs text-muted-foreground italic">
-                          Sem créditos nesta importação
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-gray-50 text-xs text-muted-foreground">
+                    <th className="px-4 py-2 text-left font-medium">Emissão</th>
+                    <th className="px-4 py-2 text-left font-medium">Período</th>
+                    <th className="px-4 py-2 text-left font-medium">Modelo / Nº</th>
+                    <th className="px-4 py-2 text-left font-medium">Emitente</th>
+                    <th className="px-4 py-2 text-right font-medium">CBS Total</th>
+                    <th className="px-4 py-2 text-right font-medium">Não Extinto</th>
+                    <th className="px-4 py-2 text-center font-medium">Situação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {creditos.map(c => (
+                    <tr key={c.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-4 py-2 whitespace-nowrap">{formatDate(c.data_dfe_emissao)}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">{formatPeriodo(c.data_apuracao)}</td>
+                      <td className="px-4 py-2">
+                        <span className="font-mono text-xs">
+                          {c.modelo_dfe || '—'}
+                          {c.numero_dfe ? ` · ${c.numero_dfe}` : ''}
                         </span>
-                      )}
-                    </div>
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <span title={c.ni_emitente} className="font-mono text-xs">
+                          {formatNI(c.ni_emitente)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-right font-medium text-green-700">
+                        {formatCurrency(c.valor_cbs_total)}
+                      </td>
+                      <td className="px-4 py-2 text-right text-blue-700">
+                        {formatCurrency(c.valor_cbs_nao_extinto)}
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        <SituacaoBadge situacao={c.situacao_credito} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
-                    {hasCredits && resumo && (
-                      <div className="border-t bg-gray-50 px-4 py-3 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-                        <div>
-                          <span className="text-xs text-muted-foreground block">Período</span>
-                          <span className="font-semibold">{formatPeriodo(resumo.data_apuracao)}</span>
-                        </div>
-                        <div>
-                          <span className="text-xs text-muted-foreground block">Total de créditos</span>
-                          <span className="font-semibold">{formatNumber(resumo.total_creditos)}</span>
-                          <span className="text-xs text-muted-foreground ml-1">
-                            ({formatNumber(resumo.total_corrente)} corr. + {formatNumber(resumo.total_ajuste)} ajuste)
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-xs text-muted-foreground block">CBS Total</span>
-                          <span className="font-semibold text-green-700">{formatCurrency(resumo.valor_cbs_total)}</span>
-                        </div>
-                        <div>
-                          <span className="text-xs text-muted-foreground block">CBS Não Extinto</span>
-                          <span className="font-semibold text-blue-700">{formatCurrency(resumo.valor_cbs_nao_extinto)}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage(p => p - 1)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Anterior
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Página {page} de {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage(p => p + 1)}
+              >
+                Próxima
+                <ChevronRight className="h-4 w-4" />
+              </Button>
             </div>
           )}
         </CardContent>

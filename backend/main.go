@@ -440,6 +440,7 @@ func main() {
 
 	// RFB Créditos CBS — extraídos da mesma importação de débitos (sem solicitação separada)
 	http.HandleFunc("/api/rfb/creditos/status", withAuth(handlers.StatusCreditosHandler, ""))
+	http.HandleFunc("/api/rfb/creditos/lista", withAuth(handlers.ListarCreditosHandler, ""))
 
 	// RFB Webhook (PUBLIC - no JWT auth)
 	http.HandleFunc("/api/rfb/webhook", withDB(handlers.RFBWebhookHandler))
