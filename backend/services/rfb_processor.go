@@ -384,7 +384,9 @@ func insertDebito(exec dbExecutor, requestID, companyID, tipoApuracao string, d 
 // Safe pattern: parse JSON FIRST, then atomically delete old debits and insert new ones in a transaction.
 // If parse or any insert fails, old data is never deleted — no data loss.
 func ReprocessarRawJSON(db *sql.DB, requestID string) error {
-	log.Printf("[RFB Reprocess] Starting reprocess for request %s", requestID)
+	log.Printf("[RFB Reprocess] ============================================================")
+	log.Printf("[RFB Reprocess] Iniciando reprocessamento | request: %s", requestID)
+	log.Printf("[RFB Reprocess] ============================================================")
 
 	var companyID string
 	var rawJSON *string
@@ -392,13 +394,16 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		SELECT company_id, raw_json FROM rfb_requests WHERE id = $1
 	`, requestID).Scan(&companyID, &rawJSON)
 	if err != nil {
+		log.Printf("[RFB Reprocess] ERRO ao buscar request: %v", err)
 		return fmt.Errorf("failed to fetch request: %w", err)
 	}
 	if rawJSON == nil || *rawJSON == "" {
+		log.Printf("[RFB Reprocess] ERRO: raw_json não encontrado para request %s — não é possível reprocessar sem o JSON original", requestID)
 		return fmt.Errorf("no raw_json stored for request %s — cannot reprocess without raw data", requestID)
 	}
 
-	log.Printf("[RFB Reprocess] Raw JSON found (%d MB), parsing...", len(*rawJSON)/1024/1024)
+	jsonSizeMB := float64(len(*rawJSON)) / 1024 / 1024
+	log.Printf("[RFB Reprocess] JSON original encontrado (%.2f MB) | company: %s", jsonSizeMB, companyID)
 
 	// 1. Atomic status claim — prevent concurrent reprocess runs
 	res, err := db.Exec(`
@@ -409,36 +414,62 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		return fmt.Errorf("failed to claim reprocess status: %w", err)
 	}
 	if rows, _ := res.RowsAffected(); rows == 0 {
-		log.Printf("[RFB Reprocess] Request %s is already being processed — skipping", requestID)
+		log.Printf("[RFB Reprocess] Request %s já está sendo processado em outra goroutine — abortando", requestID)
 		return nil
 	}
+	log.Printf("[RFB Reprocess] Status → reprocessing")
 
 	// 2. Parse JSON FIRST — before touching any existing data.
-	// If parse fails, old debits remain intact.
+	log.Printf("[RFB Reprocess] Etapa 1/4: Interpretando JSON...")
 	var apuracao RFBApuracaoJSON
 	if err := json.Unmarshal([]byte(*rawJSON), &apuracao); err != nil {
+		log.Printf("[RFB Reprocess] ERRO no parse do JSON: %v", err)
 		updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao reprocessar JSON: "+err.Error())
 		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
 
+	grupos := 0
+	if apuracao.ApuracaoCorrente != nil {
+		grupos++
+	}
+	if apuracao.ApuracaoAjuste != nil {
+		grupos++
+	}
+	if apuracao.DebitosExtemporaneos != nil {
+		grupos++
+	}
+	log.Printf("[RFB Reprocess] JSON interpretado com sucesso | grupos encontrados: %d (corrente=%v, ajuste=%v, extemporaneo=%v)",
+		grupos,
+		apuracao.ApuracaoCorrente != nil,
+		apuracao.ApuracaoAjuste != nil,
+		apuracao.DebitosExtemporaneos != nil,
+	)
+
 	// 3. Transaction: delete old debits then insert new ones atomically.
-	// Rollback keeps old data if anything goes wrong.
+	log.Printf("[RFB Reprocess] Etapa 2/4: Limpando dados anteriores...")
 	tx, err := db.Begin()
 	if err != nil {
 		updateRequestError(db, requestID, "DB_ERROR", "Falha ao iniciar transação: "+err.Error())
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	if _, err = tx.Exec(`DELETE FROM rfb_debitos WHERE request_id = $1`, requestID); err != nil {
+	var deletedDebitos, deletedCreditos int64
+	resD, err := tx.Exec(`DELETE FROM rfb_debitos WHERE request_id = $1`, requestID)
+	if err != nil {
 		tx.Rollback()
 		updateRequestError(db, requestID, "DB_ERROR", "Falha ao limpar débitos anteriores: "+err.Error())
 		return fmt.Errorf("failed to delete existing debits: %w", err)
 	}
-	if _, err = tx.Exec(`DELETE FROM rfb_creditos WHERE request_id = $1`, requestID); err != nil {
+	deletedDebitos, _ = resD.RowsAffected()
+
+	resC, err := tx.Exec(`DELETE FROM rfb_creditos WHERE request_id = $1`, requestID)
+	if err != nil {
 		tx.Rollback()
 		updateRequestError(db, requestID, "DB_ERROR", "Falha ao limpar créditos anteriores: "+err.Error())
 		return fmt.Errorf("failed to delete existing credits: %w", err)
 	}
+	deletedCreditos, _ = resC.RowsAffected()
+	log.Printf("[RFB Reprocess] Removidos: %d débitos e %d créditos anteriores", deletedDebitos, deletedCreditos)
 
 	var totalCorrente, totalAjuste, totalExtemporaneo, insertErrors int
 	var valorTotal, valorExtinto, valorNaoExtinto float64
@@ -446,10 +477,15 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	var totalCreditosCorrente, totalCreditosAjuste int
 	var valorCreditosTotal, valorCreditosExtinto, valorCreditosNaoExtinto float64
 
+	log.Printf("[RFB Reprocess] Etapa 3/4: Inserindo registros...")
+
 	if apuracao.ApuracaoCorrente != nil {
+		nd := len(apuracao.ApuracaoCorrente.Debitos)
+		nc := len(apuracao.ApuracaoCorrente.Creditos)
+		log.Printf("[RFB Reprocess] ApuracaoCorrente: %d débitos, %d créditos", nd, nc)
 		for _, d := range apuracao.ApuracaoCorrente.Debitos {
 			if err := insertDebito(tx, requestID, companyID, "corrente", d); err != nil {
-				log.Printf("[RFB Reprocess] Error inserting corrente debit (chave=%s): %v", d.ChaveDfe, err)
+				log.Printf("[RFB Reprocess] ERRO débito corrente (chave=%s): %v", d.ChaveDfe, err)
 				insertErrors++
 			} else {
 				totalCorrente++
@@ -463,7 +499,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		}
 		for _, c := range apuracao.ApuracaoCorrente.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
-				log.Printf("[RFB Reprocess] Error inserting corrente credito: %v", err)
+				log.Printf("[RFB Reprocess] ERRO crédito corrente (chave=%s): %v", c.ChaveDfe, err)
 			} else {
 				totalCreditosCorrente++
 				valorCreditosTotal += c.ValorCBSTotal
@@ -471,12 +507,19 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
+		log.Printf("[RFB Reprocess] ApuracaoCorrente inserida: %d/%d débitos, %d/%d créditos",
+			totalCorrente, nd, totalCreditosCorrente, nc)
 	}
 
 	if apuracao.ApuracaoAjuste != nil {
+		nd := len(apuracao.ApuracaoAjuste.Debitos)
+		nc := len(apuracao.ApuracaoAjuste.Creditos)
+		log.Printf("[RFB Reprocess] ApuracaoAjuste: %d débitos, %d créditos", nd, nc)
+		ajusteDebAntes := totalAjuste
+		ajusteCrAntes := totalCreditosAjuste
 		for _, d := range apuracao.ApuracaoAjuste.Debitos {
 			if err := insertDebito(tx, requestID, companyID, "ajuste", d); err != nil {
-				log.Printf("[RFB Reprocess] Error inserting ajuste debit (chave=%s): %v", d.ChaveDfe, err)
+				log.Printf("[RFB Reprocess] ERRO débito ajuste (chave=%s): %v", d.ChaveDfe, err)
 				insertErrors++
 			} else {
 				totalAjuste++
@@ -487,7 +530,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		}
 		for _, c := range apuracao.ApuracaoAjuste.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "ajuste", c); err != nil {
-				log.Printf("[RFB Reprocess] Error inserting ajuste credito: %v", err)
+				log.Printf("[RFB Reprocess] ERRO crédito ajuste (chave=%s): %v", c.ChaveDfe, err)
 			} else {
 				totalCreditosAjuste++
 				valorCreditosTotal += c.ValorCBSTotal
@@ -495,12 +538,19 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
+		log.Printf("[RFB Reprocess] ApuracaoAjuste inserida: %d/%d débitos, %d/%d créditos",
+			totalAjuste-ajusteDebAntes, nd, totalCreditosAjuste-ajusteCrAntes, nc)
 	}
 
 	if apuracao.DebitosExtemporaneos != nil {
+		nd := len(apuracao.DebitosExtemporaneos.Debitos)
+		nc := len(apuracao.DebitosExtemporaneos.Creditos)
+		log.Printf("[RFB Reprocess] DebitosExtemporaneos: %d débitos, %d créditos", nd, nc)
+		extDebAntes := totalExtemporaneo
+		extCrAntes := totalCreditosCorrente
 		for _, d := range apuracao.DebitosExtemporaneos.Debitos {
 			if err := insertDebito(tx, requestID, companyID, "extemporaneo", d); err != nil {
-				log.Printf("[RFB Reprocess] Error inserting extemporaneo debit (chave=%s): %v", d.ChaveDfe, err)
+				log.Printf("[RFB Reprocess] ERRO débito extemporaneo (chave=%s): %v", d.ChaveDfe, err)
 				insertErrors++
 			} else {
 				totalExtemporaneo++
@@ -511,7 +561,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		}
 		for _, c := range apuracao.DebitosExtemporaneos.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
-				log.Printf("[RFB Reprocess] Error inserting extemporaneo credito (chave=%s): %v", c.ChaveDfe, err)
+				log.Printf("[RFB Reprocess] ERRO crédito extemporaneo (chave=%s): %v", c.ChaveDfe, err)
 			} else {
 				totalCreditosCorrente++
 				valorCreditosTotal += c.ValorCBSTotal
@@ -519,6 +569,8 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
+		log.Printf("[RFB Reprocess] DebitosExtemporaneos inseridos: %d/%d débitos, %d/%d créditos",
+			totalExtemporaneo-extDebAntes, nd, totalCreditosCorrente-extCrAntes, nc)
 	}
 
 	// Fallback: se nenhum débito forneceu dataApuracao, tenta extrair dos créditos
@@ -526,6 +578,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		for _, c := range apuracao.ApuracaoCorrente.Creditos {
 			if c.DataApuracao != "" {
 				dataApuracao = c.DataApuracao
+				log.Printf("[RFB Reprocess] dataApuracao obtido dos créditos correntes: %s", dataApuracao)
 				break
 			}
 		}
@@ -534,6 +587,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		for _, c := range apuracao.ApuracaoAjuste.Creditos {
 			if c.DataApuracao != "" {
 				dataApuracao = c.DataApuracao
+				log.Printf("[RFB Reprocess] dataApuracao obtido dos créditos ajuste: %s", dataApuracao)
 				break
 			}
 		}
@@ -541,6 +595,12 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 
 	totalDebitos := totalCorrente + totalAjuste + totalExtemporaneo
 	totalCreditos := totalCreditosCorrente + totalCreditosAjuste
+
+	log.Printf("[RFB Reprocess] Etapa 4/4: Atualizando resumos | período: %s", dataApuracao)
+	log.Printf("[RFB Reprocess]   Débitos : %d total (%d corrente, %d ajuste, %d extemporaneo) | CBS R$ %.2f",
+		totalDebitos, totalCorrente, totalAjuste, totalExtemporaneo, valorTotal)
+	log.Printf("[RFB Reprocess]   Créditos: %d total (%d corrente+extemp, %d ajuste) | CBS R$ %.2f",
+		totalCreditos, totalCreditosCorrente, totalCreditosAjuste, valorCreditosTotal)
 
 	if _, err = tx.Exec(`
 		INSERT INTO rfb_resumo (request_id, company_id, data_apuracao, total_debitos,
@@ -558,6 +618,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		updateRequestError(db, requestID, "DB_ERROR", "Falha ao salvar resumo: "+err.Error())
 		return fmt.Errorf("failed to upsert summary: %w", err)
 	}
+	log.Printf("[RFB Reprocess] Resumo de débitos atualizado (rfb_resumo)")
 
 	if totalCreditos > 0 {
 		if _, credErr := tx.Exec(`
@@ -571,8 +632,12 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 		`, requestID, companyID, dataApuracao, totalCreditos,
 			valorCreditosTotal, valorCreditosExtinto, valorCreditosNaoExtinto,
 			totalCreditosCorrente, totalCreditosAjuste); credErr != nil {
-			log.Printf("[RFB Reprocess] WARNING: failed to upsert credits summary: %v", credErr)
+			log.Printf("[RFB Reprocess] AVISO: falha ao atualizar resumo de créditos: %v", credErr)
+		} else {
+			log.Printf("[RFB Reprocess] Resumo de créditos atualizado (rfb_creditos_resumo)")
 		}
+	} else {
+		log.Printf("[RFB Reprocess] Nenhum crédito encontrado — rfb_creditos_resumo não atualizado")
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -581,11 +646,15 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	}
 
 	updateRequestStatus(db, requestID, "completed")
+
+	log.Printf("[RFB Reprocess] ============================================================")
 	if insertErrors > 0 {
-		log.Printf("[RFB Reprocess] WARN: %d debits failed to insert out of total attempted", insertErrors)
+		log.Printf("[RFB Reprocess] AVISO: %d débitos falharam na inserção", insertErrors)
 	}
-	log.Printf("[RFB Reprocess] Request %s completed: %d debits, %d credits, CBS total: %.2f",
-		requestID, totalDebitos, totalCreditos, valorTotal)
+	log.Printf("[RFB Reprocess] CONCLUÍDO | request: %s | status → completed", requestID)
+	log.Printf("[RFB Reprocess]   %d débitos | %d créditos | período: %s | CBS R$ %.2f",
+		totalDebitos, totalCreditos, dataApuracao, valorTotal)
+	log.Printf("[RFB Reprocess] ============================================================")
 	return nil
 }
 
