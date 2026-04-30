@@ -367,7 +367,7 @@ export default function RFBDebitos() {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
         <p className="font-medium">Nenhuma importação concluída.</p>
-        <p className="text-xs">Acesse <strong>Importar Débitos</strong> para carregar os dados da RFB.</p>
+        <p className="text-xs">Acesse <strong>Importar Movimento</strong> para carregar os dados da RFB.</p>
       </div>
     );
   }

@@ -153,7 +153,7 @@ export default function RFBCreditosCBS() {
           Os créditos são registrados a partir do destaque na NF-e sem aguardar a extinção do débito do fornecedor.
           Para solicitar uma nova importação, acesse{' '}
           <Link to="/rfb/apuracao" className="font-semibold underline hover:no-underline">
-            Importar Débitos
+            Importar Movimento
           </Link>.
         </p>
       </div>

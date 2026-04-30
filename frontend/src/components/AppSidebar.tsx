@@ -151,7 +151,7 @@ const sections: NavSection[] = [
     adminOnly: true,
     items: [
       { title: "Gestão IBS/CBS",              url: "/rfb/gestao-creditos",         icon: BarChart3 },
-      { title: "Importar débitos CBS",        url: "/rfb/apuracao",                icon: Download },
+      { title: "Importar movimento CBS",      url: "/rfb/apuracao",                icon: Download },
       { title: "Débitos mês corrente",        url: "/rfb/debitos",                 icon: FileText },
       { title: "Créditos CBS — mês",          url: "/rfb/creditos-cbs",            icon: CreditCard,  disabled: true },
       { title: "Pagamentos CBS — mês",        url: "/rfb/pagamentos-cbs",          icon: Wallet,      disabled: true },

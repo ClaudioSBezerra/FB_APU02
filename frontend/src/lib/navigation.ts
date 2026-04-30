@@ -48,7 +48,7 @@ export const modules: Record<string, ModuleConfig> = {
     label: 'Receita Federal',
     tabs: [
       { label: 'Gestão IBS/CBS',      path: '/rfb/gestao-creditos' },
-      { label: 'Importar Débitos',    path: '/rfb/apuracao' },
+      { label: 'Importar Movimento',  path: '/rfb/apuracao' },
       { label: 'Débitos mês',         path: '/rfb/debitos' },
       { label: 'Créditos CBS',        path: '/rfb/creditos-cbs' },
       { label: 'Pagamentos CBS',      path: '/rfb/pagamentos-cbs',          disabled: true },
