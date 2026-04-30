@@ -424,11 +424,11 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Find the request by tiqueteSolicitacao (also fetch tipo to route correctly)
-		var requestID, tipo string
+		// Find the request by tiqueteSolicitacao
+		var requestID string
 		err = db.QueryRow(`
-			SELECT id, COALESCE(tipo, 'debito') FROM rfb_requests WHERE tiquete = $1 AND status = 'requested'
-		`, tiqueteSolicitacao).Scan(&requestID, &tipo)
+			SELECT id FROM rfb_requests WHERE tiquete = $1 AND status = 'requested'
+		`, tiqueteSolicitacao).Scan(&requestID)
 		if err != nil {
 			log.Printf("[RFB Webhook] Request not found for tiqueteSolicitacao %s: %v", tiqueteSolicitacao, err)
 			w.WriteHeader(http.StatusOK)
@@ -448,21 +448,15 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 
 		log.Printf("[RFB Webhook] Request %s updated — tiqueteDownload saved, triggering download", requestID)
 
-		// Trigger async download — route to the correct processor based on tipo
-		reqTipo := tipo
+		// Trigger async download — ProcessarDownloadRFB extrai débitos e créditos do mesmo arquivo
+		reqID := requestID
 		go func() {
 			rfbClient := services.NewRFBClient()
-			if reqTipo == "credito" {
-				if err := services.ProcessarDownloadCreditosRFB(db, rfbClient, requestID); err != nil {
-					log.Printf("[RFB Webhook] Error processing credits for request %s: %v", requestID, err)
-				}
-			} else {
-				if err := services.ProcessarDownloadRFB(db, rfbClient, requestID); err != nil {
-					log.Printf("[RFB Webhook] Error processing download for request %s: %v", requestID, err)
-					return
-				}
-				RefreshMalhaFinaMV(db)
+			if err := services.ProcessarDownloadRFB(db, rfbClient, reqID); err != nil {
+				log.Printf("[RFB Webhook] Error processing download for request %s: %v", reqID, err)
+				return
 			}
+			RefreshMalhaFinaMV(db)
 		}()
 
 		w.WriteHeader(http.StatusOK)

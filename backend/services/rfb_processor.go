@@ -249,6 +249,34 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 				valorNaoExtinto += d.ValorCBSNaoExtinto
 			}
 		}
+		for _, c := range apuracao.DebitosExtemporaneos.Creditos {
+			if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
+				log.Printf("[RFB Processor] Error inserting extemporaneo credito (chave=%s): %v", c.ChaveDfe, err)
+			} else {
+				totalCreditosCorrente++ // conta junto com corrente no resumo
+				valorCreditosTotal += c.ValorCBSTotal
+				valorCreditosExtinto += c.ValorCBSExtinto
+				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+			}
+		}
+	}
+
+	// Fallback: se nenhum débito forneceu dataApuracao, tenta extrair dos créditos
+	if dataApuracao == "" && apuracao.ApuracaoCorrente != nil {
+		for _, c := range apuracao.ApuracaoCorrente.Creditos {
+			if c.DataApuracao != "" {
+				dataApuracao = c.DataApuracao
+				break
+			}
+		}
+	}
+	if dataApuracao == "" && apuracao.ApuracaoAjuste != nil {
+		for _, c := range apuracao.ApuracaoAjuste.Creditos {
+			if c.DataApuracao != "" {
+				dataApuracao = c.DataApuracao
+				break
+			}
+		}
 	}
 
 	totalDebitos := totalCorrente + totalAjuste + totalExtemporaneo
@@ -479,6 +507,34 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 				valorTotal += d.ValorCBSTotal
 				valorExtinto += d.ValorCBSExtinto
 				valorNaoExtinto += d.ValorCBSNaoExtinto
+			}
+		}
+		for _, c := range apuracao.DebitosExtemporaneos.Creditos {
+			if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
+				log.Printf("[RFB Reprocess] Error inserting extemporaneo credito (chave=%s): %v", c.ChaveDfe, err)
+			} else {
+				totalCreditosCorrente++
+				valorCreditosTotal += c.ValorCBSTotal
+				valorCreditosExtinto += c.ValorCBSExtinto
+				valorCreditosNaoExtinto += c.ValorCBSNaoExtinto
+			}
+		}
+	}
+
+	// Fallback: se nenhum débito forneceu dataApuracao, tenta extrair dos créditos
+	if dataApuracao == "" && apuracao.ApuracaoCorrente != nil {
+		for _, c := range apuracao.ApuracaoCorrente.Creditos {
+			if c.DataApuracao != "" {
+				dataApuracao = c.DataApuracao
+				break
+			}
+		}
+	}
+	if dataApuracao == "" && apuracao.ApuracaoAjuste != nil {
+		for _, c := range apuracao.ApuracaoAjuste.Creditos {
+			if c.DataApuracao != "" {
+				dataApuracao = c.DataApuracao
+				break
 			}
 		}
 	}
