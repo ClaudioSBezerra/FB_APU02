@@ -164,12 +164,12 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Verify request belongs to company and has a tiquete
-		var requestID, tiquete, status string
+		var requestID, tiquete, status, dlTipo string
 		var tiqueteDownload *string
 		err = db.QueryRow(`
-			SELECT id, COALESCE(tiquete, ''), status, tiquete_download FROM rfb_requests
+			SELECT id, COALESCE(tiquete, ''), status, tiquete_download, COALESCE(tipo, 'debito') FROM rfb_requests
 			WHERE id = $1 AND company_id = $2
-		`, req.RequestID, companyID).Scan(&requestID, &tiquete, &status, &tiqueteDownload)
+		`, req.RequestID, companyID).Scan(&requestID, &tiquete, &status, &tiqueteDownload, &dlTipo)
 		if err == sql.ErrNoRows {
 			http.Error(w, "Solicitação não encontrada", http.StatusNotFound)
 			return
@@ -199,9 +199,16 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Trigger download in background
+		// Trigger download in background, routing by tipo
+		dlTipoCopy := dlTipo
 		go func() {
 			rfbClient := services.NewRFBClient()
+			if dlTipoCopy == "credito" {
+				if err := services.ProcessarDownloadCreditosRFB(db, rfbClient, requestID); err != nil {
+					log.Printf("[RFB Manual Download] Error processing credits request %s: %v", requestID, err)
+				}
+				return
+			}
 			if err := services.ProcessarDownloadRFB(db, rfbClient, requestID); err != nil {
 				log.Printf("[RFB Manual Download] Error processing request %s: %v", requestID, err)
 			}
@@ -314,17 +321,25 @@ func ReprocessHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Verify ownership
-		var exists bool
-		err = db.QueryRow(`SELECT EXISTS(SELECT 1 FROM rfb_requests WHERE id = $1 AND company_id = $2)`,
-			req.RequestID, companyID).Scan(&exists)
-		if err != nil || !exists {
+		// Verify ownership and get tipo
+		var reprocessTipo string
+		err = db.QueryRow(`SELECT COALESCE(tipo, 'debito') FROM rfb_requests WHERE id = $1 AND company_id = $2`,
+			req.RequestID, companyID).Scan(&reprocessTipo)
+		if err != nil {
 			http.Error(w, "Solicitação não encontrada", http.StatusNotFound)
 			return
 		}
 
+		reprocessID := req.RequestID
+		reprocessTipoCopy := reprocessTipo
 		go func() {
-			if err := services.ReprocessarRawJSON(db, req.RequestID); err != nil {
+			if reprocessTipoCopy == "credito" {
+				if err := services.ReprocessarRawJSONCreditosRFB(db, reprocessID); err != nil {
+					log.Printf("[RFB Reprocess] Error (credito): %v", err)
+				}
+				return
+			}
+			if err := services.ReprocessarRawJSON(db, reprocessID); err != nil {
 				log.Printf("[RFB Reprocess] Error: %v", err)
 			}
 		}()
@@ -425,10 +440,10 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Find the request by tiqueteSolicitacao
-		var requestID string
+		var requestID, reqTipo string
 		err = db.QueryRow(`
-			SELECT id FROM rfb_requests WHERE tiquete = $1 AND status = 'requested'
-		`, tiqueteSolicitacao).Scan(&requestID)
+			SELECT id, COALESCE(tipo, 'debito') FROM rfb_requests WHERE tiquete = $1 AND status = 'requested'
+		`, tiqueteSolicitacao).Scan(&requestID, &reqTipo)
 		if err != nil {
 			log.Printf("[RFB Webhook] Request not found for tiqueteSolicitacao %s: %v", tiqueteSolicitacao, err)
 			w.WriteHeader(http.StatusOK)
@@ -448,10 +463,17 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 
 		log.Printf("[RFB Webhook] Request %s updated — tiqueteDownload saved, triggering download", requestID)
 
-		// Trigger async download — ProcessarDownloadRFB extrai débitos e créditos do mesmo arquivo
+		// Dispatch to the correct processor based on tipo
 		reqID := requestID
+		reqTipoCopy := reqTipo
 		go func() {
 			rfbClient := services.NewRFBClient()
+			if reqTipoCopy == "credito" {
+				if err := services.ProcessarDownloadCreditosRFB(db, rfbClient, reqID); err != nil {
+					log.Printf("[RFB Webhook] Error processing credits for request %s: %v", reqID, err)
+				}
+				return
+			}
 			if err := services.ProcessarDownloadRFB(db, rfbClient, reqID); err != nil {
 				log.Printf("[RFB Webhook] Error processing download for request %s: %v", reqID, err)
 				return

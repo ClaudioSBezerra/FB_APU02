@@ -117,6 +117,16 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 
 	log.Printf("[RFB Scheduler] Solicitação criada: requestID=%s tiquete=%s companyID=%s",
 		requestID, tiquete, companyID)
+
+	// Solicitar créditos CBS em paralelo — falha não bloqueia o retorno de débitos
+	go func() {
+		if credErr := SolicitarCreditoParaEmpresa(db, companyID); credErr != nil {
+			log.Printf("[RFB Scheduler] AVISO: falha ao solicitar créditos CBS para company_id=%s: %v", companyID, credErr)
+		} else {
+			log.Printf("[RFB Scheduler] Créditos CBS solicitados com sucesso para company_id=%s", companyID)
+		}
+	}()
+
 	return nil
 }
 
