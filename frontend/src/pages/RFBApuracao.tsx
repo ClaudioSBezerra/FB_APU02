@@ -299,6 +299,12 @@ export default function RFBApuracao() {
                             <Download className="mr-1 h-3 w-3" /> Download Manual
                           </Button>
                         )}
+                        {req.status === 'completed' && (
+                          <Button size="sm" variant="ghost" className="text-purple-600 hover:bg-purple-50 text-xs"
+                            onClick={() => handleReprocess(req.id)}>
+                            <RotateCcw className="mr-1 h-3 w-3" /> Reprocessar
+                          </Button>
+                        )}
                         {req.status === 'error' && (
                           <>
                             <Badge variant="destructive" className="text-xs">{req.error_code}</Badge>
