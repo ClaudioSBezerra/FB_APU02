@@ -166,7 +166,7 @@ func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
 			defer rows.Close()
 			for rows.Next() {
 				var n credPerdNota
-				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor, &n.CFOP, &n.TipoCFOP) == nil {
+				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor) == nil {
 					notas = append(notas, n)
 				}
 			}
@@ -202,7 +202,7 @@ func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
 			defer rows.Close()
 			for rows.Next() {
 				var n credPerdNota
-				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor) == nil {
+				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor, &n.CFOP, &n.TipoCFOP) == nil {
 					notas = append(notas, n)
 				}
 			}
