@@ -19,7 +19,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { AlertTriangle, RefreshCw, ShieldAlert, TrendingDown, Info, Loader2 } from 'lucide-react';
+import { AlertTriangle, RefreshCw, ShieldAlert, TrendingDown, Info, Loader2, Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -145,6 +146,15 @@ export default function ApuracaoCredPerdidos() {
   const [drill, setDrill] = useState<DrillDownState>({
     open: false, titulo: '', forn_cnpj: '', tipo: 'nfe', notas: [], loading: false,
   });
+  const [filterNFe, setFilterNFe] = useState('');
+  const [filterSimples, setFilterSimples] = useState('');
+  const [filterCTe, setFilterCTe] = useState('');
+
+  function matchSearch(q: string, nome: string, cnpj: string) {
+    if (!q) return true;
+    const n = q.toLowerCase();
+    return nome.toLowerCase().includes(n) || cnpj.replace(/\D/g, '').includes(q.replace(/\D/g, ''));
+  }
 
   const authHeaders = {
     Authorization: `Bearer ${token}`,
@@ -337,6 +347,17 @@ export default function ApuracaoCredPerdidos() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="px-3 pt-2 pb-1">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <Input
+                  value={filterNFe}
+                  onChange={e => setFilterNFe(e.target.value)}
+                  placeholder="Filtrar por fornecedor ou CNPJ..."
+                  className="pl-7 h-7 text-xs"
+                />
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -351,17 +372,17 @@ export default function ApuracaoCredPerdidos() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(nfe?.por_fornecedor ?? []).map((f, i) => (
-                    <TableRow key={i} className="h-8">
+                  {(nfe?.por_fornecedor ?? []).filter(f => matchSearch(filterNFe, f.forn_nome, f.forn_cnpj)).map((f, i) => (
+                    <TableRow
+                      key={i}
+                      className="h-8 cursor-pointer hover:bg-orange-50/60 dark:hover:bg-orange-950/10"
+                      onClick={() => openDrill(f.forn_nome || fmtCNPJ(f.forn_cnpj), f.forn_cnpj, 'nfe')}
+                      title="Ver NF-es"
+                    >
                       <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-center">
-                        <Badge
-                          variant="secondary"
-                          className="text-[10px] px-1.5 py-0 cursor-pointer hover:bg-orange-100 hover:text-orange-700 transition-colors"
-                          onClick={() => openDrill(f.forn_nome || fmtCNPJ(f.forn_cnpj), f.forn_cnpj, 'nfe')}
-                          title="Ver notas"
-                        >
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                           {f.qtd_notas}
                         </Badge>
                       </TableCell>
@@ -410,6 +431,17 @@ export default function ApuracaoCredPerdidos() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="px-3 pt-2 pb-1">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <Input
+                  value={filterSimples}
+                  onChange={e => setFilterSimples(e.target.value)}
+                  placeholder="Filtrar por fornecedor ou CNPJ..."
+                  className="pl-7 h-7 text-xs"
+                />
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -423,8 +455,13 @@ export default function ApuracaoCredPerdidos() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(simples?.por_fornecedor ?? []).map((f, i) => (
-                    <TableRow key={i} className="h-8">
+                  {(simples?.por_fornecedor ?? []).filter(f => matchSearch(filterSimples, f.forn_nome, f.forn_cnpj)).map((f, i) => (
+                    <TableRow
+                      key={i}
+                      className="h-8 cursor-pointer hover:bg-amber-50/60 dark:hover:bg-amber-950/10"
+                      onClick={() => openDrill(f.forn_nome || fmtCNPJ(f.forn_cnpj), f.forn_cnpj, 'nfe')}
+                      title="Ver NF-es"
+                    >
                       <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-right">{fmtNum(f.valor_total)}</TableCell>
@@ -478,6 +515,17 @@ export default function ApuracaoCredPerdidos() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
+            <div className="px-3 pt-2 pb-1">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <Input
+                  value={filterCTe}
+                  onChange={e => setFilterCTe(e.target.value)}
+                  placeholder="Filtrar por transportadora ou CNPJ..."
+                  className="pl-7 h-7 text-xs"
+                />
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -492,17 +540,17 @@ export default function ApuracaoCredPerdidos() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(cte?.por_transportadora ?? []).map((t, i) => (
-                    <TableRow key={i} className="h-8">
+                  {(cte?.por_transportadora ?? []).filter(t => matchSearch(filterCTe, t.emit_nome, t.emit_cnpj)).map((t, i) => (
+                    <TableRow
+                      key={i}
+                      className="h-8 cursor-pointer hover:bg-violet-50/60 dark:hover:bg-violet-950/10"
+                      onClick={() => openDrill(t.emit_nome || fmtCNPJ(t.emit_cnpj), t.emit_cnpj, 'cte')}
+                      title="Ver CT-es"
+                    >
                       <TableCell className="py-1 px-3 text-[11px] font-medium">{t.emit_nome || fmtCNPJ(t.emit_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(t.emit_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-center">
-                        <Badge
-                          variant="secondary"
-                          className="text-[10px] px-1.5 py-0 cursor-pointer hover:bg-violet-100 hover:text-violet-700 transition-colors"
-                          onClick={() => openDrill(t.emit_nome || fmtCNPJ(t.emit_cnpj), t.emit_cnpj, 'cte')}
-                          title="Ver CT-es"
-                        >
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                           {t.qtd_ctes}
                         </Badge>
                       </TableCell>
