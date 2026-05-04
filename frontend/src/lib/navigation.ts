@@ -59,7 +59,7 @@ export const modules: Record<string, ModuleConfig> = {
   rfb: {
     label: 'Receita Federal',
     tabs: [
-      { label: 'Gestão IBS/CBS',      path: '/rfb/gestao-creditos' },
+      { label: 'Gestão CBS RFB',       path: '/rfb/gestao-creditos' },
       { label: 'Importar Movimento',  path: '/rfb/apuracao' },
       { label: 'Débitos mês',         path: '/rfb/debitos' },
       { label: 'Créditos CBS',        path: '/rfb/creditos-cbs' },
