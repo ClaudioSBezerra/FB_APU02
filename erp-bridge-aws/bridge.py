@@ -233,7 +233,17 @@ SELECT
     SUM(CASE WHEN ni.TAXTYP IN ('IB1S','IB2S','IB3S') THEN ni.TAXVAL ELSE 0 END)   AS v_ibs_uf,
     SUM(CASE WHEN ni.TAXTYP IN ('IB1M','IB2M','IB3M') THEN ni.TAXVAL ELSE 0 END)   AS v_ibs_mun,
     SUM(CASE WHEN ni.TAXTYP IN ('IB1S','IB2S','IB3S','IB1M','IB2M','IB3M') THEN ni.TAXVAL ELSE 0 END) AS v_ibs,
-    SUM(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.TAXVAL ELSE 0 END)    AS v_cbs
+    SUM(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.TAXVAL ELSE 0 END)    AS v_cbs,
+    (
+      SELECT cfop4 FROM (
+        SELECT SUBSTR(it2.cfop, 1, 4) AS cfop4, COUNT(*) AS cnt
+        FROM s4i_nfe_it it2
+        WHERE it2.NFEID = nn.NFEID
+          AND it2.cfop IS NOT NULL
+        GROUP BY SUBSTR(it2.cfop, 1, 4)
+        ORDER BY cnt DESC
+      ) WHERE ROWNUM = 1
+    )                                                                               AS cfop_dom
 FROM s4i_nfe nn
 LEFT JOIN s4i_nfe_impostos ni
   ON ni.NFEID = nn.NFEID
@@ -670,6 +680,7 @@ def processar_sap(
                 "v_ibs_mun":        f(r.get("v_ibs_mun")),
                 "v_ibs":            f(r.get("v_ibs")),
                 "v_cbs":            f(r.get("v_cbs")),
+                "cfop":             s(r.get("cfop_dom")),
             })
 
         # ── Sumário antes do envio ──────────────────────────────────────────
