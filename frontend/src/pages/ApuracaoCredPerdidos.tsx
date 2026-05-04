@@ -35,6 +35,8 @@ interface FornNFe {
   ibs_estimado: number;
   cbs_estimado: number;
   total_estimado: number;
+  cfop?: string;
+  tipo_cfop?: string;
 }
 
 interface FornSimples {
@@ -105,6 +107,8 @@ interface NotaDrillDown {
   serie: string;
   numero: string;
   valor: number;
+  cfop?: string;
+  tipo_cfop?: string;
 }
 
 interface DrillDownState {
@@ -364,6 +368,7 @@ export default function ApuracaoCredPerdidos() {
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="py-1.5 px-3 text-[11px]">Fornecedor</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px]">CNPJ</TableHead>
+                    <TableHead className="py-1.5 px-3 text-[11px] text-center">CFOP</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px] text-center">Notas</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px] text-right">Valor Total (R$)</TableHead>
                     <TableHead className="py-1.5 px-3 text-[11px] text-right">IBS Est. (R$)</TableHead>
@@ -381,6 +386,14 @@ export default function ApuracaoCredPerdidos() {
                     >
                       <TableCell className="py-1 px-3 text-[11px] font-medium">{f.forn_nome || fmtCNPJ(f.forn_cnpj)}</TableCell>
                       <TableCell className="py-1 px-3 text-[10px] font-mono text-muted-foreground">{fmtCNPJ(f.forn_cnpj)}</TableCell>
+                      <TableCell className="py-1 px-3 text-[11px] text-center">
+                        {f.cfop ? (
+                          <span className="font-mono text-[10px] font-semibold">
+                            {f.cfop}
+                            <span className="ml-1 text-muted-foreground font-normal">({f.tipo_cfop})</span>
+                          </span>
+                        ) : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
                       <TableCell className="py-1 px-3 text-[11px] text-center">
                         <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                           {f.qtd_notas}
@@ -617,6 +630,9 @@ export default function ApuracaoCredPerdidos() {
                         Nº {drill.tipo === 'cte' ? 'CT-e' : 'NF'}
                       </TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data Emissão</TableHead>
+                      {drill.tipo === 'nfe' && (
+                        <TableHead className="py-1.5 px-2 text-[11px] text-center whitespace-nowrap">CFOP</TableHead>
+                      )}
                       <TableHead className="py-1.5 px-2 text-[11px]">Chave Eletrônica</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">
                         {drill.tipo === 'cte' ? 'vPrest (R$)' : 'Valor NF (R$)'}
@@ -632,6 +648,18 @@ export default function ApuracaoCredPerdidos() {
                         <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{n.serie || '—'}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-center font-mono">{n.numero || '—'}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{n.data_emissao}</TableCell>
+                        {drill.tipo === 'nfe' && (
+                          <TableCell className="py-0.5 px-2 text-[11px] text-center whitespace-nowrap">
+                            {n.cfop ? (
+                              <span className="font-mono text-[10px] font-semibold">
+                                {n.cfop}
+                                {n.tipo_cfop && (
+                                  <span className="ml-1 text-muted-foreground font-normal">({n.tipo_cfop})</span>
+                                )}
+                              </span>
+                            ) : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                        )}
                         <TableCell className="py-0.5 px-2 text-[10px] font-mono text-muted-foreground">
                           <span
                             className="cursor-pointer hover:text-foreground transition-colors"

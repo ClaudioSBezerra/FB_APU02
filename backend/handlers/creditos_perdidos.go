@@ -20,13 +20,15 @@ type credPerdAliquota struct {
 }
 
 type credPerdFornecedor struct {
-	FornCNPJ   string  `json:"forn_cnpj"`
-	FornNome   string  `json:"forn_nome"`
-	QtdNotas   int     `json:"qtd_notas"`
-	ValorTotal float64 `json:"valor_total"`
-	IBSEstimado float64 `json:"ibs_estimado"`
-	CBSEstimado float64 `json:"cbs_estimado"`
+	FornCNPJ      string  `json:"forn_cnpj"`
+	FornNome      string  `json:"forn_nome"`
+	QtdNotas      int     `json:"qtd_notas"`
+	ValorTotal    float64 `json:"valor_total"`
+	IBSEstimado   float64 `json:"ibs_estimado"`
+	CBSEstimado   float64 `json:"cbs_estimado"`
 	TotalEstimado float64 `json:"total_estimado"`
+	CFOP          string  `json:"cfop"`
+	TipoCFOP      string  `json:"tipo_cfop"`
 }
 
 type credPerdSimplesForn struct {
@@ -101,6 +103,8 @@ type credPerdNota struct {
 	Serie       string  `json:"serie"`
 	Numero      string  `json:"numero"`
 	Valor       float64 `json:"valor"`
+	CFOP        string  `json:"cfop"`
+	TipoCFOP    string  `json:"tipo_cfop"`
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +166,7 @@ func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
 			defer rows.Close()
 			for rows.Next() {
 				var n credPerdNota
-				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor) == nil {
+				if rows.Scan(&n.Filial, &n.FilialCNPJ, &n.Chave, &n.DataEmissao, &n.Serie, &n.Numero, &n.Valor, &n.CFOP, &n.TipoCFOP) == nil {
 					notas = append(notas, n)
 				}
 			}
@@ -175,7 +179,9 @@ func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
 					TO_CHAR(ne.data_emissao, 'DD/MM/YYYY')     AS data_emissao,
 					COALESCE(ne.serie, '')                     AS serie,
 					COALESCE(ne.numero_nfe, '')                AS numero,
-					ne.v_nf
+					ne.v_nf,
+					COALESCE(ne.cfop, '')                      AS cfop,
+					COALESCE(ne.tipo_cfop, '')                 AS tipo_cfop
 				FROM nfe_entradas ne
 				LEFT JOIN filial_apelidos fa
 					ON fa.company_id = $1 AND fa.cnpj = ne.dest_cnpj_cpf
@@ -308,7 +314,9 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 				forn_cnpj,
 				COALESCE((SELECT nome FROM parceiros WHERE company_id = $1 AND cnpj = forn_cnpj LIMIT 1), '') AS forn_nome,
 				COUNT(*)          AS qtd_notas,
-				SUM(v_nf)         AS valor_total
+				SUM(v_nf)         AS valor_total,
+				COALESCE((array_agg(cfop      ORDER BY v_nf DESC NULLS LAST))[1], '') AS cfop,
+				COALESCE((array_agg(tipo_cfop ORDER BY v_nf DESC NULLS LAST))[1], '') AS tipo_cfop
 			FROM nfe_entradas
 			WHERE company_id = $1
 			  AND ($2 = '' OR mes_ano = $2)
@@ -334,7 +342,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 
 		for rows.Next() {
 			var f credPerdFornecedor
-			if err := rows.Scan(&f.FornCNPJ, &f.FornNome, &f.QtdNotas, &f.ValorTotal); err != nil {
+			if err := rows.Scan(&f.FornCNPJ, &f.FornNome, &f.QtdNotas, &f.ValorTotal, &f.CFOP, &f.TipoCFOP); err != nil {
 				continue
 			}
 			f.IBSEstimado = f.ValorTotal * (ibsRate / 100.0)
