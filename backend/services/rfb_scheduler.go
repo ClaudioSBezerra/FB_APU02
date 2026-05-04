@@ -172,6 +172,11 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 	tiquete, err := rfbClient.SolicitarCredito(token, cnpjBase)
 	if err != nil {
 		errMsg := err.Error()
+		// "no Route matched" = gateway 404: endpoint not yet live — skip DB record
+		if strings.Contains(errMsg, "no Route matched") || strings.Contains(errMsg, "404") {
+			log.Printf("[RFB Creditos] Endpoint /creditos-cbs/v1/ indisponível no gateway (HTTP 404) — aguardando liberação pela RFB")
+			return fmt.Errorf("endpoint não disponível: %w", err)
+		}
 		errorCode := "REQUEST_ERROR"
 		if strings.HasPrefix(errMsg, "RATE_LIMIT_429|") {
 			errorCode = "RATE_LIMIT"

@@ -513,7 +513,7 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 				res.total_corrente, res.total_ajuste, res.total_extemporaneo
 			FROM rfb_requests r
 			LEFT JOIN rfb_resumo res ON res.request_id = r.id
-			WHERE r.company_id = $1
+			WHERE r.company_id = $1 AND COALESCE(r.tipo, 'debito') = 'debito'
 			ORDER BY r.created_at DESC
 			LIMIT 20
 		`, companyID)
