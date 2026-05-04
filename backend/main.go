@@ -438,6 +438,10 @@ func main() {
 	http.HandleFunc("/api/rfb/apuracao/status", withAuth(handlers.StatusApuracaoHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/", withAuth(handlers.DetalheApuracaoHandler, ""))
 
+	// RFB Débitos — consulta acumulada por período/ano (não depende de request_id)
+	http.HandleFunc("/api/rfb/debitos/periodos", withAuth(handlers.PeriodosDebitosHandler, ""))
+	http.HandleFunc("/api/rfb/debitos", withAuth(handlers.ListarDebitosHandler, ""))
+
 	// RFB Créditos CBS — extraídos da mesma importação de débitos (sem solicitação separada)
 	http.HandleFunc("/api/rfb/creditos/status", withAuth(handlers.StatusCreditosHandler, ""))
 	http.HandleFunc("/api/rfb/creditos/lista", withAuth(handlers.ListarCreditosHandler, ""))

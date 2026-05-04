@@ -13,10 +13,7 @@ import { toast } from 'sonner';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
 
-interface RFBResumo {
-  id: string;
-  request_id: string;
-  data_apuracao: string;
+interface ResumoAgregado {
   total_debitos: number;
   valor_cbs_total: number;
   valor_cbs_extinto: number;
@@ -24,14 +21,6 @@ interface RFBResumo {
   total_corrente: number;
   total_ajuste: number;
   total_extemporaneo: number;
-}
-
-interface RFBRequest {
-  id: string;
-  cnpj_base: string;
-  status: string;
-  created_at: string;
-  resumo?: RFBResumo;
 }
 
 interface RFBDebito {
@@ -54,15 +43,56 @@ interface RFBDebito {
 
 interface DebitPage {
   debitos: RFBDebito[];
-  resumo: RFBResumo | null;
+  resumo: ResumoAgregado;
   pagination: { page: number; page_size: number; total: number; total_pages: number };
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function normalizePeriodo(raw: string): string {
+  if (/^\d{6}$/.test(raw)) return raw;                     // 202604 → ok
+  const m = raw.match(/^(\d{4})-(\d{2})/);
+  if (m) return m[1] + m[2];                               // 2026-04 → 202604
+  return raw;
+}
+
+function formatPeriodoLabel(p: string): string {
+  // p = YYYYMM
+  if (p.length === 6) return `${p.slice(4, 6)}/${p.slice(0, 4)}`;
+  return p;
+}
+
+function formatCNPJBase(cnpj: string): string {
+  if (!cnpj) return '—';
+  const d = cnpj.replace(/\D/g, '');
+  if (d.length === 8)  return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5)}`;
+  if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
+  if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
+  return cnpj;
+}
+
+function formatDate(s?: string): string {
+  if (!s) return '—';
+  try { return new Date(s).toLocaleDateString('pt-BR'); } catch { return s; }
+}
+
+function formatCurrency(v: number): string {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
+}
+
+function formatNum(v: number): string {
+  return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+}
+
+function formatNumber(n: number): string {
+  return new Intl.NumberFormat('pt-BR').format(n);
 }
 
 // ── Paginação ─────────────────────────────────────────────────────────────────
 
-function PaginationBar({
-  page, pageCount, onChange,
-}: { page: number; pageCount: number; onChange: (p: number) => void }) {
+function PaginationBar({ page, pageCount, onChange }: {
+  page: number; pageCount: number; onChange: (p: number) => void;
+}) {
   const [inputVal, setInputVal] = useState(String(page));
   useEffect(() => { setInputVal(String(page)); }, [page]);
   if (pageCount <= 1) return null;
@@ -108,63 +138,23 @@ interface Filters {
 }
 
 const EMPTY_FILTERS: Filters = { modelo: '', dataInicio: '', dataFim: '', chave: '', cliente: '' };
-
 const MODELOS_DFE = ['55', '65', '57', '67', '58', '63'];
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatCNPJBase(cnpj: string): string {
-  if (!cnpj) return '—';
-  const d = cnpj.replace(/\D/g, '');
-  if (d.length === 8)  return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5)}`;
-  if (d.length === 14) return `${d.slice(0,2)}.${d.slice(2,5)}.${d.slice(5,8)}/${d.slice(8,12)}-${d.slice(12)}`;
-  if (d.length === 11) return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9)}`;
-  return cnpj;
-}
-
-function formatPeriodo(p: string): string {
-  if (!p) return '—';
-  // YYYYMM → MM/YYYY
-  if (/^\d{6}$/.test(p)) return `${p.slice(4, 6)}/${p.slice(0, 4)}`;
-  // YYYY-MM ou YYYY-MM-DD → MM/YYYY
-  const m = p.match(/^(\d{4})-(\d{2})/);
-  if (m) return `${m[2]}/${m[1]}`;
-  return p;
-}
-
-function formatDate(s?: string): string {
-  if (!s) return '—';
-  try { return new Date(s).toLocaleDateString('pt-BR'); } catch { return s; }
-}
-
-function formatCurrency(v: number): string {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
-}
-
-function formatNum(v: number): string {
-  return new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
-}
-
-function formatNumber(n: number): string {
-  return new Intl.NumberFormat('pt-BR').format(n);
-}
-
-// ── DANFE via backend (/api/danfe/{chave}) ────────────────────────────────────
+// ── DANFE via backend ─────────────────────────────────────────────────────────
 
 async function openDanfe(chave: string) {
   const res = await fetch(`/api/danfe/${chave}`, {
     headers: {
       'Authorization': `Bearer ${localStorage.getItem('token')}`,
-      'X-Company-ID':  localStorage.getItem('companyId') || '',
+      'X-Company-ID': localStorage.getItem('companyId') || '',
     },
   });
   if (res.status === 404) { toast.error('XML desta NF-e não encontrado. Importe o XML de saída primeiro.'); return; }
   if (!res.ok) { toast.error('Erro ao gerar DANFE. Tente novamente.'); return; }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
-  const win = window.open(url, '_blank');
+  window.open(url, '_blank');
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  if (!win) toast.warning('Permita popups para visualizar o DANFE.');
 }
 
 // ── Botão copiar chave ────────────────────────────────────────────────────────
@@ -180,7 +170,7 @@ function CopyChaveButton({ chave }: { chave: string }) {
     });
   }
   return (
-    <button onClick={handleCopy} title="Copiar chave de acesso"
+    <button onClick={handleCopy} title="Copiar chave"
       className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors">
       {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
     </button>
@@ -190,14 +180,14 @@ function CopyChaveButton({ chave }: { chave: string }) {
 // ── Componente principal ─────────────────────────────────────────────────────
 
 export default function RFBDebitos() {
-  const [requests,    setRequests]    = useState<RFBRequest[]>([]);
+  const [periodos,    setPeriodos]    = useState<string[]>([]);
   const [loadingList, setLoadingList] = useState(true);
-  const [selectedId,  setSelectedId]  = useState<string | null>(null);
+  // selectedPeriodo: "ano:YYYY" ou "YYYYMM"
+  const [selectedPeriodo, setSelectedPeriodo] = useState<string>('');
   const [page,        setPage]        = useState(1);
   const [filters,     setFilters]     = useState<Filters>(EMPTY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
 
-  // Debounced text filters
   const [chaveDebounced,   setChaveDebounced]   = useState('');
   const [clienteDebounced, setClienteDebounced] = useState('');
 
@@ -219,73 +209,63 @@ export default function RFBDebitos() {
     'X-Company-ID':  localStorage.getItem('companyId') || '',
   }), []);
 
-  // Reset page when filters or filial change
-  useEffect(() => { setPage(1); }, [filters, niEmitente]);
+  useEffect(() => { setPage(1); }, [filters, niEmitente, selectedPeriodo]);
 
-  // ── Carrega lista de requests concluídos ──────────────────────────────────
-  const fetchRequests = useCallback(async () => {
-    try {
-      const res = await fetch('/api/rfb/apuracao/status', { headers: getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        // Ordena mais recente primeiro e de-duplica por período — mantém 1 entrada por MM/AAAA
-        const completed = (data.requests || [] as RFBRequest[])
-          .filter((r: RFBRequest) => r.status === 'completed')
-          .sort((a: RFBRequest, b: RFBRequest) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-        // Normaliza qualquer formato de período para YYYY-MM para de-duplicação
-        const toPeriodKey = (r: RFBRequest): string => {
-          const raw = r.resumo?.data_apuracao;
-          if (raw) {
-            if (/^\d{6}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}`; // 202603 → 2026-03
-            const m = raw.match(/^(\d{4})-(\d{2})/);
-            if (m) return `${m[1]}-${m[2]}`; // 2026-03-xx → 2026-03
+  // ── Carrega períodos disponíveis ──────────────────────────────────────────
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch('/api/rfb/debitos/periodos', { headers: getHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          const raw: string[] = (data.periodos || []).map(normalizePeriodo).filter((p: string) => p.length >= 6);
+          setPeriodos(raw);
+          // Default: "Todas do Ano" do ano mais recente disponível
+          if (raw.length > 0) {
+            setSelectedPeriodo(`ano:${raw[0].slice(0, 4)}`);
           }
-          return r.created_at.slice(0, 7); // fallback: YYYY-MM do created_at
-        };
-
-        const seen = new Set<string>();
-        const deduped = completed.filter((r: RFBRequest) => {
-          const key = toPeriodKey(r);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-
-        setRequests(deduped);
-        return deduped as RFBRequest[];
-      }
-    } catch { /* silent */ } finally { setLoadingList(false); }
-    return [];
+        }
+      } catch { /* silent */ } finally { setLoadingList(false); }
+    }
+    load();
   }, [getHeaders]);
 
-  useEffect(() => {
-    fetchRequests().then(list => {
-      if (list.length > 0) setSelectedId(list[0].id);
-    });
-  }, [fetchRequests]);
+  // Anos distintos a partir dos períodos disponíveis
+  const anos = [...new Set(periodos.map(p => p.slice(0, 4)))];
 
-  // ── React Query para débitos ──────────────────────────────────────────────
+  // ── Query de débitos ──────────────────────────────────────────────────────
   const { data: debitData, isLoading: detailLoading } = useQuery<DebitPage>({
-    queryKey: ['rfb-debitos', selectedId, {
+    queryKey: ['rfb-debitos-v2', selectedPeriodo, {
       page, modelo: filters.modelo, dataInicio: filters.dataInicio,
       dataFim: filters.dataFim, chave: chaveDebounced,
       cliente: clienteDebounced, niEmitente,
     }],
     queryFn: async () => {
-      if (!selectedId) return { debitos: [], resumo: null, pagination: { page: 1, page_size: 100, total: 0, total_pages: 1 } };
+      const empty: DebitPage = {
+        debitos: [],
+        resumo: { total_debitos: 0, valor_cbs_total: 0, valor_cbs_extinto: 0, valor_cbs_nao_extinto: 0, total_corrente: 0, total_ajuste: 0, total_extemporaneo: 0 },
+        pagination: { page: 1, page_size: 100, total: 0, total_pages: 1 },
+      };
+      if (!selectedPeriodo) return empty;
+
       const params = new URLSearchParams({ page: String(page), page_size: '100' });
-      if (filters.modelo)     params.set('modelo',       filters.modelo);
-      if (filters.dataInicio) params.set('data_de',      filters.dataInicio);
-      if (filters.dataFim)    params.set('data_ate',     filters.dataFim);
-      if (chaveDebounced)     params.set('chave',        chaveDebounced);
+      if (selectedPeriodo.startsWith('ano:')) {
+        params.set('ano', selectedPeriodo.slice(4));
+      } else {
+        params.set('periodo', selectedPeriodo);
+      }
+      if (filters.modelo)     params.set('modelo',        filters.modelo);
+      if (filters.dataInicio) params.set('data_de',       filters.dataInicio);
+      if (filters.dataFim)    params.set('data_ate',      filters.dataFim);
+      if (chaveDebounced)     params.set('chave',         chaveDebounced);
       if (clienteDebounced)   params.set('ni_adquirente', clienteDebounced.replace(/\D/g, ''));
-      if (niEmitente)         params.set('ni_emitente',  niEmitente);
-      const res = await fetch(`/api/rfb/apuracao/${selectedId}?${params}`, { headers: getHeaders() });
+      if (niEmitente)         params.set('ni_emitente',   niEmitente);
+
+      const res = await fetch(`/api/rfb/debitos?${params}`, { headers: getHeaders() });
       if (!res.ok) throw new Error('Erro ao carregar débitos');
       return res.json();
     },
-    enabled: !!selectedId,
+    enabled: !!selectedPeriodo,
     placeholderData: keepPreviousData,
   });
 
@@ -295,26 +275,36 @@ export default function RFBDebitos() {
   const pageCount  = pagination.total_pages;
 
   const hasActiveFilters = Object.values(filters).some(v => v !== '');
-
-  function clearFilters() { setFilters(EMPTY_FILTERS); }
+  function clearFilters()  { setFilters(EMPTY_FILTERS); }
   function setFilter(key: keyof Filters, value: string) {
     setFilters(prev => ({ ...prev, [key]: value }));
   }
 
-  // ── Export Excel (busca todos os registros filtrados) ──────────────────────
+  // ── Label do período selecionado ──────────────────────────────────────────
+  function periodoLabel(value: string) {
+    if (value.startsWith('ano:')) return `Todas do Ano — ${value.slice(4)}`;
+    return formatPeriodoLabel(value);
+  }
+
+  // ── Export Excel ──────────────────────────────────────────────────────────
   async function exportExcel() {
-    if (!selectedId) return;
+    if (!selectedPeriodo) return;
     const params = new URLSearchParams({ page: '1', page_size: '500' });
-    if (filters.modelo)     params.set('modelo',       filters.modelo);
-    if (filters.dataInicio) params.set('data_de',      filters.dataInicio);
-    if (filters.dataFim)    params.set('data_ate',     filters.dataFim);
-    if (chaveDebounced)     params.set('chave',        chaveDebounced);
+    if (selectedPeriodo.startsWith('ano:')) {
+      params.set('ano', selectedPeriodo.slice(4));
+    } else {
+      params.set('periodo', selectedPeriodo);
+    }
+    if (filters.modelo)     params.set('modelo',        filters.modelo);
+    if (filters.dataInicio) params.set('data_de',       filters.dataInicio);
+    if (filters.dataFim)    params.set('data_ate',      filters.dataFim);
+    if (chaveDebounced)     params.set('chave',         chaveDebounced);
     if (clienteDebounced)   params.set('ni_adquirente', clienteDebounced.replace(/\D/g, ''));
-    if (niEmitente)         params.set('ni_emitente',  niEmitente);
+    if (niEmitente)         params.set('ni_emitente',   niEmitente);
 
     let allRows: RFBDebito[] = [];
     try {
-      const res = await fetch(`/api/rfb/apuracao/${selectedId}?${params}`, { headers: getHeaders() });
+      const res = await fetch(`/api/rfb/debitos?${params}`, { headers: getHeaders() });
       if (res.ok) {
         const data = await res.json();
         allRows = data.debitos || [];
@@ -327,8 +317,8 @@ export default function RFBDebitos() {
       return;
     }
 
-    const periodo = resumo ? formatPeriodo(resumo.data_apuracao) : 'export';
     const rows = allRows.map(d => ({
+      'Período':          d.data_apuracao,
       'Modelo':           d.modelo_dfe || '—',
       'Série':            d.serie || '—',
       'Nº NF':            d.numero_dfe || '—',
@@ -343,19 +333,20 @@ export default function RFBDebitos() {
     }));
     const ws = XLSX.utils.json_to_sheet(rows);
     ws['!cols'] = [
-      { wch: 8 }, { wch: 6 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
+      { wch: 8 }, { wch: 8 }, { wch: 6 }, { wch: 12 }, { wch: 20 }, { wch: 20 },
       { wch: 12 }, { wch: 46 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 20 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Débitos CBS');
-    XLSX.writeFile(wb, `debitos_cbs_${periodo.replace('/', '-')}.xlsx`);
+    const suffix = selectedPeriodo.startsWith('ano:')
+      ? selectedPeriodo.slice(4)
+      : formatPeriodoLabel(selectedPeriodo).replace('/', '-');
+    XLSX.writeFile(wb, `debitos_cbs_${suffix}.xlsx`);
     toast.success(`${formatNumber(allRows.length)} registros exportados`);
   }
 
-  const selectedRequest = requests.find(r => r.id === selectedId);
-
   // ── Loading inicial ──────────────────────────────────────────────────────
-  if (loadingList || (detailLoading && !resumo && debitos.length === 0)) {
+  if (loadingList) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
@@ -363,10 +354,10 @@ export default function RFBDebitos() {
     );
   }
 
-  if (requests.length === 0) {
+  if (periodos.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 text-muted-foreground text-sm gap-2">
-        <p className="font-medium">Nenhuma importação concluída.</p>
+        <p className="font-medium">Nenhum débito CBS importado.</p>
         <p className="text-xs">Acesse <strong>Importar Movimento</strong> para carregar os dados da RFB.</p>
       </div>
     );
@@ -376,35 +367,34 @@ export default function RFBDebitos() {
   return (
     <div className="space-y-3">
 
-      {/* ── Seletor de período + resumo compacto ── */}
+      {/* ── Seletor de competência + resumo ── */}
       <div className="flex flex-wrap items-start gap-3">
 
-        {/* Período */}
+        {/* Competência */}
         <div className="shrink-0">
-          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 block">Período</Label>
-          <Select value={selectedId ?? ''} onValueChange={id => { setSelectedId(id); setPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-44">
+          <Label className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 block">Competência</Label>
+          <Select value={selectedPeriodo} onValueChange={v => { setSelectedPeriodo(v); setPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-52">
               <SelectValue placeholder="Selecione..." />
             </SelectTrigger>
             <SelectContent>
-              {requests.map(r => {
-                const periodo = r.resumo?.data_apuracao
-                  ? formatPeriodo(r.resumo.data_apuracao)
-                  : formatPeriodo(r.created_at.slice(0, 7)); // YYYY-MM
-                return (
-                  <SelectItem key={r.id} value={r.id} className="text-xs">
-                    {periodo}{' — '}{formatCNPJBase(r.cnpj_base)}
-                  </SelectItem>
-                );
-              })}
+              {anos.map(ano => (
+                <SelectItem key={`ano:${ano}`} value={`ano:${ano}`} className="text-xs font-medium">
+                  Todas do Ano — {ano}
+                </SelectItem>
+              ))}
+              {periodos.map(p => (
+                <SelectItem key={p} value={p} className="text-xs pl-6">
+                  {formatPeriodoLabel(p)}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
 
-        {/* Cards resumo compactos */}
-        {resumo && (
+        {/* Cards resumo */}
+        {resumo && resumo.total_debitos > 0 && (
           <div className="flex flex-wrap gap-2 flex-1">
-            {/* Valores CBS */}
             {[
               { label: 'CBS Total',       value: formatCurrency(resumo.valor_cbs_total),       color: 'text-red-600' },
               { label: 'CBS Não Extinto', value: formatCurrency(resumo.valor_cbs_nao_extinto), color: 'text-orange-600' },
@@ -418,15 +408,13 @@ export default function RFBDebitos() {
               </Card>
             ))}
 
-            {/* Separador visual */}
             <div className="self-stretch w-px bg-border mx-1" />
 
-            {/* Contagens de documentos */}
             {[
-              { label: 'Total Docs',   value: resumo.total_debitos,       color: 'text-foreground' },
-              { label: 'Corrente',     value: resumo.total_corrente,      color: 'text-blue-600' },
-              { label: 'Ajuste',       value: resumo.total_ajuste,        color: 'text-purple-600' },
-              { label: 'Extemporâneo', value: resumo.total_extemporaneo,  color: 'text-amber-600' },
+              { label: 'Total Docs',   value: resumo.total_debitos,      color: 'text-foreground' },
+              { label: 'Corrente',     value: resumo.total_corrente,     color: 'text-blue-600' },
+              { label: 'Ajuste',       value: resumo.total_ajuste,       color: 'text-purple-600' },
+              { label: 'Extemporâneo', value: resumo.total_extemporaneo, color: 'text-amber-600' },
             ].map(c => (
               <Card key={c.label} className="shrink-0">
                 <CardContent className="px-3 py-1.5">
@@ -516,19 +504,20 @@ export default function RFBDebitos() {
           <span className="text-xs text-muted-foreground">
             {detailLoading
               ? 'Carregando...'
-              : <>{formatNumber(pagination.total)} registros{hasActiveFilters && <span className="text-primary font-medium"> filtrados</span>}</>
+              : <>{formatNumber(pagination.total)} registros
+                  {selectedPeriodo && <span className="text-muted-foreground/60 ml-1">· {periodoLabel(selectedPeriodo)}</span>}
+                  {hasActiveFilters && <span className="text-primary font-medium"> filtrados</span>}
+                </>
             }
           </span>
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm" variant="outline" className="h-7 text-xs gap-1.5"
-              onClick={exportExcel}
-              disabled={pagination.total === 0 || detailLoading}
-            >
-              <Download className="h-3.5 w-3.5" />
-              Excel ({formatNumber(Math.min(pagination.total, 500))})
-            </Button>
-          </div>
+          <Button
+            size="sm" variant="outline" className="h-7 text-xs gap-1.5"
+            onClick={exportExcel}
+            disabled={pagination.total === 0 || detailLoading}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Excel ({formatNumber(Math.min(pagination.total, 500))})
+          </Button>
         </div>
 
         <CardContent className="p-0">
@@ -541,6 +530,7 @@ export default function RFBDebitos() {
               <table className="min-w-full divide-y divide-gray-100 text-[11px]">
                 <thead className="bg-gray-50 sticky top-0">
                   <tr>
+                    <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Comp.</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Mod.</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Série</th>
                     <th className="px-2 py-2 text-left font-semibold text-[10px] uppercase tracking-wide text-muted-foreground">Nº NF</th>
@@ -557,6 +547,9 @@ export default function RFBDebitos() {
                 <tbody className="divide-y divide-gray-50">
                   {debitos.map(d => (
                     <tr key={d.id} className="hover:bg-gray-50/60">
+                      <td className="px-2 py-1 font-mono text-muted-foreground text-[10px]">
+                        {formatPeriodoLabel(normalizePeriodo(d.data_apuracao))}
+                      </td>
                       <td className="px-2 py-1 font-mono">{d.modelo_dfe || '—'}</td>
                       <td className="px-2 py-1 font-mono">{d.serie || '—'}</td>
                       <td className="px-2 py-1 font-mono">{d.numero_dfe || '—'}</td>
@@ -567,11 +560,8 @@ export default function RFBDebitos() {
                         <span className="select-all">{d.chave_dfe || '—'}</span>
                         {d.chave_dfe && <CopyChaveButton chave={d.chave_dfe} />}
                         {d.chave_dfe && (
-                          <button
-                            onClick={() => openDanfe(d.chave_dfe)}
-                            title="Ver DANFE"
-                            className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors"
-                          >
+                          <button onClick={() => openDanfe(d.chave_dfe)} title="Ver DANFE"
+                            className="ml-1 inline-flex items-center text-muted-foreground hover:text-primary transition-colors">
                             <FileText className="h-3 w-3" />
                           </button>
                         )}
@@ -587,18 +577,12 @@ export default function RFBDebitos() {
             </div>
           ) : (
             <div className="py-10 text-center text-muted-foreground text-xs">
-              {hasActiveFilters ? 'Nenhum resultado para os filtros aplicados.' : 'Nenhum débito CBS encontrado.'}
+              {hasActiveFilters ? 'Nenhum resultado para os filtros aplicados.' : 'Nenhum débito CBS encontrado para este período.'}
             </div>
           )}
         </CardContent>
         <PaginationBar page={page} pageCount={pageCount} onChange={setPage} />
       </Card>
-
-      {selectedRequest && (
-        <p className="text-[10px] text-muted-foreground text-right">
-          CNPJ Base: {formatCNPJBase(selectedRequest.cnpj_base)} · Importado em: {new Date(selectedRequest.created_at).toLocaleString('pt-BR')}
-        </p>
-      )}
     </div>
   );
 }
