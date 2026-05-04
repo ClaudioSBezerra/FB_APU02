@@ -1,4 +1,4 @@
-import { Calculator, Landmark, Settings, LogOut, KeyRound, Telescope, FileText } from 'lucide-react'
+import { Calculator, Landmark, Scale, Settings, LogOut, KeyRound, Telescope, FileText } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
@@ -33,6 +33,7 @@ import { toast } from 'sonner'
 const mainItems = [
   { id: 'notas',       icon: FileText,         label: 'Notas Importadas', path: '/apuracao/saida/notas' },
   { id: 'apuracao',    icon: Calculator,       label: 'Apuração IBS/CBS', path: '/apuracao/creditos-perdidos' },
+  { id: 'cgibs',       icon: Scale,            label: 'CGIBS — IBS',      path: '/cgibs/apuracao-ibs' },
   { id: 'rfb',         icon: Landmark,         label: 'Receita Federal',  path: '/rfb/gestao-creditos' },
   { id: 'malha',       icon: Telescope,        label: 'Malha Fina',       path: '/malha-fina/nfe-entradas' },
 ]
