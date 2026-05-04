@@ -36,6 +36,7 @@ type batchDoc struct {
 	DestCNPJ         string  `json:"dest_cnpj"`
 	Cancelado        string  `json:"cancelado"`         // "S" = cancelada, demais = normal
 	NomeParceiro     string  `json:"nome_parceiro"`     // forn.razsoc (DIRECT=1) ou clie.razsoc (DIRECT=2)
+	TipoCFOP         string  `json:"tipo_cfop"`         // C=Consumo,R=Revenda,A=Ativo,T=Transferência,O=Outros,S=Saída
 	VTotal           float64 `json:"v_total"`
 	VBcIbsCbs        float64 `json:"v_bc_ibs_cbs"`
 	VIbsUf           float64 `json:"v_ibs_uf"`
@@ -214,6 +215,10 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 	modInt, _ := strconv.Atoi(modelo)
 	cancelado := doc.Cancelado
 	if cancelado != "S" { cancelado = "N" }
+	tipoCFOP := strings.TrimSpace(doc.TipoCFOP)
+	if tipoCFOP == "" {
+		tipoCFOP = "C" // default Consumo quando bridge não envia o campo
+	}
 	res, err := db.Exec(`
 		INSERT INTO nfe_entradas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
@@ -221,23 +226,24 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 			forn_cnpj, dest_cnpj_cpf,
 			v_nf,
 			v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
-			cancelado
+			cancelado, tipo_cfop
 		) VALUES (
 			$1,$2,$3,$4,$5,
 			$6,$7,$8,
 			$9,$10,
 			$11,
 			$12,$13,$14,$15,$16,
-			$17
+			$17,$18
 		)
 		ON CONFLICT ON CONSTRAINT uq_nfe_entradas_company_chave
-		DO UPDATE SET cancelado = EXCLUDED.cancelado`,
+		DO UPDATE SET cancelado = EXCLUDED.cancelado,
+		              tipo_cfop = EXCLUDED.tipo_cfop`,
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
 		doc.EmitCNPJ, doc.DestCNPJ,
 		doc.VTotal,
 		doc.VBcIbsCbs, doc.VIbsUf, doc.VIbsMun, doc.VIbs, doc.VCbs,
-		cancelado,
+		cancelado, tipoCFOP,
 	)
 	if err != nil {
 		return false, err

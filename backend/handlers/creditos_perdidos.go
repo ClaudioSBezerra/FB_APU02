@@ -182,6 +182,7 @@ func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
 				WHERE ne.company_id = $1
 				  AND ($2 = '' OR ne.mes_ano = $2)
 				  AND ne.forn_cnpj = $3
+				  AND ne.tipo_cfop IN ('C','R','S','A')
 				  AND ne.v_ibs = 0
 				  AND ne.v_cbs = 0
 				ORDER BY ne.data_emissao DESC, ne.numero_nfe DESC
@@ -289,18 +290,19 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 		// ── 1. NF-e sem IBS/CBS ──────────────────────────────────────────────
 		// Exclui transferências internas: mesma raiz CNPJ (8 primeiros dígitos)
 
-		// Total de notas de terceiros no período
+		// Total de notas de terceiros no período (apenas CFOP tipos C, R, S, A)
 		var totalUniverse int
 		db.QueryRow(`
 			SELECT COUNT(*)
 			FROM nfe_entradas
 			WHERE company_id = $1
 			  AND ($2 = '' OR mes_ano = $2)
+			  AND tipo_cfop IN ('C','R','S','A')
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
 		`, companyID, mesAno).Scan(&totalUniverse)
 
-		// Notas sem IBS/CBS de terceiros, agrupadas por fornecedor
+		// Notas sem IBS/CBS de terceiros, agrupadas por fornecedor (apenas tipos C, R, S, A)
 		rows, err := db.Query(`
 			SELECT
 				forn_cnpj,
@@ -312,6 +314,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			  AND ($2 = '' OR mes_ano = $2)
 			  AND v_ibs = 0
 			  AND v_cbs = 0
+			  AND tipo_cfop IN ('C','R','S','A')
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
 			GROUP BY forn_cnpj
