@@ -449,6 +449,43 @@ func main() {
 	// RFB Webhook (PUBLIC - no JWT auth)
 	http.HandleFunc("/api/rfb/webhook", withDB(handlers.RFBWebhookHandler))
 
+	// CGIBS Credenciais
+	http.HandleFunc("/api/cgibs/credentials", func(w http.ResponseWriter, r *http.Request) {
+		database := getDB()
+		if database == nil {
+			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			handlers.AuthMiddleware(handlers.GetCGIBSCredentialHandler(database), "")(w, r)
+		case http.MethodPost:
+			handlers.AuthMiddleware(handlers.SaveCGIBSCredentialHandler(database), "")(w, r)
+		case http.MethodDelete:
+			handlers.AuthMiddleware(handlers.DeleteCGIBSCredentialHandler(database), "")(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	http.HandleFunc("/api/cgibs/credentials/agendamento", func(w http.ResponseWriter, r *http.Request) {
+		database := getDB()
+		if database == nil {
+			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
+			return
+		}
+		handlers.AuthMiddleware(handlers.UpdateCGIBSScheduleHandler(database), "")(w, r)
+	})
+
+	// CGIBS Apuração
+	http.HandleFunc("/api/cgibs/apuracao/solicitar",    withAuth(handlers.SolicitarCGIBSApuracaoHandler, ""))
+	http.HandleFunc("/api/cgibs/apuracao/clear-errors", withAuth(handlers.ClearErrorsCGIBSHandler, ""))
+	http.HandleFunc("/api/cgibs/apuracao/status",       withAuth(handlers.StatusCGIBSApuracaoHandler, ""))
+	http.HandleFunc("/api/cgibs/apuracao/",             withAuth(handlers.DetalheCGIBSHandler, ""))
+
+	// CGIBS Débitos IBS (fonte interna — nfe_saidas)
+	http.HandleFunc("/api/cgibs/debitos/periodos", withAuth(handlers.PeriodosDebitosIBSHandler, ""))
+	http.HandleFunc("/api/cgibs/debitos",          withAuth(handlers.ListarDebitosIBSHandler, ""))
+
 	// NF-e Saídas
 	http.HandleFunc("/api/nfe-saidas/filiais",      withAuth(handlers.NfeSaidasFiliaisHandler, ""))
 	http.HandleFunc("/api/nfe-saidas/competencias", withAuth(handlers.NfeSaidasCompetenciasHandler, ""))

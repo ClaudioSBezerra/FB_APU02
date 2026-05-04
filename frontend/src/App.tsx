@@ -28,6 +28,9 @@ import MalhaFinaCTe from './pages/MalhaFinaCTe'
 import AdminUsers from './pages/AdminUsers'
 import UserActivity from './pages/UserActivity'
 import LimparDadosApuracao from './pages/LimparDadosApuracao'
+import CGIBSApuracao from './pages/CGIBSApuracao'
+import CGIBSCredentials from './pages/CGIBSCredentials'
+import CGIBSDebitos from './pages/CGIBSDebitos'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
@@ -226,6 +229,12 @@ function AppLayout() {
               <Route path="/malha-fina/nfe-entradas"  element={<MalhaFinaNFeEntradas />} />
               <Route path="/malha-fina/nfe-saidas"    element={<MalhaFinaNFeSaidas />} />
               <Route path="/malha-fina/cte"           element={<MalhaFinaCTe />} />
+
+              {/* CGIBS */}
+              <Route path="/cgibs/apuracao-ibs"   element={<PainelApuracaoIBS />} />
+              <Route path="/cgibs/apuracao"        element={<CGIBSApuracao />} />
+              <Route path="/cgibs/debitos"         element={<CGIBSDebitos />} />
+              <Route path="/cgibs/credenciais"     element={<AdminRoute><CGIBSCredentials /></AdminRoute>} />
 
               {/* Receita Federal */}
               <Route path="/rfb/gestao-creditos"        element={<GestaoCredIBSCBS />} />

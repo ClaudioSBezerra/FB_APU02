@@ -44,6 +44,18 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Apuração CBS',       path: '/rfb/apuracao-cbs' },
     ],
   },
+  cgibs: {
+    label: 'CGIBS',
+    tabs: [
+      { label: 'Apuração IBS',        path: '/cgibs/apuracao-ibs' },
+      { label: 'Importar Movimento',  path: '/cgibs/apuracao' },
+      { label: 'Débitos IBS',         path: '/cgibs/debitos' },
+      { label: 'Créditos IBS',        path: '#', disabled: true },
+      { label: 'Pagamentos IBS',      path: '#', disabled: true },
+      { label: 'Pgtos Fornecedores',  path: '#', disabled: true },
+      { label: 'Concluir Apuração',   path: '#', disabled: true },
+    ],
+  },
   rfb: {
     label: 'Receita Federal',
     tabs: [
@@ -84,7 +96,8 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Apelidos Filiais', path: '/config/apelidos-filiais' },
       { label: 'Gestores',         path: '/config/gestores' },
       { label: 'Ambiente',         path: '/config/ambiente' },
-      { label: 'Credenciais RFB',   path: '/rfb/credenciais',    adminOnly: true },
+      { label: 'Credenciais RFB',    path: '/rfb/credenciais',    adminOnly: true },
+      { label: 'Credenciais CGIBS', path: '/cgibs/credenciais',  adminOnly: true },
       { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',  adminOnly: true },
       { label: 'Usuários',          path: '/config/usuarios',        adminOnly: true },
       { label: 'Atividade',         path: '/config/user-activity',   adminOnly: true },
@@ -103,12 +116,15 @@ export function getActiveModule(pathname: string): string {
   const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
   if (apuracaoPaths.includes(pathname)) return 'apuracao'
 
+  const cgibsPaths = ['/cgibs/apuracao-ibs', '/cgibs/apuracao', '/cgibs/debitos']
+  if (cgibsPaths.some(p => pathname.startsWith(p))) return 'cgibs'
+
   const rfbExclude = ['/rfb/credenciais', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
   if (pathname.startsWith('/rfb/') && !rfbExclude.includes(pathname)) return 'rfb'
 
   if (pathname.startsWith('/malha-fina/')) return 'malha'
 
-  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais') return 'config'
+  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais' || pathname === '/cgibs/credenciais') return 'config'
 
   return 'painel'
 }
