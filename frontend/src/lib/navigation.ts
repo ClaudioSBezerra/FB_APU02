@@ -45,7 +45,7 @@ export const modules: Record<string, ModuleConfig> = {
     ],
   },
   cgibs: {
-    label: 'CGIBS',
+    label: 'CGIBS - Apuração Assistida IBS',
     tabs: [
       { label: 'Apuração IBS',        path: '/cgibs/apuracao-ibs' },
       { label: 'Importar Movimento',  path: '/cgibs/apuracao' },
@@ -57,7 +57,7 @@ export const modules: Record<string, ModuleConfig> = {
     ],
   },
   rfb: {
-    label: 'Receita Federal',
+    label: 'Receita Federal - Apuração Assistida',
     tabs: [
       { label: 'Gestão CBS RFB',       path: '/rfb/gestao-creditos' },
       { label: 'Importar Movimento',  path: '/rfb/apuracao' },
