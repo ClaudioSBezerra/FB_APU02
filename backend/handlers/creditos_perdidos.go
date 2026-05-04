@@ -188,7 +188,7 @@ func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
 				WHERE ne.company_id = $1
 				  AND ($2 = '' OR ne.mes_ano = $2)
 				  AND ne.forn_cnpj = $3
-				  AND ne.tipo_cfop IN ('C','R','S','A')
+				  AND COALESCE(ne.tipo_cfop, 'C') IN ('C','R','S','A')
 				  AND ne.v_ibs = 0
 				  AND ne.v_cbs = 0
 				ORDER BY ne.data_emissao DESC, ne.numero_nfe DESC
@@ -303,7 +303,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			FROM nfe_entradas
 			WHERE company_id = $1
 			  AND ($2 = '' OR mes_ano = $2)
-			  AND tipo_cfop IN ('C','R','S','A')
+			  AND COALESCE(tipo_cfop, 'C') IN ('C','R','S','A')
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
 		`, companyID, mesAno).Scan(&totalUniverse)
@@ -322,7 +322,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			  AND ($2 = '' OR mes_ano = $2)
 			  AND v_ibs = 0
 			  AND v_cbs = 0
-			  AND tipo_cfop IN ('C','R','S','A')
+			  AND COALESCE(tipo_cfop, 'C') IN ('C','R','S','A')
 			  AND LEFT(forn_cnpj, 8) != LEFT(dest_cnpj_cpf, 8)
 			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = forn_cnpj)
 			GROUP BY forn_cnpj
