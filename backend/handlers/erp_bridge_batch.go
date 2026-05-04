@@ -36,7 +36,7 @@ type batchDoc struct {
 	DestCNPJ         string  `json:"dest_cnpj"`
 	Cancelado        string  `json:"cancelado"`         // "S" = cancelada, demais = normal
 	NomeParceiro     string  `json:"nome_parceiro"`     // forn.razsoc (DIRECT=1) ou clie.razsoc (DIRECT=2)
-	TipoCFOP         string  `json:"tipo_cfop"`         // C=Consumo,R=Revenda,A=Ativo,T=Transferência,O=Outros,S=Saída
+	TipoCFOP         string  `json:"tipo_cfop"`         // C=Consumo,R=Revenda,A=Ativo Imobilizado,T=Transferência,O=Outros,S=Serviços
 	VTotal           float64 `json:"v_total"`
 	VBcIbsCbs        float64 `json:"v_bc_ibs_cbs"`
 	VIbsUf           float64 `json:"v_ibs_uf"`

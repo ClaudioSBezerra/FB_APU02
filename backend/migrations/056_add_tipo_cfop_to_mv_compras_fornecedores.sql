@@ -11,7 +11,7 @@ SELECT
     p.cnpj                              AS fornecedor_cnpj,
     p.cod_part,
     j.company_name                      AS filial_nome,
-    COALESCE(f.tipo, 'O')               AS tipo_cfop,  -- R=Revenda,C=Consumo,A=Ativo,T=Transferência,O=Operacional,D=Devolução
+    COALESCE(f.tipo, 'O')               AS tipo_cfop,  -- C=Consumo,R=Revenda,A=Ativo Imobilizado,T=Transferência,S=Serviços,O=Outros
     TO_CHAR(COALESCE(c.dt_e_s, c.dt_doc), 'MM/YYYY')             AS mes_ano,
     EXTRACT(YEAR FROM COALESCE(c.dt_e_s, c.dt_doc))::INTEGER      AS ano,
     SUM(c190.vl_opr)                    AS total_valor,
