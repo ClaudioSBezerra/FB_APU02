@@ -28,6 +28,7 @@ import MalhaFinaCTe from './pages/MalhaFinaCTe'
 import AdminUsers from './pages/AdminUsers'
 import UserActivity from './pages/UserActivity'
 import LimparDadosApuracao from './pages/LimparDadosApuracao'
+import CGIBSPainel from './pages/CGIBSPainel'
 import CGIBSApuracao from './pages/CGIBSApuracao'
 import CGIBSCredentials from './pages/CGIBSCredentials'
 import CGIBSDebitos from './pages/CGIBSDebitos'
@@ -231,7 +232,7 @@ function AppLayout() {
               <Route path="/malha-fina/cte"           element={<MalhaFinaCTe />} />
 
               {/* CGIBS */}
-              <Route path="/cgibs/apuracao-ibs"   element={<PainelApuracaoIBS />} />
+              <Route path="/cgibs/apuracao-ibs"   element={<CGIBSPainel />} />
               <Route path="/cgibs/apuracao"        element={<CGIBSApuracao />} />
               <Route path="/cgibs/debitos"         element={<CGIBSDebitos />} />
               <Route path="/cgibs/credenciais"     element={<AdminRoute><CGIBSCredentials /></AdminRoute>} />
