@@ -218,22 +218,32 @@ FONTES = {
 SAP_QUERY = """
 SELECT
     nn.DIRECT,
-    nn.NFEID                                                                         AS chave,
-    SUBSTR(nn.NFEID, 21, 2)                                                          AS modelo,
-    nn.SERIES                                                                        AS serie,
-    nn.NFENUM                                                                        AS numero,
-    TO_CHAR(TRUNC(nn.DOCDAT), 'YYYY-MM-DD')                                         AS data_emissao,
-    TO_CHAR(TRUNC(nn.CREDAT), 'YYYY-MM-DD')                                         AS data_autorizacao,
-    TO_CHAR(TRUNC(nn.DOCDAT), 'MM/YYYY')                                             AS mes_ano,
-    nn.CNPJ_EMIT                                                                     AS emit_cnpj,
-    nn.CNPJ_DEST                                                                     AS dest_cnpj,
-    nn.CANCELADO                                                                     AS cancelado,
-    nn.NFTOT                                                                         AS v_total,
-    MAX(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.BASE  ELSE 0 END)     AS v_bc_ibs_cbs,
-    SUM(CASE WHEN ni.TAXTYP IN ('IB1S','IB2S','IB3S') THEN ni.TAXVAL ELSE 0 END)   AS v_ibs_uf,
-    SUM(CASE WHEN ni.TAXTYP IN ('IB1M','IB2M','IB3M') THEN ni.TAXVAL ELSE 0 END)   AS v_ibs_mun,
+    nn.NFEID                                                                          AS chave,
+    SUBSTR(nn.NFEID, 21, 2)                                                           AS modelo,
+    nn.SERIES                                                                         AS serie,
+    nn.NFENUM                                                                         AS numero,
+    TO_CHAR(TRUNC(nn.DOCDAT), 'YYYY-MM-DD')                                          AS data_emissao,
+    TO_CHAR(TRUNC(nn.CREDAT), 'YYYY-MM-DD')                                          AS data_autorizacao,
+    TO_CHAR(TRUNC(nn.DOCDAT), 'MM/YYYY')                                              AS mes_ano,
+    nn.CNPJ_EMIT                                                                      AS emit_cnpj,
+    nn.CNPJ_DEST                                                                      AS dest_cnpj,
+    nn.CANCELADO                                                                      AS cancelado,
+    nn.NFTOT                                                                          AS v_total,
+    MAX(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.BASE  ELSE 0 END)      AS v_bc_ibs_cbs,
+    SUM(CASE WHEN ni.TAXTYP IN ('IB1S','IB2S','IB3S') THEN ni.TAXVAL ELSE 0 END)    AS v_ibs_uf,
+    SUM(CASE WHEN ni.TAXTYP IN ('IB1M','IB2M','IB3M') THEN ni.TAXVAL ELSE 0 END)    AS v_ibs_mun,
     SUM(CASE WHEN ni.TAXTYP IN ('IB1S','IB2S','IB3S','IB1M','IB2M','IB3M') THEN ni.TAXVAL ELSE 0 END) AS v_ibs,
-    SUM(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.TAXVAL ELSE 0 END)    AS v_cbs,
+    SUM(CASE WHEN ni.TAXTYP IN ('CBS1','CBS2','CBS3') THEN ni.TAXVAL ELSE 0 END)     AS v_cbs,
+    SUM(CASE WHEN ni.TAXTYP IN ('CIC0','ZIC4','IC1C','ICM4','ZIC3','ICM3','ICD0','ICM1','ZSN1','ICZF','ICMM','CIC1','ICM0','CIC2','ZSN2','ICD3','ICM2','ICMF') AND ni.BASE > 0 THEN ni.BASE  ELSE 0 END) AS base_icms,
+    SUM(CASE WHEN ni.TAXTYP IN ('CIC0','ZIC4','IC1C','ICM4','ZIC3','ICM3','ICD0','ICM1','ZSN1','ICZF','ICMM','CIC1','ICM0','CIC2','ZSN2','ICD3','ICM2','ICMF') AND ni.BASE > 0 THEN ni.TAXVAL ELSE 0 END) AS icms,
+    SUM(CASE WHEN ni.TAXTYP IN ('ZDOP','ZCS3','ZDOQ','ICS2','FPS2','ICS1','ICS3','ICST','ZCS4','CST2','ICFP') AND ni.BASE > 0 THEN ni.TAXVAL ELSE 0 END) AS icms_st,
+    SUM(CASE WHEN ni.TAXTYP IN ('IPI3','IPIO','IPI2','IPI1','IPI0') AND ni.BASE > 0 THEN ni.TAXVAL ELSE 0 END) AS ipi,
+    SUM(CASE WHEN ni.TAXTYP IN ('PIS0','IPW5','IPW3','IPSZ','IPSW','IPSV','IPSU','IPSS','IPSQ','IPSO','IPSN','IPSA','IPS3','IPIS','9BPX','9BPI','8BPI','0BPI') AND ni.BASE > 0 THEN ni.BASE  ELSE 0 END) AS base_pis,
+    SUM(CASE WHEN ni.TAXTYP IN ('PIS0','IPW5','IPW3','IPSZ','IPSW','IPSV','IPSU','IPSS','IPSQ','IPSO','IPSN','IPSA','IPS3','IPIS','9BPX','9BPI','8BPI','0BPI') AND ni.BASE > 0 THEN ni.TAXVAL ELSE 0 END) AS pis,
+    SUM(CASE WHEN ni.TAXTYP IN ('ICW5','ICW3','ICOZ','ICOW','ICOV','ICOU','ICOS','ICOQ','ICOO','ICON','ICOF','ICOA','ICN3','COFT','COFD','9BCX','9BCO','8BCO','8BCD','0BCO') AND ni.BASE > 0 THEN ni.BASE  ELSE 0 END) AS base_cofins,
+    SUM(CASE WHEN ni.TAXTYP IN ('ICW5','ICW3','ICOZ','ICOW','ICOV','ICOU','ICOS','ICOQ','ICOO','ICON','ICOF','ICOA','ICN3','COFT','COFD','9BCX','9BCO','8BCO','8BCD','0BCO') AND ni.BASE > 0 THEN ni.TAXVAL ELSE 0 END) AS cofins,
+    SUM(CASE WHEN ni.TAXTYP IN ('ICAP') AND ni.BASE > 0 THEN ni.BASE  ELSE 0 END)   AS base_partilha,
+    SUM(CASE WHEN ni.TAXTYP IN ('ICAP') AND ni.BASE > 0 THEN ni.TAXVAL ELSE 0 END)  AS icms_partilha,
     (
       SELECT cfop4 FROM (
         SELECT SUBSTR(it2.cfop, 1, 4) AS cfop4, COUNT(*) AS cnt
@@ -243,12 +253,20 @@ SELECT
         GROUP BY SUBSTR(it2.cfop, 1, 4)
         ORDER BY cnt DESC
       ) WHERE ROWNUM = 1
-    )                                                                               AS cfop_dom
+    )                                                                                AS cfop_dom
 FROM s4i_nfe nn
 LEFT JOIN s4i_nfe_impostos ni
   ON ni.NFEID = nn.NFEID
- AND ni.TAXTYP IN ('CBS1','CBS2','CBS3','IB1M','IB2M','IB3M','IB1S','IB2S','IB3S')
- AND ni.TAXVAL > 0
+ AND ni.TAXTYP IN (
+    'CBS1','CBS2','CBS3','IB1M','IB2M','IB3M','IB1S','IB2S','IB3S',
+    'CIC0','ZIC4','IC1C','ICM4','ZIC3','ICM3','ICD0','ICM1','ZSN1','ICZF','ICMM','CIC1','ICM0','CIC2','ZSN2','ICD3','ICM2','ICMF',
+    'ZDOP','ZCS3','ZDOQ','ICS2','FPS2','ICS1','ICS3','ICST','ZCS4','CST2','ICFP',
+    'IPI3','IPIO','IPI2','IPI1','IPI0',
+    'PIS0','IPW5','IPW3','IPSZ','IPSW','IPSV','IPSU','IPSS','IPSQ','IPSO','IPSN','IPSA','IPS3','IPIS','9BPX','9BPI','8BPI','0BPI',
+    'ICW5','ICW3','ICOZ','ICOW','ICOV','ICOU','ICOS','ICOQ','ICOO','ICON','ICOF','ICOA','ICN3','COFT','COFD','9BCX','9BCO','8BCO','8BCD','0BCO',
+    'ICAP'
+ )
+ AND (ni.TAXVAL > 0 OR ni.BASE > 0)
 LEFT JOIN s4i_nfe_it it
   ON it.NFEID = nn.NFEID
  AND it.ITMNUM = ni.ITMNUM
@@ -680,6 +698,16 @@ def processar_sap(
                 "v_ibs_mun":        f(r.get("v_ibs_mun")),
                 "v_ibs":            f(r.get("v_ibs")),
                 "v_cbs":            f(r.get("v_cbs")),
+                "base_icms":        f(r.get("base_icms")),
+                "icms":             f(r.get("icms")),
+                "icms_st":          f(r.get("icms_st")),
+                "ipi":              f(r.get("ipi")),
+                "base_pis":         f(r.get("base_pis")),
+                "pis":              f(r.get("pis")),
+                "base_cofins":      f(r.get("base_cofins")),
+                "cofins":           f(r.get("cofins")),
+                "base_partilha":    f(r.get("base_partilha")),
+                "icms_partilha":    f(r.get("icms_partilha")),
                 "cfop":             s(r.get("cfop_dom")),
             })
 
