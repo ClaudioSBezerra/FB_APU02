@@ -67,6 +67,16 @@ type nfeEntradaRow struct {
 	VIBSMun         float64 `json:"v_ibs_mun"`
 	VIBS            float64 `json:"v_ibs"`
 	VCBS            float64 `json:"v_cbs"`
+	BaseIcms        float64 `json:"base_icms"`
+	Icms            float64 `json:"icms"`
+	IcmsSt          float64 `json:"icms_st"`
+	Ipi             float64 `json:"ipi"`
+	BasePis         float64 `json:"base_pis"`
+	Pis             float64 `json:"pis"`
+	BaseCofins      float64 `json:"base_cofins"`
+	Cofins          float64 `json:"cofins"`
+	BasePartilha    float64 `json:"base_partilha"`
+	IcmsPartilha    float64 `json:"icms_partilha"`
 	Cancelado       string  `json:"cancelado"` // "S" ou "N"
 }
 
@@ -162,6 +172,9 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(dest_cnpj_cpf,''),
 				v_nf,
 				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
+				COALESCE(base_icms,0), COALESCE(icms,0), COALESCE(icms_st,0), COALESCE(ipi,0),
+				COALESCE(base_pis,0), COALESCE(pis,0), COALESCE(base_cofins,0), COALESCE(cofins,0),
+				COALESCE(base_partilha,0), COALESCE(icms_partilha,0),
 				COALESCE(cancelado, 'N') AS cancelado
 			FROM nfe_entradas ` + where +
 			fmt.Sprintf(" ORDER BY %s %s, numero_nfe DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
@@ -184,6 +197,9 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 				&row.FornCNPJ, &row.FornNome, &row.DestCNPJCPF,
 				&row.VNF,
 				&row.VBCIbsCbs, &row.VIBSuf, &row.VIBSMun, &row.VIBS, &row.VCBS,
+				&row.BaseIcms, &row.Icms, &row.IcmsSt, &row.Ipi,
+				&row.BasePis, &row.Pis, &row.BaseCofins, &row.Cofins,
+				&row.BasePartilha, &row.IcmsPartilha,
 				&row.Cancelado,
 			); err != nil {
 				log.Printf("NfeEntradasList scan error: %v", err)

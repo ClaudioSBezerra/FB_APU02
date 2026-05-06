@@ -44,6 +44,9 @@ interface CteEntradaRow {
   v_prest: number;
   v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number;
   v_ibs: number; v_cbs: number;
+  base_icms: number; icms: number; icms_st: number; ipi: number;
+  base_pis: number; pis: number; base_cofins: number; cofins: number;
+  base_partilha: number; icms_partilha: number;
   cancelado: string; // "S" | "N"
 }
 
@@ -174,6 +177,18 @@ function DetalheCTe({ cte, onClose }: { cte: CteEntradaRow; onClose: () => void 
             <LinhaBRL label="vIBSUF" value={cte.v_ibs_uf} /><LinhaBRL label="vIBSMun" value={cte.v_ibs_mun} />
             <LinhaBRL label="vIBS (Total)" value={cte.v_ibs} />
             <LinhaBRL label="vCBS" value={cte.v_cbs} />
+          </Secao>
+          <Secao title="Tributos — ICMS / PIS / COFINS">
+            <LinhaBRL label="Base ICMS" value={cte.base_icms} />
+            <LinhaBRL label="ICMS" value={cte.icms} />
+            <LinhaBRL label="ICMS-ST" value={cte.icms_st} />
+            <LinhaBRL label="IPI" value={cte.ipi} />
+            <LinhaBRL label="Base PIS" value={cte.base_pis} />
+            <LinhaBRL label="PIS" value={cte.pis} />
+            <LinhaBRL label="Base COFINS" value={cte.base_cofins} />
+            <LinhaBRL label="COFINS" value={cte.cofins} />
+            <LinhaBRL label="Base ICMS-Partilha" value={cte.base_partilha} />
+            <LinhaBRL label="ICMS-Partilha" value={cte.icms_partilha} />
             {(cte.v_ibs == null || cte.v_ibs === 0) && (cte.v_cbs == null || cte.v_cbs === 0) && (
               <div className="flex items-center gap-1 mt-1 text-orange-600">
                 <AlertTriangle className="h-3 w-3" />
@@ -432,6 +447,11 @@ export default function ConsultaCTesEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_cbs')}>
                         CBS (R$) <SortIcon col="v_cbs" />
                       </TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">ICMS (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IPI (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">PIS (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">ST (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">COFINS (R$)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -470,6 +490,11 @@ export default function ConsultaCTesEntradas() {
                           <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_ibs_uf)}</TableCell>
                           <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_ibs_mun)}</TableCell>
                           <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_cbs)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.icms)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.ipi)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.pis)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.icms_st)}</TableCell>
+                          <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.cofins)}</TableCell>
                         </TableRow>
                       );
                     })}

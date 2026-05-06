@@ -44,6 +44,9 @@ interface NfeEntradaRow {
   v_nf: number;
   v_bc_ibs_cbs: number; v_ibs_uf: number; v_ibs_mun: number;
   v_ibs: number; v_cbs: number;
+  base_icms: number; icms: number; icms_st: number; ipi: number;
+  base_pis: number; pis: number; base_cofins: number; cofins: number;
+  base_partilha: number; icms_partilha: number;
   cancelado: string; // "S" | "N"
 }
 
@@ -174,6 +177,18 @@ function DetalheNFe({ nfe, onClose }: { nfe: NfeEntradaRow; onClose: () => void 
             <LinhaBRL label="vIBSUF" value={nfe.v_ibs_uf} /><LinhaBRL label="vIBSMun" value={nfe.v_ibs_mun} />
             <LinhaBRL label="vIBS (Total)" value={nfe.v_ibs} />
             <LinhaBRL label="vCBS" value={nfe.v_cbs} />
+          </Secao>
+          <Secao title="Tributos — ICMS / PIS / COFINS">
+            <LinhaBRL label="Base ICMS" value={nfe.base_icms} />
+            <LinhaBRL label="ICMS" value={nfe.icms} />
+            <LinhaBRL label="ICMS-ST" value={nfe.icms_st} />
+            <LinhaBRL label="IPI" value={nfe.ipi} />
+            <LinhaBRL label="Base PIS" value={nfe.base_pis} />
+            <LinhaBRL label="PIS" value={nfe.pis} />
+            <LinhaBRL label="Base COFINS" value={nfe.base_cofins} />
+            <LinhaBRL label="COFINS" value={nfe.cofins} />
+            <LinhaBRL label="Base ICMS-Partilha" value={nfe.base_partilha} />
+            <LinhaBRL label="ICMS-Partilha" value={nfe.icms_partilha} />
           </Secao>
         </div>
       </DialogContent>
@@ -426,6 +441,11 @@ export default function ConsultaNFesEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('v_cbs')}>
                         CBS (R$) <SortIcon col="v_cbs" />
                       </TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">ICMS (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IPI (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">PIS (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">ST (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">COFINS (R$)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -465,6 +485,11 @@ export default function ConsultaNFesEntradas() {
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_ibs_uf)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_ibs_mun)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.v_cbs)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.icms)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.ipi)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.pis)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.icms_st)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.cofins)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
