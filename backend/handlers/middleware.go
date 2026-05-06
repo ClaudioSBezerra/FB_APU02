@@ -18,6 +18,7 @@ func GetAllowedOrigins() map[string]bool {
 	} else {
 		list = []string{
 			"https://apuracao.fbtax.cloud",
+			"https://fctax.fcxlabs.com",
 			"https://fbtax.cloud",
 			"http://localhost:3000",
 			"http://localhost:5173",

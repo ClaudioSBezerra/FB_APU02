@@ -42,7 +42,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=coolify"
-      - "traefik.http.routers.apuracao.rule=Host(`apuracao.fbtax.cloud`)"
+      - "traefik.http.routers.apuracao.rule=Host(`apuracao.fbtax.cloud`) || Host(`fctax.fcxlabs.com`)"
       - "traefik.http.routers.apuracao.entrypoints=https"
       - "traefik.http.routers.apuracao.tls=true"
       - "traefik.http.routers.apuracao.tls.certresolver=letsencrypt"
