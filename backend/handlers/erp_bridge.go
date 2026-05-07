@@ -734,8 +734,8 @@ func ERPBridgePendingHandler(db *sql.DB) http.HandlerFunc {
 // Chamado pelo daemon a cada ciclo para indicar que está ativo.
 // Aproveita para limpar runs presos em pending/running por mais de 2 horas.
 
-func ERPBridgeHeartbeatHandler(db *sql.DB) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func ERPBridgeHeartbeatHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -781,5 +781,5 @@ func ERPBridgeHeartbeatHandler(db *sql.DB) http.Handler {
 		`, companyID)
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-	})
+	}
 }
