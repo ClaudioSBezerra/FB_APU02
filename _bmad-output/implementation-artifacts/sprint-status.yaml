@@ -1,0 +1,83 @@
+# generated: 2026-05-06
+# project: FB_APU01
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: "2026-05-06"
+project: FB_APU01
+tracking_system: file-system
+story_location: "_bmad-output/implementation-artifacts"
+
+development_status:
+  # ── Epic 1: Tenant Context e JWT Expandido ──────────────────────────────────
+  epic-1: in-progress
+  1-1-criar-struct-tenantcontext-e-helpers: done
+  1-2-expandir-jwt-com-tenant-id-e-company-id: backlog
+  1-3-implementar-tenantmiddleware: backlog
+  1-4-integrar-tenantmiddleware-em-main-go: backlog
+  1-5-atualizar-frontend-authcontext: backlog
+  epic-1-retrospective: optional
+
+  # ── Epic 2: Row-Level Security e Desnormalizacao ────────────────────────────
+  epic-2: backlog
+  2-1-criar-migration-de-desnormalizacao: backlog
+  2-2-criar-trigger-de-auto-preenchimento: backlog
+  2-3-criar-usuario-de-aplicacao-nao-superuser: backlog
+  2-4-habilitar-rls-e-criar-policies: backlog
+  2-5-atualizar-materialized-views-com-environment-id: backlog
+  2-6-testes-de-isolamento-cross-tenant: backlog
+  epic-2-retrospective: optional
+
+  # ── Epic 3: Refatoracao de Handlers para TenantContext ──────────────────────
+  epic-3: backlog
+  3-1-refatorar-reporthandler: backlog
+  3-2-refatorar-uploadhandler: backlog
+  3-3-refatorar-jobhandler: backlog
+  3-4-refatorar-environmenthandler: backlog
+  3-5-refatorar-authhandler-getusercompanies: backlog
+  epic-3-retrospective: optional
+
+  # ── Epic 4: Planos Comerciais por Tenant ────────────────────────────────────
+  epic-4: backlog
+  4-1-criar-migration-de-tenant-plans: backlog
+  4-2-criar-middleware-de-verificacao-de-limites: backlog
+  4-3-criar-api-de-consulta-de-plano: backlog
+  4-4-exibir-plano-no-frontend: backlog
+  epic-4-retrospective: optional
+
+  # ── Epic 5: Audit Log e Observabilidade ─────────────────────────────────────
+  epic-5: backlog
+  5-1-criar-migration-de-audit-log: backlog
+  5-2-integrar-audit-log-no-tenantmiddleware: backlog
+  5-3-adicionar-tenant-id-aos-logs-estruturados: backlog
+  5-4-criar-api-de-consulta-de-audit-log-admin: backlog
+  epic-5-retrospective: optional
