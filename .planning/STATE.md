@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: context exhaustion at 87% (2026-05-12)
-last_updated: "2026-05-12T15:00:00.000Z"
-last_activity: 2026-05-12 -- Phase 2 bugs complete, verified
+stopped_at: Phase 3 Plan 1 complete (2026-05-12)
+last_updated: "2026-05-12T17:05:00.000Z"
+last_activity: 2026-05-12 -- Phase 3 Plan 01 complete (DEBT-01 migrations renomeadas)
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
-  percent: 50
+  total_plans: 14
+  completed_plans: 10
+  percent: 55
 ---
 
 # Project State
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 
 ## Current Position
 
-Phase: 2 of 4 (Bugs) — COMPLETE
-Plan: 2/2 complete
-Status: Phase 2 verified passed; ready for Phase 3
-Last activity: 2026-05-12 -- Phase 2 bugs complete, verified
+Phase: 3 of 4 (Debito Tecnico) — IN PROGRESS
+Plan: 1/5 complete
+Status: Phase 3 Plan 01 (DEBT-01) concluido; aguardando planos 02-05
+Last activity: 2026-05-12 -- Phase 3 Plan 01 complete (migrations duplicadas renomeadas)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 55%
 
 ## Completed Phases
 
@@ -38,6 +38,12 @@ Progress: [█████░░░░░] 50%
 |-------|-------|------------|------------|
 | 1. Seguranca | 7/7 | Complete | 2026-05-12 |
 | 2. Bugs      | 2/2 | Complete | 2026-05-12 |
+
+## In Progress
+
+| Phase | Plans | Status |
+|-------|-------|--------|
+| 3. Debito Tecnico | 1/5 | Executing |
 
 ## Performance Metrics
 
@@ -67,6 +73,7 @@ Recent decisions affecting current work:
 - Roadmap: DEBT-05 (avaliacao do tenant middleware) vai para Phase 3 — resultado documentado antes de qualquer expansao de testes em Phase 4
 - BUG-01: Pages delegam headers ao interceptor global; nao importam COMPANY_ID_KEY diretamente pois nao precisam do valor em logica de UI
 - BUG-02/03: useCallback/useEffect dep [companyId] garante re-fetch automatico ao trocar empresa
+- DEBT-01: Sufixo 'b' escolhido para renames de migration — preserva semântica do número original sem conflito; conteúdo idempotente garante segurança em re-aplicação em ambientes existentes
 
 ### Pending Todos
 
@@ -88,6 +95,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-05-12T15:00:00.000Z
-Stopped at: Phase 2 verification complete
+Last session: 2026-05-12T17:05:00.000Z
+Stopped at: Phase 3 Plan 01 complete (DEBT-01)
 Resume file: None
