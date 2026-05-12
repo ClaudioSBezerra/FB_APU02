@@ -15,8 +15,8 @@
 ### Bugs
 
 - [x] **BUG-01**: Chave de `localStorage` para company ID unificada em constante única — eliminar as 3 variantes (`companyId`, `company_id`, `selectedCompanyId`)
-- [ ] **BUG-02**: `PainelApuracaoCBS.tsx` e `PainelApuracaoIBS.tsx` corrigidos para ler a chave unificada (empresa sempre correta)
-- [ ] **BUG-03**: `Managers.tsx` corrigido — lia `selectedCompanyId` que nunca é escrita por nenhum componente
+- [x] **BUG-02**: `PainelApuracaoCBS.tsx` e `PainelApuracaoIBS.tsx` corrigidos para ler a chave unificada (empresa sempre correta)
+- [x] **BUG-03**: `Managers.tsx` corrigido — lia `selectedCompanyId` que nunca é escrita por nenhum componente
 
 ### Débito Técnico
 
@@ -67,8 +67,8 @@
 | SEC-03 | Fase 1 | Pending |
 | SEC-04 | Fase 1 | Complete |
 | BUG-01 | Fase 2 | Complete |
-| BUG-02 | Fase 2 | Pending |
-| BUG-03 | Fase 2 | Pending |
+| BUG-02 | Fase 2 | Complete |
+| BUG-03 | Fase 2 | Complete |
 | DEBT-01 | Fase 3 | Pending |
 | DEBT-02 | Fase 3 | Pending |
 | DEBT-03 | Fase 3 | Pending |

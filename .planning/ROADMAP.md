@@ -7,7 +7,7 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
 ## Phases
 
 - [x] **Phase 1: Seguranca** - Remover credenciais expostas, ativar rate limiter, migrar JWT para sessionStorage e sanitizar erros do banco (completed 2026-05-12)
-- [ ] **Phase 2: Bugs** - Unificar a chave de company ID no localStorage e corrigir os tres componentes que leem chave errada
+- [x] **Phase 2: Bugs** - Unificar a chave de company ID no localStorage e corrigir os tres componentes que leem chave errada (completed 2026-05-12)
 - [ ] **Phase 3: Debito Tecnico** - Renumerar migrations duplicadas, corrigir erros silenciosos de DB, remover Redis ocioso e ferramentas de debug, avaliar tenant middleware
 - [ ] **Phase 4: Qualidade** - Configurar Vitest, escrever testes unitarios nos handlers criticos e incluir etapa de testes no CI
 
@@ -43,7 +43,7 @@ Plans:
 **Plans**: 2 planos
 Plans:
 - [x] 02-01-PLAN.md — BUG-01: Criar storageKeys.ts + corrigir 9 paginas que bypassam o interceptor (Wave 1)
-- [ ] 02-02-PLAN.md — BUG-02 + BUG-03: Refatorar PainelApuracaoCBS, PainelApuracaoIBS e Managers para useAuth() (Wave 2)
+- [x] 02-02-PLAN.md — BUG-02 + BUG-03: Refatorar PainelApuracaoCBS, PainelApuracaoIBS e Managers para useAuth() (Wave 2)
 **UI hint**: yes
 
 ### Phase 3: Debito Tecnico
@@ -73,6 +73,6 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Seguranca | 7/7 | Complete   | 2026-05-12 |
-| 2. Bugs | 1/2 | In Progress|  |
+| 2. Bugs | 2/2 | Complete   | 2026-05-12 |
 | 3. Debito Tecnico | 0/? | Not started | - |
 | 4. Qualidade | 0/? | Not started | - |
