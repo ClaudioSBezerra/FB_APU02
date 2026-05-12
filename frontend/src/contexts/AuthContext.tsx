@@ -61,14 +61,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const isApiCall  = url.includes('/api/');
       const isAuthCall = url.includes('/api/auth/');
       if (response.status === 401 && isApiCall && !isAuthCall && tokenRef.current) {
-        const prefs: Record<string, string> = {};
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key?.startsWith('pref_company_')) prefs[key] = localStorage.getItem(key) || '';
-        }
-        localStorage.clear();
-        Object.entries(prefs).forEach(([k, v]) => localStorage.setItem(k, v));
-        localStorage.setItem('session_expired', '1');
+        sessionStorage.clear();
+        sessionStorage.setItem('session_expired', '1');
         window.location.href = '/login';
       }
 
@@ -78,14 +72,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    // Restore session from localStorage
-    const storedToken = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
-    const storedEnv = localStorage.getItem('environment');
-    const storedGroup = localStorage.getItem('group');
-    const storedCompany = localStorage.getItem('company');
-    const storedCompanyId = localStorage.getItem('companyId');
-    const storedCnpj = localStorage.getItem('cnpj');
+    // Restore session from sessionStorage
+    const storedToken = sessionStorage.getItem('token');
+    const storedUser = sessionStorage.getItem('user');
+    const storedEnv = sessionStorage.getItem('environment');
+    const storedGroup = sessionStorage.getItem('group');
+    const storedCompany = sessionStorage.getItem('company');
+    const storedCompanyId = sessionStorage.getItem('companyId');
+    const storedCnpj = sessionStorage.getItem('cnpj');
 
     if (storedToken && storedUser) {
       setToken(storedToken);
@@ -105,7 +99,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       .then(res => {
         if (res.ok) return res.json();
         if (res.status === 401) {
-          localStorage.clear();
+          sessionStorage.clear();
           window.location.href = '/login';
           throw new Error('Session expired');
         }
@@ -113,7 +107,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       })
       .then(userData => {
         setUser(userData);
-        localStorage.setItem('user', JSON.stringify(userData));
+        sessionStorage.setItem('user', JSON.stringify(userData));
       })
       .catch(err => console.error("Session refresh error:", err))
       .finally(() => setLoading(false));
@@ -150,26 +144,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setCompanyId(companyIdVal);
     setCnpj(cnpjVal);
 
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data.user));
-    localStorage.setItem('environment', data.environment_name || '');
-    localStorage.setItem('group', data.group_name || '');
-    localStorage.setItem('company', companyName || '');
-    localStorage.setItem('companyId', companyIdVal || '');
-    localStorage.setItem('cnpj', cnpjVal || '');
+    sessionStorage.setItem('token', data.token);
+    sessionStorage.setItem('user', JSON.stringify(data.user));
+    sessionStorage.setItem('environment', data.environment_name || '');
+    sessionStorage.setItem('group', data.group_name || '');
+    sessionStorage.setItem('company', companyName || '');
+    sessionStorage.setItem('companyId', companyIdVal || '');
+    sessionStorage.setItem('cnpj', cnpjVal || '');
   };
 
   const logout = () => {
-    // Preserva preferências de empresa antes de limpar o storage
-    const prefs: Record<string, string> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith('pref_company_')) {
-        prefs[key] = localStorage.getItem(key) || '';
-      }
-    }
-    localStorage.clear();
-    Object.entries(prefs).forEach(([k, v]) => localStorage.setItem(k, v));
+    // Limpa dados de sessão; preferências de empresa (pref_company_*) ficam intactas no localStorage
+    sessionStorage.clear();
 
     setUser(null);
     setToken(null);
@@ -185,14 +171,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setCompany(name);
     setCompanyId(id);
     setCnpj(newCnpj);
-    localStorage.setItem('company', name);
-    localStorage.setItem('companyId', id);
-    localStorage.setItem('cnpj', newCnpj);
+    sessionStorage.setItem('company', name);
+    sessionStorage.setItem('companyId', id);
+    sessionStorage.setItem('cnpj', newCnpj);
     // Salva preferência persistente para este usuário (localStorage + banco)
     if (user?.id) {
       localStorage.setItem(`pref_company_${user.id}`, JSON.stringify({ id, name, cnpj: newCnpj }));
     }
-    const tok = localStorage.getItem('token');
+    const tok = sessionStorage.getItem('token');
     if (tok) {
       fetch('/api/user/preferred-company', {
         method: 'PATCH',
