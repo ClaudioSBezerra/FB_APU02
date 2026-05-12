@@ -59,7 +59,7 @@ func SolicitarCreditosHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCreditos]")
 			return
 		}
 
@@ -114,7 +114,7 @@ func StatusCreditosHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCreditos]")
 			return
 		}
 
@@ -133,7 +133,7 @@ func StatusCreditosHandler(db *sql.DB) http.HandlerFunc {
 			LIMIT 20
 		`, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar créditos", err, "[RFBCreditos]")
 			return
 		}
 		defer rows.Close()
@@ -153,7 +153,7 @@ func StatusCreditosHandler(db *sql.DB) http.HandlerFunc {
 				&resCBSTotal, &resCBSExtinto, &resCBSNaoExtinto,
 				&resCorrente, &resAjuste,
 			); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler crédito", err, "[RFBCreditos]")
 				return
 			}
 			if resID.Valid {
@@ -197,7 +197,7 @@ func DownloadManualCreditosHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCreditos]")
 			return
 		}
 
@@ -221,7 +221,7 @@ func DownloadManualCreditosHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar solicitação de crédito", err, "[RFBCreditos]")
 			return
 		}
 
@@ -270,7 +270,7 @@ func DeleteCreditoRequestHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCreditos]")
 			return
 		}
 
@@ -282,7 +282,7 @@ func DeleteCreditoRequestHandler(db *sql.DB) http.HandlerFunc {
 			WHERE id = $1 AND company_id = $2 AND tipo = 'credito' AND status = 'error'
 		`, requestID, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir solicitação de crédito", err, "[RFBCreditos]")
 			return
 		}
 		rows, _ := res.RowsAffected()
@@ -308,7 +308,7 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCreditos]")
 			return
 		}
 
@@ -365,7 +365,7 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 			args...,
 		)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar créditos", err, "[RFBCreditos]")
 			return
 		}
 		defer rows.Close()
@@ -399,7 +399,7 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 				&c.ValorCBSTotal, &c.ValorCBSExtinto, &c.ValorCBSNaoExtinto,
 				&c.SituacaoCredito, &c.FormasExtincao, &c.CreatedAt,
 			); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler item de crédito", err, "[RFBCreditos]")
 				return
 			}
 			if dataEmissao.Valid {
@@ -460,7 +460,7 @@ func ClearCreditosErrorsHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCreditos]")
 			return
 		}
 
@@ -468,7 +468,7 @@ func ClearCreditosErrorsHandler(db *sql.DB) http.HandlerFunc {
 			DELETE FROM rfb_requests WHERE company_id = $1 AND tipo = 'credito' AND status = 'error'
 		`, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao limpar erros de créditos", err, "[RFBCreditos]")
 			return
 		}
 		rows, _ := res.RowsAffected()

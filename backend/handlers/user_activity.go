@@ -26,7 +26,7 @@ func LogActivityHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
+			sanitizeDBErr(w, http.StatusBadRequest, "Empresa não encontrada ou sem acesso", err, "[UserActivity]")
 			return
 		}
 
@@ -92,7 +92,7 @@ func ListUserActivityHandler(db *sql.DB) http.HandlerFunc {
 		}
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
+			sanitizeDBErr(w, http.StatusBadRequest, "Empresa não encontrada ou sem acesso", err, "[UserActivity]")
 			return
 		}
 
@@ -161,7 +161,7 @@ func ListModuleActivityHandler(db *sql.DB) http.HandlerFunc {
 		}
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
+			sanitizeDBErr(w, http.StatusBadRequest, "Empresa não encontrada ou sem acesso", err, "[UserActivity]")
 			return
 		}
 

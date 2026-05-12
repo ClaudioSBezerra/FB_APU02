@@ -35,7 +35,7 @@ func GetCGIBSCredentialHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[CGIBSCredentials]")
 			return
 		}
 
@@ -60,7 +60,7 @@ func GetCGIBSCredentialHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, "Error querying credential: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar credencial CGIBS", err, "[CGIBSCredentials]")
 			return
 		}
 		if len(cred.ClientSecret) > 4 {
@@ -85,7 +85,7 @@ func SaveCGIBSCredentialHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[CGIBSCredentials]")
 			return
 		}
 
@@ -129,7 +129,7 @@ func SaveCGIBSCredentialHandler(db *sql.DB) http.HandlerFunc {
 			RETURNING id
 		`, companyID, req.CNPJMatriz, req.ClientID, req.ClientSecret, req.Ambiente).Scan(&id)
 		if err != nil {
-			http.Error(w, "Error saving credential: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao salvar credencial CGIBS", err, "[CGIBSCredentials]")
 			return
 		}
 
@@ -174,7 +174,7 @@ func UpdateCGIBSScheduleHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[CGIBSCredentials]")
 			return
 		}
 
@@ -218,12 +218,12 @@ func DeleteCGIBSCredentialHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[CGIBSCredentials]")
 			return
 		}
 		result, err := db.Exec("DELETE FROM cgibs_credentials WHERE company_id=$1", companyID)
 		if err != nil {
-			http.Error(w, "Error deleting credential: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir credencial CGIBS", err, "[CGIBSCredentials]")
 			return
 		}
 		rows, _ := result.RowsAffected()

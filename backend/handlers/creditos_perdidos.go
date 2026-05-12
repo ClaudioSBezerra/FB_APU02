@@ -127,7 +127,7 @@ func CreditosPerdidosNotasHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[CreditosPerdidos]")
 			return
 		}
 
@@ -236,7 +236,7 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[CreditosPerdidos]")
 			return
 		}
 

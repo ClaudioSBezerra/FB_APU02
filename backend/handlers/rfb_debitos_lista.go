@@ -40,7 +40,7 @@ func ListarDebitosHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBDebitosLista]")
 			return
 		}
 
@@ -175,7 +175,7 @@ func ListarDebitosHandler(db *sql.DB) http.HandlerFunc {
 		pageArgs := append(args, pageSize, offset)
 		rows, err := db.Query(selectQ, pageArgs...)
 		if err != nil {
-			http.Error(w, "Error querying debits: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar débitos", err, "[RFBDebitosLista]")
 			return
 		}
 		defer rows.Close()
@@ -223,7 +223,7 @@ func PeriodosDebitosHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBDebitosLista]")
 			return
 		}
 
@@ -234,7 +234,7 @@ func PeriodosDebitosHandler(db *sql.DB) http.HandlerFunc {
 			ORDER BY periodo DESC
 		`, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar períodos de débitos", err, "[RFBDebitosLista]")
 			return
 		}
 		defer rows.Close()

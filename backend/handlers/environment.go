@@ -66,7 +66,7 @@ func GetEnvironmentsHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar ambientes", err, "[Environment]")
 			return
 		}
 		defer rows.Close()
@@ -75,7 +75,7 @@ func GetEnvironmentsHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var e Environment
 			if err := rows.Scan(&e.ID, &e.Name, &e.Description, &e.CreatedAt); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler ambiente", err, "[Environment]")
 				return
 			}
 			envs = append(envs, e)
@@ -92,7 +92,7 @@ func CreateEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var e Environment
 		if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "Dados inválidos na requisição", http.StatusBadRequest)
 			return
 		}
 
@@ -102,7 +102,7 @@ func CreateEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 		).Scan(&e.ID, &e.CreatedAt)
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao criar ambiente", err, "[Environment]")
 			return
 		}
 
@@ -115,7 +115,7 @@ func UpdateEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 		// Expects ID in URL or Body. For simplicity, we take from body now or just update based on ID
 		var e Environment
 		if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "Dados inválidos na requisição", http.StatusBadRequest)
 			return
 		}
 
@@ -125,7 +125,7 @@ func UpdateEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 		)
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar ambiente", err, "[Environment]")
 			return
 		}
 
@@ -144,7 +144,7 @@ func DeleteEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 
 		_, err := db.Exec("DELETE FROM environments WHERE id = $1", id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir ambiente", err, "[Environment]")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -167,7 +167,7 @@ func GetGroupsHandler(db *sql.DB) http.HandlerFunc {
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar grupos", err, "[Environment]")
 			return
 		}
 		defer rows.Close()
@@ -176,7 +176,7 @@ func GetGroupsHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var g EnterpriseGroup
 			if err := rows.Scan(&g.ID, &g.EnvironmentID, &g.Name, &g.Description, &g.CreatedAt); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler grupo", err, "[Environment]")
 				return
 			}
 			groups = append(groups, g)
@@ -193,7 +193,7 @@ func CreateGroupHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var g EnterpriseGroup
 		if err := json.NewDecoder(r.Body).Decode(&g); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "Dados inválidos na requisição", http.StatusBadRequest)
 			return
 		}
 
@@ -203,7 +203,7 @@ func CreateGroupHandler(db *sql.DB) http.HandlerFunc {
 		).Scan(&g.ID, &g.CreatedAt)
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao criar grupo", err, "[Environment]")
 			return
 		}
 
@@ -221,7 +221,7 @@ func DeleteGroupHandler(db *sql.DB) http.HandlerFunc {
 
 		_, err := db.Exec("DELETE FROM enterprise_groups WHERE id = $1", id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir grupo", err, "[Environment]")
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -244,7 +244,7 @@ func GetCompaniesHandler(db *sql.DB) http.HandlerFunc {
 
 		rows, err := db.Query(query, args...)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar empresas", err, "[Environment]")
 			return
 		}
 		defer rows.Close()
@@ -253,7 +253,7 @@ func GetCompaniesHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var c Company
 			if err := rows.Scan(&c.ID, &c.GroupID, &c.Name, &c.TradeName, &c.CreatedAt); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler empresa", err, "[Environment]")
 				return
 			}
 			companies = append(companies, c)
@@ -270,7 +270,7 @@ func CreateCompanyHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var c Company
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "Dados inválidos na requisição", http.StatusBadRequest)
 			return
 		}
 
@@ -300,7 +300,7 @@ func CreateCompanyHandler(db *sql.DB) http.HandlerFunc {
 		).Scan(&c.ID, &c.CreatedAt)
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao criar empresa", err, "[Environment]")
 			return
 		}
 
@@ -318,7 +318,7 @@ func DeleteCompanyHandler(db *sql.DB) http.HandlerFunc {
 
 		_, err := db.Exec("DELETE FROM companies WHERE id = $1", id)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir empresa", err, "[Environment]")
 			return
 		}
 		w.WriteHeader(http.StatusOK)

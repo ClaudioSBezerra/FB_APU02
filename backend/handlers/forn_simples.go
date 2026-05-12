@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -19,7 +20,7 @@ func ListFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 
 		rows, err := db.Query("SELECT cnpj FROM forn_simples ORDER BY cnpj")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar fornecedores do Simples", err, "[FornSimples]")
 			return
 		}
 		defer rows.Close()
@@ -28,7 +29,7 @@ func ListFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var f FornSimples
 			if err := rows.Scan(&f.CNPJ); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler fornecedor do Simples", err, "[FornSimples]")
 				return
 			}
 			list = append(list, f)
@@ -72,7 +73,7 @@ func CreateFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 
 		_, err := db.Exec("INSERT INTO forn_simples (cnpj) VALUES ($1) ON CONFLICT (cnpj) DO NOTHING", cnpj)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao cadastrar fornecedor do Simples", err, "[FornSimples]")
 			return
 		}
 
@@ -106,7 +107,7 @@ func DeleteFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 
 		result, err := db.Exec("DELETE FROM forn_simples WHERE cnpj = $1", cnpj)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir fornecedor do Simples", err, "[FornSimples]")
 			return
 		}
 
@@ -143,14 +144,14 @@ func ImportFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 
 		tx, err := db.Begin()
 		if err != nil {
-			http.Error(w, "Database connection error: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao iniciar transação", err, "[FornSimples]")
 			return
 		}
 
 		stmt, err := tx.Prepare("INSERT INTO forn_simples (cnpj) VALUES ($1) ON CONFLICT (cnpj) DO NOTHING")
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao preparar importação", err, "[FornSimples]")
 			return
 		}
 		defer stmt.Close()
@@ -163,7 +164,8 @@ func ImportFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 			}
 			if err != nil {
 				tx.Rollback()
-				http.Error(w, "Error reading CSV: "+err.Error(), http.StatusBadRequest)
+				log.Printf("[FornSimples] Erro ao ler CSV: %v", err)
+				http.Error(w, "Erro ao ler CSV (verifique o formato do arquivo)", http.StatusBadRequest)
 				return
 			}
 
@@ -193,14 +195,14 @@ func ImportFornSimplesHandler(db *sql.DB) http.HandlerFunc {
 			_, err = stmt.Exec(cnpj)
 			if err != nil {
 				tx.Rollback()
-				http.Error(w, "Error inserting CNPJ "+cnpj+": "+err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao importar CNPJ", err, "[FornSimples]")
 				return
 			}
 			count++
 		}
 
 		if err := tx.Commit(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao confirmar importação", err, "[FornSimples]")
 			return
 		}
 

@@ -34,7 +34,7 @@ func GetUserHierarchyHandler(db *sql.DB) http.HandlerFunc {
 				http.Error(w, "User not assigned to any environment", http.StatusNotFound)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar ambiente do usuário", err, "[Hierarchy]")
 			return
 		}
 

@@ -39,7 +39,7 @@ func GetRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCredentials]")
 			return
 		}
 
@@ -62,7 +62,7 @@ func GetRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, "Error querying credential: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar credencial RFB", err, "[RFBCredentials]")
 			return
 		}
 
@@ -97,7 +97,7 @@ func SaveRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCredentials]")
 			return
 		}
 
@@ -148,7 +148,7 @@ func SaveRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 			RETURNING id
 		`, companyID, req.CNPJMatriz, req.ClientID, req.ClientSecret, req.Ambiente).Scan(&id)
 		if err != nil {
-			http.Error(w, "Error saving credential: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao salvar credencial RFB", err, "[RFBCredentials]")
 			return
 		}
 
@@ -201,7 +201,7 @@ func UpdateRFBScheduleHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCredentials]")
 			return
 		}
 
@@ -225,7 +225,7 @@ func UpdateRFBScheduleHandler(db *sql.DB) http.HandlerFunc {
 			WHERE company_id = $3
 		`, req.AgendamentoAtivo, req.HorarioAgendamento, companyID)
 		if err != nil {
-			http.Error(w, "Erro ao atualizar agendamento: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar agendamento", err, "[RFBCredentials]")
 			return
 		}
 
@@ -257,13 +257,13 @@ func DeleteRFBCredentialHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[RFBCredentials]")
 			return
 		}
 
 		result, err := db.Exec("DELETE FROM rfb_credentials WHERE company_id = $1", companyID)
 		if err != nil {
-			http.Error(w, "Error deleting credential: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir credencial RFB", err, "[RFBCredentials]")
 			return
 		}
 

@@ -60,7 +60,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	userID := claims["user_id"].(string)
 	companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 	if err != nil {
-		jsonErr(w, http.StatusBadRequest, err.Error())
+		sanitizeDBErr(w, http.StatusBadRequest, "Empresa não encontrada ou sem acesso", err, "[MalhaFina]")
 		return
 	}
 
@@ -247,7 +247,7 @@ func malhaFinaResumoFromMV(db *sql.DB, w http.ResponseWriter, r *http.Request, t
 	userID := claims["user_id"].(string)
 	companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 	if err != nil {
-		jsonErr(w, http.StatusBadRequest, err.Error())
+		sanitizeDBErr(w, http.StatusBadRequest, "Empresa não encontrada ou sem acesso", err, "[MalhaFina]")
 		return
 	}
 
@@ -341,7 +341,7 @@ func MalhaFinaResumoGeralHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusBadRequest, err.Error())
+			sanitizeDBErr(w, http.StatusBadRequest, "Empresa não encontrada ou sem acesso", err, "[MalhaFina]")
 			return
 		}
 

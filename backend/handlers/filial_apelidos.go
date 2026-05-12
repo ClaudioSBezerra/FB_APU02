@@ -32,7 +32,7 @@ func FilialApelidosHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[FilialApelidos]")
 			return
 		}
 
@@ -96,13 +96,14 @@ func ImportFilialApelidosHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[FilialApelidos]")
 			return
 		}
 
 		file, _, err := r.FormFile("file")
 		if err != nil {
-			http.Error(w, "Invalid file: "+err.Error(), http.StatusBadRequest)
+			log.Printf("[FilialApelidos] Erro ao receber arquivo: %v", err)
+			http.Error(w, "Arquivo inválido ou não enviado", http.StatusBadRequest)
 			return
 		}
 		defer file.Close()
@@ -110,7 +111,8 @@ func ImportFilialApelidosHandler(db *sql.DB) http.HandlerFunc {
 		// Read all bytes to handle BOM
 		raw, err := io.ReadAll(file)
 		if err != nil {
-			http.Error(w, "Error reading file: "+err.Error(), http.StatusBadRequest)
+			log.Printf("[FilialApelidos] Erro ao ler arquivo: %v", err)
+			http.Error(w, "Erro ao ler arquivo enviado", http.StatusBadRequest)
 			return
 		}
 
@@ -173,8 +175,9 @@ func ImportFilialApelidosHandler(db *sql.DB) http.HandlerFunc {
 				companyID, cnpj, apelido,
 			)
 			if err != nil {
+				log.Printf("[FilialApelidos] Erro ao inserir CNPJ %s na linha %d: %v", cnpj, i+1, err)
 				skipped++
-				errs = append(errs, "Linha "+strconv.Itoa(i+1)+": erro ao inserir CNPJ "+cnpj+": "+err.Error())
+				errs = append(errs, "Linha "+strconv.Itoa(i+1)+": erro ao inserir CNPJ "+cnpj)
 				continue
 			}
 			imported++

@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -21,7 +22,7 @@ func ListCFOPsHandler(db *sql.DB) http.HandlerFunc {
 
 		rows, err := db.Query("SELECT cfop, descricao_cfop, tipo FROM cfop ORDER BY cfop")
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar CFOPs", err, "[CFOP]")
 			return
 		}
 		defer rows.Close()
@@ -30,7 +31,7 @@ func ListCFOPsHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var c CFOP
 			if err := rows.Scan(&c.CFOP, &c.DescricaoCFOP, &c.Tipo); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler CFOP", err, "[CFOP]")
 				return
 			}
 			cfops = append(cfops, c)
@@ -103,7 +104,7 @@ func ImportCFOPsHandler(db *sql.DB) http.HandlerFunc {
 
 		tx, err := db.Begin()
 		if err != nil {
-			http.Error(w, "Database connection error: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao iniciar transação", err, "[CFOP]")
 			return
 		}
 
@@ -115,14 +116,14 @@ func ImportCFOPsHandler(db *sql.DB) http.HandlerFunc {
 		)`)
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, "Failed to create table: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao verificar tabela CFOP", err, "[CFOP]")
 			return
 		}
 
 		stmt, err := tx.Prepare("INSERT INTO cfop (cfop, descricao_cfop, tipo) VALUES ($1, $2, $3) ON CONFLICT (cfop) DO UPDATE SET descricao_cfop = $2, tipo = $3")
 		if err != nil {
 			tx.Rollback()
-			http.Error(w, "Database error: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao preparar importação de CFOP", err, "[CFOP]")
 			return
 		}
 		defer stmt.Close()
@@ -134,7 +135,8 @@ func ImportCFOPsHandler(db *sql.DB) http.HandlerFunc {
 			}
 			if err != nil {
 				tx.Rollback()
-				http.Error(w, "Error reading CSV (check format): "+err.Error(), http.StatusBadRequest)
+				log.Printf("[CFOP] Erro ao ler CSV: %v", err)
+				http.Error(w, "Erro ao ler CSV (verifique o formato do arquivo)", http.StatusBadRequest)
 				return
 			}
 			
@@ -171,13 +173,13 @@ func ImportCFOPsHandler(db *sql.DB) http.HandlerFunc {
 			_, err = stmt.Exec(cfop, descricao, tipo)
 			if err != nil {
 				tx.Rollback()
-				http.Error(w, "Error inserting CFOP "+cfop+": "+err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao inserir CFOP", err, "[CFOP]")
 				return
 			}
 		}
 		
 		if err := tx.Commit(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao confirmar importação", err, "[CFOP]")
 			return
 		}
 

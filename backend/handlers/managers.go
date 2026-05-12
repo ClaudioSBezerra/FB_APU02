@@ -37,7 +37,7 @@ func ListManagersHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[Managers]")
 			return
 		}
 
@@ -48,7 +48,7 @@ func ListManagersHandler(db *sql.DB) http.HandlerFunc {
 			ORDER BY nome_completo ASC
 		`, companyID)
 		if err != nil {
-			http.Error(w, "Error querying managers: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar managers", err, "[Managers]")
 			return
 		}
 		defer rows.Close()
@@ -57,7 +57,7 @@ func ListManagersHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var m Manager
 			if err := rows.Scan(&m.ID, &m.CompanyID, &m.NomeCompleto, &m.Cargo, &m.Email, &m.Ativo, &m.CreatedAt, &m.UpdatedAt); err != nil {
-				http.Error(w, "Error scanning manager: "+err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler manager", err, "[Managers]")
 				return
 			}
 			managers = append(managers, m)
@@ -89,7 +89,7 @@ func CreateManagerHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[Managers]")
 			return
 		}
 
@@ -135,7 +135,7 @@ func CreateManagerHandler(db *sql.DB) http.HandlerFunc {
 			RETURNING id
 		`, companyID, req.NomeCompleto, req.Cargo, req.Email).Scan(&id)
 		if err != nil {
-			http.Error(w, "Error creating manager: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao criar manager", err, "[Managers]")
 			return
 		}
 
@@ -174,7 +174,7 @@ func UpdateManagerHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[Managers]")
 			return
 		}
 
@@ -205,7 +205,7 @@ func UpdateManagerHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, "Error checking manager: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao verificar manager", err, "[Managers]")
 			return
 		}
 		if existingCompanyID != companyID {
@@ -256,7 +256,7 @@ func UpdateManagerHandler(db *sql.DB) http.HandlerFunc {
 
 		_, err = db.Exec(query, args...)
 		if err != nil {
-			http.Error(w, "Error updating manager: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar manager", err, "[Managers]")
 			return
 		}
 
@@ -294,7 +294,7 @@ func DeleteManagerHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar empresa", err, "[Managers]")
 			return
 		}
 
@@ -314,7 +314,7 @@ func DeleteManagerHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, "Error checking manager: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao verificar manager", err, "[Managers]")
 			return
 		}
 		if existingCompanyID != companyID {
@@ -325,7 +325,7 @@ func DeleteManagerHandler(db *sql.DB) http.HandlerFunc {
 		// Soft delete (set ativo = false)
 		_, err = db.Exec("UPDATE managers SET ativo = false WHERE id = $1", managerID)
 		if err != nil {
-			http.Error(w, "Error deleting manager: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao desativar manager", err, "[Managers]")
 			return
 		}
 

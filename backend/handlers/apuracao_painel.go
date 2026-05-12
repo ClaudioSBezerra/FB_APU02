@@ -67,7 +67,7 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[ApuracaoPainel]")
 			return
 		}
 
@@ -88,7 +88,7 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 			         SPLIT_PART(mes_ano, '/', 1) DESC
 		`, companyID)
 		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao listar períodos: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar períodos", err, "[ApuracaoPainel]")
 			return
 		}
 		defer rows.Close()
@@ -135,7 +135,7 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 			WHERE company_id = $1 AND mes_ano = $2
 		`, companyID, mesAno).Scan(&debitoIBSUF, &debitoIBSMun, &debitoIBS, &debitoCBS, &qtdSaidas)
 		if err != nil && err != sql.ErrNoRows {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar saídas: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar saídas", err, "[ApuracaoPainel]")
 			return
 		}
 
@@ -153,7 +153,7 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 			WHERE company_id = $1 AND mes_ano = $2
 		`, companyID, mesAno).Scan(&creditoNfeIBSUF, &creditoNfeIBSMun, &creditoNfeIBS, &creditoNfeCBS, &qtdEntradas)
 		if err != nil && err != sql.ErrNoRows {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar entradas: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar entradas", err, "[ApuracaoPainel]")
 			return
 		}
 
@@ -169,7 +169,7 @@ func ApuracaoPainelHandler(db *sql.DB) http.HandlerFunc {
 			WHERE company_id = $1 AND mes_ano = $2
 		`, companyID, mesAno).Scan(&creditoCteIBS, &creditoCteCBS, &qtdCtes)
 		if err != nil && err != sql.ErrNoRows {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar CT-e: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar CT-e", err, "[ApuracaoPainel]")
 			return
 		}
 
