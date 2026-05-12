@@ -87,7 +87,8 @@ func SolicitarCreditosHandler(db *sql.DB) http.HandlerFunc {
 			case strings.Contains(msg, "REQUEST_ERROR"):
 				http.Error(w, "Erro ao solicitar créditos: "+msg, http.StatusBadGateway)
 			default:
-				http.Error(w, msg, http.StatusInternalServerError)
+				log.Printf("[RFBCreditos] Erro inesperado: %v", err)
+				http.Error(w, "Erro ao solicitar créditos. Tente novamente.", http.StatusInternalServerError)
 			}
 			return
 		}
