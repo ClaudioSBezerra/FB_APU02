@@ -119,7 +119,8 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			case strings.Contains(msg, "REQUEST_ERROR"):
 				http.Error(w, "Erro ao solicitar apuração: "+msg, http.StatusBadGateway)
 			default:
-				http.Error(w, msg, http.StatusInternalServerError)
+				log.Printf("[SolicitarApuracao] Erro inesperado: %v", err)
+				http.Error(w, "Erro ao solicitar apuração. Tente novamente.", http.StatusInternalServerError)
 			}
 			return
 		}

@@ -283,6 +283,16 @@ func ResetDatabaseHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if role, _ := claims["role"].(string); role != "admin" {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+
 		log.Println("Admin: Initiating full database reset (clearing imported data)...")
 
 		// Execute the deletion in a transaction for safety

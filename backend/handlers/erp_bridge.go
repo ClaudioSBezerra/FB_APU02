@@ -400,7 +400,7 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 					req.TotalErros, req.ErroMsg)
 			}
 			if execErr != nil {
-				http.Error(w, execErr.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar run", execErr, "[ERPBridgeRun]")
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
