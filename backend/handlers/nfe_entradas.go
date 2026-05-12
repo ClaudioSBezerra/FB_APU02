@@ -103,7 +103,7 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa: "+err.Error())
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[NFeEntradas]")
 			return
 		}
 

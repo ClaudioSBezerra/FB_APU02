@@ -30,7 +30,7 @@ func GetFiliaisHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[Filiais]")
 			return
 		}
 
@@ -44,7 +44,7 @@ func GetFiliaisHandler(db *sql.DB) http.HandlerFunc {
 			ORDER BY m.filial_nome ASC, m.filial_cnpj ASC
 		`, companyID)
 		if err != nil {
-			http.Error(w, "Error querying filiais: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar filiais", err, "[Filiais]")
 			return
 		}
 		defer rows.Close()

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -113,7 +112,7 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 					ErpType:         "oracle_xml",
 				}
 			} else if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar configuração", err, "[ERPBridgeConfig]")
 				return
 			} else {
 				cfg.Horario = horario
@@ -171,7 +170,7 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				    updated_at       = NOW()
 			`, companyID, req.Ativo, req.Horario, req.DiasRetroativos, req.ResetTracker)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao salvar configuração", err, "[ERPBridgeConfig]")
 				return
 			}
 			// Atualiza credenciais individualmente se fornecidas
@@ -231,7 +230,7 @@ func ERPBridgeRunsHandler(db *sql.DB) http.HandlerFunc {
 				LIMIT 200
 			`, companyID)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar runs", err, "[ERPBridgeRuns]")
 				return
 			}
 			defer rows.Close()
@@ -273,7 +272,7 @@ func ERPBridgeRunsHandler(db *sql.DB) http.HandlerFunc {
 				RETURNING id
 			`, companyID, req.DataIni, req.DataFim, origem).Scan(&id)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao criar run", err, "[ERPBridgeRuns]")
 				return
 			}
 			// Atualiza ultimo_run_em na config
@@ -418,7 +417,7 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 				&run.DataIni, &run.DataFim, &run.TotalEnviados, &run.TotalIgnorados,
 				&run.TotalErros, &run.ErroMsg, &run.Origem)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar run", err, "[ERPBridgeRun]")
 				return
 			}
 			irows, _ := db.Query(`
@@ -475,7 +474,7 @@ func ERPBridgeServidoresHandler(db *sql.DB) http.HandlerFunc {
 			) t ORDER BY nome
 		`, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar servidores", err, "[ERPBridgeServidores]")
 			return
 		}
 		defer rows.Close()
@@ -594,7 +593,7 @@ func ERPBridgeCredentialsHandler(db *sql.DB) http.Handler {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar credenciais", err, "[ERPBridgeCredentials]")
 			return
 		}
 		result := map[string]string{
@@ -678,8 +677,7 @@ func ERPBridgeTriggerHandler(db *sql.DB) http.HandlerFunc {
 			RETURNING id
 		`, companyID, req.DataIni, req.DataFim, filiaisJSON, req.OnlyParceiros).Scan(&id)
 		if err != nil {
-			log.Printf("ERPBridgeTrigger insert error: %v", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao criar importação", err, "[ERPBridgeTrigger]")
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -705,7 +703,7 @@ func ERPBridgePendingHandler(db *sql.DB) http.HandlerFunc {
 			ORDER BY iniciado_em ASC
 		`, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar runs pendentes", err, "[ERPBridgePending]")
 			return
 		}
 		defer rows.Close()
@@ -760,7 +758,7 @@ func ERPBridgeHeartbeatHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao verificar API key", err, "[ERPBridgeHeartbeat]")
 			return
 		}
 

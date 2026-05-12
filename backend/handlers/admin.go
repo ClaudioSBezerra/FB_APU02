@@ -41,7 +41,7 @@ func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Erro ao identificar empresa: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao identificar empresa", err, "[LimparApuracao]")
 			return
 		}
 
@@ -57,8 +57,7 @@ func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		for _, t := range tables {
 			res, err := db.Exec("DELETE FROM "+t+" WHERE company_id = $1", companyID)
 			if err != nil {
-				log.Printf("[LimparApuracao] Erro ao limpar %s: %v", t, err)
-				http.Error(w, "Erro ao limpar "+t+": "+err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao limpar dados de apuração", err, "[LimparApuracao]")
 				return
 			}
 			n, _ := res.RowsAffected()
@@ -236,8 +235,7 @@ func RefreshViewsHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("Concurrent refresh failed for mv_mercadorias_agregada, trying standard: %v", err)
 			_, err = db.Exec("REFRESH MATERIALIZED VIEW mv_mercadorias_agregada")
 			if err != nil {
-				log.Printf("Error refreshing mv_mercadorias_agregada: %v", err)
-				http.Error(w, "Failed to refresh mv_mercadorias_agregada: "+err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar view mv_mercadorias_agregada", err, "[RefreshViews]")
 				return
 			}
 		}
@@ -248,8 +246,7 @@ func RefreshViewsHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("Concurrent refresh failed for mv_operacoes_simples, trying standard: %v", err)
 			_, err = db.Exec("REFRESH MATERIALIZED VIEW mv_operacoes_simples")
 			if err != nil {
-				log.Printf("Error refreshing mv_operacoes_simples: %v", err)
-				http.Error(w, "Failed to refresh mv_operacoes_simples: "+err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar view mv_operacoes_simples", err, "[RefreshViews]")
 				return
 			}
 		}
@@ -260,8 +257,7 @@ func RefreshViewsHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("Concurrent refresh failed for mv_compras_fornecedores, trying standard: %v", err)
 			_, err = db.Exec("REFRESH MATERIALIZED VIEW mv_compras_fornecedores")
 			if err != nil {
-				log.Printf("Error refreshing mv_compras_fornecedores: %v", err)
-				http.Error(w, "Failed to refresh mv_compras_fornecedores: "+err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar view mv_compras_fornecedores", err, "[RefreshViews]")
 				return
 			}
 		}

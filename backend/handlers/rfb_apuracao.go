@@ -88,7 +88,7 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[SolicitarApuracao]")
 			return
 		}
 
@@ -151,7 +151,7 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[DownloadManual]")
 			return
 		}
 
@@ -175,7 +175,7 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, "Erro ao buscar solicitação: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar solicitação", err, "[DownloadManual]")
 			return
 		}
 
@@ -237,7 +237,7 @@ func DeleteRequestHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[DeleteRequest]")
 			return
 		}
 		requestID := strings.TrimPrefix(r.URL.Path, "/api/rfb/apuracao/")
@@ -248,7 +248,7 @@ func DeleteRequestHandler(db *sql.DB) http.HandlerFunc {
 			WHERE id = $1 AND company_id = $2 AND status = 'error'
 		`, requestID, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao remover solicitação", err, "[DeleteRequest]")
 			return
 		}
 		rows, _ := res.RowsAffected()
@@ -276,12 +276,12 @@ func ClearErrorsHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[ClearErrors]")
 			return
 		}
 		res, err := db.Exec(`DELETE FROM rfb_requests WHERE company_id = $1 AND status = 'error'`, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao remover registros de erro", err, "[ClearErrors]")
 			return
 		}
 		rows, _ := res.RowsAffected()
@@ -309,7 +309,7 @@ func ReprocessHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[Reprocess]")
 			return
 		}
 
@@ -500,7 +500,7 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[StatusApuracao]")
 			return
 		}
 
@@ -518,7 +518,7 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			LIMIT 20
 		`, companyID)
 		if err != nil {
-			http.Error(w, "Error querying requests: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar solicitações", err, "[StatusApuracao]")
 			return
 		}
 		defer rows.Close()
@@ -538,8 +538,8 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 				&resCBSTotal, &resCBSExtinto, &resCBSNaoExtinto,
 				&resCorrente, &resAjuste, &resExtemp,
 			); err != nil {
-				http.Error(w, "Error scanning request: "+err.Error(), http.StatusInternalServerError)
-				return
+				log.Printf("[StatusApuracao] Erro ao ler solicitação: %v", err)
+				continue
 			}
 			if resID.Valid {
 				req.Resumo = &RFBResumo{
@@ -579,7 +579,7 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, "Error getting company: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[DetalheApuracao]")
 			return
 		}
 
@@ -592,7 +592,7 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			res, err := db.Exec(`DELETE FROM rfb_requests WHERE id = $1 AND company_id = $2 AND status = 'error'`,
 				requestID, companyID)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao remover solicitação", err, "[DetalheApuracao]")
 				return
 			}
 			rows, _ := res.RowsAffected()
@@ -622,7 +622,7 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, "Error querying request: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar solicitação", err, "[DetalheApuracao]")
 			return
 		}
 
@@ -746,7 +746,7 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		pageArgs := append(args, pageSize, offset)
 		debitRows, err := db.Query(selectQ, pageArgs...)
 		if err != nil {
-			http.Error(w, "Error querying debits: "+err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar débitos", err, "[DetalheApuracao]")
 			return
 		}
 		defer debitRows.Close()

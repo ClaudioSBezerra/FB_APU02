@@ -47,7 +47,7 @@ func StatusCGIBSApuracaoHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[StatusCGIBSApuracao]")
 			return
 		}
 
@@ -63,7 +63,7 @@ func StatusCGIBSApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			LIMIT 50
 		`, companyID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar solicitações CGIBS", err, "[StatusCGIBSApuracao]")
 			return
 		}
 		defer rows.Close()
@@ -153,7 +153,7 @@ func ClearErrorsCGIBSHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[ClearErrorsCGIBS]")
 			return
 		}
 		db.Exec(`DELETE FROM cgibs_requests WHERE company_id=$1 AND status='error'`, companyID)
@@ -173,7 +173,7 @@ func DetalheCGIBSHandler(db *sql.DB) http.HandlerFunc {
 		userID := claims["user_id"].(string)
 		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[DetalheCGIBS]")
 			return
 		}
 

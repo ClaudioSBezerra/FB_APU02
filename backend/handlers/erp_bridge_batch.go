@@ -113,7 +113,8 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 		// ── Parse body ────────────────────────────────────────────────────────
 		var req batchRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, `{"error":"JSON inválido: `+err.Error()+`"}`, http.StatusBadRequest)
+			log.Printf("[BatchImport] JSON inválido: %v", err)
+			http.Error(w, `{"error":"JSON inválido"}`, http.StatusBadRequest)
 			return
 		}
 
