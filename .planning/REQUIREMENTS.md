@@ -21,7 +21,7 @@
 ### Débito Técnico
 
 - [ ] **DEBT-01**: Migrations com números duplicados renumeradas — `021` (2 arquivos) e `061` (2 arquivos)
-- [ ] **DEBT-02**: Chamadas `db.Exec` sem verificação de erro corrigidas — ao menos 15 ocorrências silenciosas nos handlers
+- [x] **DEBT-02**: Chamadas `db.Exec` sem verificação de erro corrigidas — ao menos 15 ocorrências silenciosas nos handlers
 - [ ] **DEBT-03**: Redis removido do `docker-compose.prod.yml` — definido mas sem nenhum uso no código Go (256 MB alocados em vão)
 - [ ] **DEBT-04**: Ferramentas de debug com senhas hardcoded removidas ou excluídas do git (`backend/tools/debug_*.go`, `verify_data.go`)
 - [ ] **DEBT-05**: Middleware `backend/middleware/tenant.go` avaliado — decisão documentada sobre aplicar ou não nos handlers críticos; se aplicado, handlers migrados
@@ -70,7 +70,7 @@
 | BUG-02 | Fase 2 | Complete |
 | BUG-03 | Fase 2 | Complete |
 | DEBT-01 | Fase 3 | Pending |
-| DEBT-02 | Fase 3 | Pending |
+| DEBT-02 | Fase 3 | Complete |
 | DEBT-03 | Fase 3 | Pending |
 | DEBT-04 | Fase 3 | Pending |
 | DEBT-05 | Fase 3 | Pending |

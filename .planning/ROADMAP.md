@@ -8,7 +8,7 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
 
 - [x] **Phase 1: Seguranca** - Remover credenciais expostas, ativar rate limiter, migrar JWT para sessionStorage e sanitizar erros do banco (completed 2026-05-12)
 - [x] **Phase 2: Bugs** - Unificar a chave de company ID no localStorage e corrigir os tres componentes que leem chave errada (completed 2026-05-12)
-- [ ] **Phase 3: Debito Tecnico** - Renumerar migrations duplicadas, corrigir erros silenciosos de DB, remover Redis ocioso e ferramentas de debug, avaliar tenant middleware
+- [x] **Phase 3: Debito Tecnico** - Renumerar migrations duplicadas, corrigir erros silenciosos de DB, remover Redis ocioso e ferramentas de debug, avaliar tenant middleware (completed 2026-05-12)
 - [ ] **Phase 4: Qualidade** - Configurar Vitest, escrever testes unitarios nos handlers criticos e incluir etapa de testes no CI
 
 ## Phase Details
@@ -56,7 +56,13 @@ Plans:
   3. `docker-compose.prod.yml` nao define servico Redis; o container nao sobe em producao
   4. Os arquivos `backend/tools/debug_*.go` e `verify_data.go` nao existem no repositorio (ou estao no `.gitignore`) e nenhum arquivo rastreado pelo git contem senha hardcoded de ambiente de desenvolvimento
   5. Ha uma decisao documentada em PROJECT.md sobre `middleware/tenant.go`: aplicado (com handlers migrados) ou diferido para v2 com justificativa
-**Plans**: TBD
+**Plans**: 5 planos
+Plans:
+- [x] 03-01-PLAN.md — DEBT-01: Renumerar migrations duplicadas (021 e 061)
+- [x] 03-02-PLAN.md — DEBT-02: Verificação de erro em db.Exec nos handlers
+- [x] 03-03-PLAN.md — DEBT-03: Remover Redis do docker-compose.prod.yml
+- [x] 03-04-PLAN.md — DEBT-04: Remover ferramentas de debug do rastreamento git
+- [x] 03-05-PLAN.md — DEBT-05: Decisão sobre middleware/tenant.go documentada em PROJECT.md
 
 ### Phase 4: Qualidade
 **Goal**: O projeto tem testes executaveis, os handlers criticos tem cobertura unitaria e o pipeline de CI impede deploy sem testes passando
@@ -74,5 +80,5 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Seguranca | 7/7 | Complete   | 2026-05-12 |
 | 2. Bugs | 2/2 | Complete   | 2026-05-12 |
-| 3. Debito Tecnico | 0/? | Not started | - |
+| 3. Debito Tecnico | 5/5 | Complete   | 2026-05-12 |
 | 4. Qualidade | 0/? | Not started | - |
