@@ -22,12 +22,15 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
   2. Um agente automatizado fazendo mais de 5 tentativas de login em 15 minutos recebe HTTP 429 antes de atingir a 6a tentativa
   3. Apos login bem-sucedido, o JWT esta em `sessionStorage` e nao em `localStorage`; fechar o browser encerra a sessao
   4. Erros internos do PostgreSQL (nomes de tabela, query text) nunca aparecem na resposta HTTP; o browser recebe apenas uma mensagem generica
-**Plans**: 4 planos
+**Plans**: 7 planos (4 originais + 3 gap closure)
 Plans:
 - [x] 01-01-PLAN.md — Credencial ERP bridge: remover senha de config.yaml, gitignore e expurgar historico git (SEC-01)
 - [x] 01-02-PLAN.md — Rate limiter de login: aplicar LoginRL na rota /api/auth/login (SEC-02)
 - [x] 01-03-PLAN.md — JWT sessionStorage: migrar token de localStorage para sessionStorage no AuthContext (SEC-03)
 - [x] 01-04-PLAN.md — Sanitizacao de erros DB: helper sanitizeDBErr + correcao de todos os vazamentos de err.Error() (SEC-04)
+- [ ] 01-05-PLAN.md — [GAP] SEC-01: Re-expurgar historico git (commits 402bc32 e 01e5d74 ainda contem config.yaml)
+- [ ] 01-06-PLAN.md — [GAP] CR-02+CR-03+WR-03: Fix vazamentos em erp_bridge.go e rfb_apuracao.go + auth check em admin.go
+- [ ] 01-07-PLAN.md — [GAP] SEC-04 extensao: sanitizeDBErr nos ~12 handlers fora do escopo original
 
 ### Phase 2: Bugs
 **Goal**: Qualquer pagina do frontend opera sempre com a empresa correta — sem empresa errada silenciosa causada por chaves discrepantes de localStorage
