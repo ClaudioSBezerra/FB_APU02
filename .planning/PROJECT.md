@@ -103,3 +103,34 @@ Este documento evolui a cada transição de fase e milestone.
 
 ---
 *Last updated: 2026-05-12 após inicialização*
+
+## Decisões Arquiteturais
+
+### middleware/tenant.go — Diferido para v2 (2026-05-12)
+
+**Contexto:** `backend/middleware/tenant.go` define `WithTenant(db, ctx, fn)` — um helper
+que abre uma transação PostgreSQL e chama `set_config('app.tenant_id', ...)` para que
+políticas RLS possam filtrar automaticamente por tenant, sem que cada handler precise
+passar `company_id` explicitamente.
+
+**Situação atual:** Nenhum handler usa `WithTenant`. Todos os 40+ handlers usam o padrão
+`GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))` + `WHERE company_id = $1`
+explícito em cada query SQL.
+
+**Decisão: Diferir para v2.**
+
+**Justificativa:**
+1. **Escopo do milestone:** Este milestone é exclusivamente de estabilização — sem
+   refatorações de arquitetura. Migrar 40+ handlers para `WithTenant` é uma refatoração
+   significativa com risco de regressão.
+2. **Migração não-trivial:** `WithTenant` requer que todas as queries dentro de uma
+   requisição usem o mesmo `*sql.Tx` (não `*sql.DB`). Cada handler precisaria mudar
+   sua assinatura e passar `tx` em vez de `db` em todos os `QueryRow`, `Query` e `Exec`.
+3. **Risco mitigado:** Os bugs de company ID que motivariam a migração foram corrigidos
+   na Phase 2 (BUG-01, BUG-02, BUG-03). O padrão atual funciona corretamente.
+4. **Defesa existente:** `GetEffectiveCompanyID` valida que o usuário tem acesso à empresa
+   solicitada antes de retornar o ID — é uma verificação explícita e testável.
+
+**Ação v2:** Quando RLS for ativado em produção, migrar os handlers críticos para
+`WithTenant` começando pelos handlers de leitura (sem risco de rollback de escrita).
+Prioridade: `nfe_entradas.go`, `nfe_saidas.go`, `rfb_apuracao.go`, `cgibs_apuracao.go`.
