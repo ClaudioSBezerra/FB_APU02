@@ -65,8 +65,7 @@ func initDBAsync() {
 		var err error
 		connStr := os.Getenv("DATABASE_URL")
 		if connStr == "" {
-			connStr = "postgres://postgres:postgres@localhost:5432/fiscal_db?sslmode=disable"
-			fmt.Println("DATABASE_URL not set, using default local connection:", connStr)
+			log.Fatal("DATABASE_URL environment variable is required")
 		}
 
 		attempt := 0

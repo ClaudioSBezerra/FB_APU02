@@ -49,6 +49,11 @@ temp_lovable_analysis/
 
 # Credentials — never commit
 erp-bridge-aws/config.yaml
+.env.*
+
+# Compiled binaries
+backend/fb_apu02
+backend/fb_apu01
 
 # Debug tools (local only — contain dev credentials)
 backend/tools/
