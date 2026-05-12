@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -189,11 +190,13 @@ func UpdateCGIBSScheduleHandler(db *sql.DB) http.HandlerFunc {
 		if len(req.HorarioAgendamento) != 5 || req.HorarioAgendamento[2] != ':' {
 			req.HorarioAgendamento = "06:00"
 		}
-		db.Exec(`
+		if _, err := db.Exec(`
 			UPDATE cgibs_credentials
 			SET agendamento_ativo=$1, horario_agendamento=$2::TIME, updated_at=NOW()
 			WHERE company_id=$3
-		`, req.AgendamentoAtivo, req.HorarioAgendamento, companyID)
+		`, req.AgendamentoAtivo, req.HorarioAgendamento, companyID); err != nil {
+			log.Printf("[CGIBSCredentials] Erro ao atualizar agendamento: %v", err)
+		}
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"agendamento_ativo":   req.AgendamentoAtivo,

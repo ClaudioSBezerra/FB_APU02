@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -156,7 +157,9 @@ func ClearErrorsCGIBSHandler(db *sql.DB) http.HandlerFunc {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao obter empresa", err, "[ClearErrorsCGIBS]")
 			return
 		}
-		db.Exec(`DELETE FROM cgibs_requests WHERE company_id=$1 AND status='error'`, companyID)
+		if _, err := db.Exec(`DELETE FROM cgibs_requests WHERE company_id=$1 AND status='error'`, companyID); err != nil {
+			log.Printf("[ClearErrorsCGIBS] Erro ao remover registros de erro: %v", err)
+		}
 		json.NewEncoder(w).Encode(map[string]string{"message": "Erros removidos"})
 	}
 }
@@ -179,7 +182,9 @@ func DetalheCGIBSHandler(db *sql.DB) http.HandlerFunc {
 
 		id := r.URL.Path[len("/api/cgibs/apuracao/"):]
 		if r.Method == http.MethodDelete {
-			db.Exec(`DELETE FROM cgibs_requests WHERE id=$1 AND company_id=$2`, id, companyID)
+			if _, err := db.Exec(`DELETE FROM cgibs_requests WHERE id=$1 AND company_id=$2`, id, companyID); err != nil {
+				log.Printf("[DetalheCGIBS] Erro ao deletar request: %v", err)
+			}
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

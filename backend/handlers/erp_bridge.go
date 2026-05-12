@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -175,28 +176,40 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 			}
 			// Atualiza credenciais individualmente se fornecidas
 			if req.FBTaxEmail != nil {
-				db.Exec(`UPDATE erp_bridge_config SET fbtax_email = $2 WHERE company_id = $1`, companyID, *req.FBTaxEmail)
+				if _, err := db.Exec(`UPDATE erp_bridge_config SET fbtax_email = $2 WHERE company_id = $1`, companyID, *req.FBTaxEmail); err != nil {
+					log.Printf("[ERPBridge] Erro ao atualizar fbtax_email: %v", err)
+				}
 			}
 			if req.FBTaxPassword != nil && *req.FBTaxPassword != "" {
 				if enc, encErr := EncryptField(*req.FBTaxPassword); encErr == nil {
-					db.Exec(`UPDATE erp_bridge_config SET fbtax_password = $2 WHERE company_id = $1`, companyID, enc)
+					if _, err := db.Exec(`UPDATE erp_bridge_config SET fbtax_password = $2 WHERE company_id = $1`, companyID, enc); err != nil {
+						log.Printf("[ERPBridge] Erro ao atualizar fbtax_password: %v", err)
+					}
 				}
 			}
 			if req.OracleUsuario != nil {
 				if enc, encErr := EncryptField(*req.OracleUsuario); encErr == nil {
-					db.Exec(`UPDATE erp_bridge_config SET oracle_usuario = $2 WHERE company_id = $1`, companyID, enc)
+					if _, err := db.Exec(`UPDATE erp_bridge_config SET oracle_usuario = $2 WHERE company_id = $1`, companyID, enc); err != nil {
+						log.Printf("[ERPBridge] Erro ao atualizar oracle_usuario: %v", err)
+					}
 				}
 			}
 			if req.OracleSenha != nil && *req.OracleSenha != "" {
 				if enc, encErr := EncryptField(*req.OracleSenha); encErr == nil {
-					db.Exec(`UPDATE erp_bridge_config SET oracle_senha = $2 WHERE company_id = $1`, companyID, enc)
+					if _, err := db.Exec(`UPDATE erp_bridge_config SET oracle_senha = $2 WHERE company_id = $1`, companyID, enc); err != nil {
+						log.Printf("[ERPBridge] Erro ao atualizar oracle_senha: %v", err)
+					}
 				}
 			}
 			if req.ErpType != nil {
-				db.Exec(`UPDATE erp_bridge_config SET erp_type = $2 WHERE company_id = $1`, companyID, *req.ErpType)
+				if _, err := db.Exec(`UPDATE erp_bridge_config SET erp_type = $2 WHERE company_id = $1`, companyID, *req.ErpType); err != nil {
+					log.Printf("[ERPBridge] Erro ao atualizar erp_type: %v", err)
+				}
 			}
 			if req.OracleDsn != nil {
-				db.Exec(`UPDATE erp_bridge_config SET oracle_dsn = $2 WHERE company_id = $1`, companyID, *req.OracleDsn)
+				if _, err := db.Exec(`UPDATE erp_bridge_config SET oracle_dsn = $2 WHERE company_id = $1`, companyID, *req.OracleDsn); err != nil {
+					log.Printf("[ERPBridge] Erro ao atualizar oracle_dsn: %v", err)
+				}
 			}
 			w.WriteHeader(http.StatusNoContent)
 
@@ -276,20 +289,24 @@ func ERPBridgeRunsHandler(db *sql.DB) http.HandlerFunc {
 				return
 			}
 			// Atualiza ultimo_run_em na config
-			db.Exec(`
+			if _, err := db.Exec(`
 				INSERT INTO erp_bridge_config (company_id, ativo, horario, dias_retroativos, ultimo_run_em)
 				VALUES ($1, false, '02:00', 1, NOW())
 				ON CONFLICT (company_id) DO UPDATE SET ultimo_run_em = NOW()
-			`, companyID)
+			`, companyID); err != nil {
+				log.Printf("[ERPBridgeRuns] Erro ao atualizar ultimo_run_em: %v", err)
+			}
 			w.WriteHeader(http.StatusCreated)
 			json.NewEncoder(w).Encode(map[string]string{"id": id})
 
 		case http.MethodDelete:
 			// Limpa runs finalizados (não remove running/pending)
-			db.Exec(`
+			if _, err := db.Exec(`
 				DELETE FROM erp_bridge_runs
 				WHERE company_id = $1 AND status NOT IN ('running','pending')
-			`, companyID)
+			`, companyID); err != nil {
+				log.Printf("[ERPBridgeRuns] Erro ao limpar runs finalizados: %v", err)
+			}
 			w.WriteHeader(http.StatusNoContent)
 
 		default:
@@ -349,12 +366,14 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 				if status == "" {
 					status = "ok"
 				}
-				db.Exec(`
+				if _, err := db.Exec(`
 					INSERT INTO erp_bridge_run_items
 					    (run_id, servidor, tipo, enviados, ignorados, erros, status, erro_msg)
 					VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 				`, runID, item.Servidor, item.Tipo, item.Enviados,
-					item.Ignorados, item.Erros, status, item.ErroMsg)
+					item.Ignorados, item.Erros, status, item.ErroMsg); err != nil {
+					log.Printf("[ERPBridgeRun] Erro ao inserir item de run (servidor=%s tipo=%s): %v", item.Servidor, item.Tipo, err)
+				}
 			}
 			w.WriteHeader(http.StatusCreated)
 
@@ -515,11 +534,13 @@ func ERPBridgeRegistrarServidoresHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		for _, nome := range body.Nomes {
-			db.Exec(`
+			if _, err := db.Exec(`
 				INSERT INTO erp_bridge_servidores (company_id, nome, updated_at)
 				VALUES ($1, $2, NOW())
 				ON CONFLICT (company_id, nome) DO UPDATE SET updated_at = NOW()
-			`, companyID, nome)
+			`, companyID, nome); err != nil {
+				log.Printf("[ERPBridgeServidores] Erro ao registrar servidor %q: %v", nome, err)
+			}
 		}
 		w.WriteHeader(http.StatusNoContent)
 	}
@@ -555,11 +576,14 @@ func ERPBridgeGenerateAPIKeyHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "erro ao criptografar chave", http.StatusInternalServerError)
 			return
 		}
-		db.Exec(`
+		if _, err := db.Exec(`
 			INSERT INTO erp_bridge_config (company_id, api_key, api_key_hash)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (company_id) DO UPDATE SET api_key = $2, api_key_hash = $3, updated_at = NOW()
-		`, companyID, enc, hashHex)
+		`, companyID, enc, hashHex); err != nil {
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao salvar API key", err, "[ERPBridgeGenerateAPIKey]")
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]string{"api_key": key})
 	}
 }
@@ -763,12 +787,14 @@ func ERPBridgeHeartbeatHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Atualiza daemon_last_seen
-		db.Exec(`
+		if _, err := db.Exec(`
 			UPDATE erp_bridge_config SET daemon_last_seen = NOW() WHERE company_id = $1
-		`, companyID)
+		`, companyID); err != nil {
+			log.Printf("[ERPBridgeHeartbeat] Erro ao atualizar daemon_last_seen: %v", err)
+		}
 
 		// Limpa runs presos: pending/running por mais de 2 horas → error
-		db.Exec(`
+		if _, err := db.Exec(`
 			UPDATE erp_bridge_runs
 			SET status = 'error',
 			    finalizado_em = NOW(),
@@ -776,7 +802,9 @@ func ERPBridgeHeartbeatHandler(db *sql.DB) http.HandlerFunc {
 			WHERE company_id = $1
 			  AND status IN ('pending', 'running')
 			  AND iniciado_em < NOW() - INTERVAL '2 hours'
-		`, companyID)
+		`, companyID); err != nil {
+			log.Printf("[ERPBridgeHeartbeat] Erro ao limpar runs presos: %v", err)
+		}
 
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	}

@@ -363,12 +363,14 @@ func upsertParceiro(db *sql.DB, companyID, cnpj, nome string) {
 	if strings.TrimSpace(cnpj) == "" || strings.TrimSpace(nome) == "" {
 		return
 	}
-	db.Exec(`
+	if _, err := db.Exec(`
 		INSERT INTO parceiros (company_id, cnpj, nome) VALUES ($1, $2, $3)
 		ON CONFLICT (company_id, cnpj)
 		DO UPDATE SET nome = EXCLUDED.nome
 		WHERE parceiros.nome = '' OR parceiros.nome IS NULL
-	`, companyID, strings.TrimSpace(cnpj), strings.TrimSpace(nome))
+	`, companyID, strings.TrimSpace(cnpj), strings.TrimSpace(nome)); err != nil {
+		log.Printf("[ERPBridgeBatch] Erro ao upsert parceiro (cnpj=%s): %v", strings.TrimSpace(cnpj), err)
+	}
 }
 
 // nullDate converte "YYYY-MM-DD" para sql.NullString; retorna NULL se vazio.

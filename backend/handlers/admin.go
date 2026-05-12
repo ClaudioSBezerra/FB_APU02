@@ -182,19 +182,25 @@ func ResetCompanyDataHandler(db *sql.DB) http.HandlerFunc {
 			// Refresh mv_mercadorias_agregada
 			if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_mercadorias_agregada"); err != nil {
 				log.Printf("ResetCompanyData: Concurrent refresh failed for mv_mercadorias_agregada, trying standard: %v", err)
-				db.Exec("REFRESH MATERIALIZED VIEW mv_mercadorias_agregada")
+				if _, err := db.Exec("REFRESH MATERIALIZED VIEW mv_mercadorias_agregada"); err != nil {
+					log.Printf("ResetCompanyData: Standard refresh also failed for mv_mercadorias_agregada: %v", err)
+				}
 			}
 
 			// Refresh mv_operacoes_simples (Simples Nacional)
 			if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_operacoes_simples"); err != nil {
 				log.Printf("ResetCompanyData: Concurrent refresh failed for mv_operacoes_simples, trying standard: %v", err)
-				db.Exec("REFRESH MATERIALIZED VIEW mv_operacoes_simples")
+				if _, err := db.Exec("REFRESH MATERIALIZED VIEW mv_operacoes_simples"); err != nil {
+					log.Printf("ResetCompanyData: Standard refresh also failed for mv_operacoes_simples: %v", err)
+				}
 			}
 
 			// Refresh mv_compras_fornecedores (todos os fornecedores)
 			if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_compras_fornecedores"); err != nil {
 				log.Printf("ResetCompanyData: Concurrent refresh failed for mv_compras_fornecedores, trying standard: %v", err)
-				db.Exec("REFRESH MATERIALIZED VIEW mv_compras_fornecedores")
+				if _, err := db.Exec("REFRESH MATERIALIZED VIEW mv_compras_fornecedores"); err != nil {
+					log.Printf("ResetCompanyData: Standard refresh also failed for mv_compras_fornecedores: %v", err)
+				}
 			}
 
 			log.Printf("ResetCompanyData: View refresh completed for CompanyID %s", req.CompanyID)
@@ -437,9 +443,13 @@ func CreateUserHandler(db *sql.DB) http.HandlerFunc {
 			if err == nil {
 				var groupID string
 				db.QueryRow("INSERT INTO enterprise_groups (environment_id, name, description) VALUES ($1, 'Grupo Padrão', 'Grupo Inicial') RETURNING id", envID).Scan(&groupID)
-				db.Exec("INSERT INTO user_environments (user_id, environment_id, role) VALUES ($1, $2, 'admin')", userID, envID)
+				if _, execErr := db.Exec("INSERT INTO user_environments (user_id, environment_id, role) VALUES ($1, $2, 'admin')", userID, envID); execErr != nil {
+					log.Printf("[AdminCreateUser] Erro ao inserir user_environments: %v", execErr)
+				}
 				if groupID != "" {
-					db.Exec("INSERT INTO companies (group_id, name, trade_name, owner_id) VALUES ($1, $2, $2, $3)", groupID, "Empresa de "+req.FullName, userID)
+					if _, execErr := db.Exec("INSERT INTO companies (group_id, name, trade_name, owner_id) VALUES ($1, $2, $2, $3)", groupID, "Empresa de "+req.FullName, userID); execErr != nil {
+						log.Printf("[AdminCreateUser] Erro ao inserir company: %v", execErr)
+					}
 				}
 			}
 		}
