@@ -46,3 +46,6 @@ backups/
 temp_lovable_analysis/
 # Claude Code local state
 .claude/
+
+# Credentials — never commit
+erp-bridge-aws/config.yaml
