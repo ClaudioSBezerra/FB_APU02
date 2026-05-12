@@ -14,7 +14,7 @@ key-files:
 
 ## Summary
 
-Credencial do Oracle ERP/FBTax removida do repositório git. Senha real `Proxy#6939` substituída por placeholder e expurgada do histórico completo via `git filter-branch`.
+Credencial do Oracle ERP/FBTax removida do repositório git. Senha real (REDACTED) substituída por placeholder e expurgada do histórico completo via `git filter-branch`.
 
 ## What Was Built
 
@@ -32,7 +32,7 @@ Credencial do Oracle ERP/FBTax removida do repositório git. Senha real `Proxy#6
 - [x] `erp-bridge-aws/config.yaml` existe localmente com placeholder (não senha real)
 - [x] `grep "erp-bridge-aws/config.yaml" .gitignore` retorna 1 resultado
 - [x] `git check-ignore -v erp-bridge-aws/config.yaml` confirma que está ignorado
-- [x] `git log -p --all | grep "Proxy#6939"` retorna 0 ocorrências
+- [x] `git log -p --all | grep "[REDACTED]"` retorna 0 ocorrências
 - [x] Credencial rotacionada no sistema de origem (confirmado pelo usuário)
 
 ## Self-Check: PASSED
