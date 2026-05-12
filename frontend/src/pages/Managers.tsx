@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Manager {
   id: string;
@@ -12,6 +13,7 @@ interface Manager {
 }
 
 export default function Managers() {
+  const { companyId } = useAuth();
   const [managers, setManagers] = useState<Manager[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -21,14 +23,7 @@ export default function Managers() {
 
   const fetchManagers = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('selectedCompanyId');
-      const response = await fetch('/api/managers', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': companyId || '',
-        },
-      });
+      const response = await fetch('/api/managers');
       if (response.ok) {
         const data = await response.json();
         setManagers(data.managers || []);
@@ -44,15 +39,14 @@ export default function Managers() {
 
   useEffect(() => {
     fetchManagers();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('selectedCompanyId');
       const url = editingManager
         ? `/api/managers/${editingManager.id}`
         : '/api/managers/create';
@@ -63,8 +57,6 @@ export default function Managers() {
         method,
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': companyId || '',
         },
         body: JSON.stringify(formData),
       });
@@ -98,14 +90,8 @@ export default function Managers() {
     if (!confirm('Tem certeza que deseja desativar este gestor?')) return;
 
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('selectedCompanyId');
       const response = await fetch(`/api/managers/${id}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': companyId || '',
-        },
       });
 
       if (response.ok) {
