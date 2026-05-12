@@ -53,14 +53,9 @@ export default function CGIBSApuracao() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null)
 
-  const getHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
-    'X-Company-ID': localStorage.getItem('companyId') || localStorage.getItem('company_id') || '',
-  })
-
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch('/api/cgibs/apuracao/status', { headers: getHeaders() })
+      const res = await fetch('/api/cgibs/apuracao/status')
       if (res.ok) {
         const data = await res.json()
         setRequests(data.requests || [])
@@ -76,7 +71,7 @@ export default function CGIBSApuracao() {
     try {
       const res = await fetch('/api/cgibs/apuracao/solicitar', {
         method: 'POST',
-        headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
       })
       const data = await res.json()
       if (res.ok) {
@@ -92,13 +87,13 @@ export default function CGIBSApuracao() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Remover este registro do histórico?')) return
-    await fetch(`/api/cgibs/apuracao/${id}`, { method: 'DELETE', headers: getHeaders() })
+    await fetch(`/api/cgibs/apuracao/${id}`, { method: 'DELETE' })
     setRequests(prev => prev.filter(r => r.id !== id))
   }
 
   const handleClearErrors = async () => {
     if (!confirm('Limpar todos os registros com erro?')) return
-    await fetch('/api/cgibs/apuracao/clear-errors', { method: 'DELETE', headers: getHeaders() })
+    await fetch('/api/cgibs/apuracao/clear-errors', { method: 'DELETE' })
     setRequests(prev => prev.filter(r => r.status !== 'error'))
   }
 

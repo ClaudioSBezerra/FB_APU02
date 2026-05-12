@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import * as XLSX from 'xlsx';
 import { useFiliais } from '@/contexts/FilialContext';
@@ -143,12 +143,7 @@ const MODELOS_DFE = ['55', '65', '57', '67', '58', '63'];
 // ── DANFE via backend ─────────────────────────────────────────────────────────
 
 async function openDanfe(chave: string) {
-  const res = await fetch(`/api/danfe/${chave}`, {
-    headers: {
-      'Authorization': `Bearer ${localStorage.getItem('token')}`,
-      'X-Company-ID': localStorage.getItem('companyId') || '',
-    },
-  });
+  const res = await fetch(`/api/danfe/${chave}`);
   if (res.status === 404) { toast.error('XML desta NF-e não encontrado. Importe o XML de saída primeiro.'); return; }
   if (!res.ok) { toast.error('Erro ao gerar DANFE. Tente novamente.'); return; }
   const blob = await res.blob();
@@ -204,10 +199,6 @@ export default function RFBDebitos() {
   const { selectedFiliais } = useFiliais();
   const niEmitente = selectedFiliais.length === 1 ? selectedFiliais[0].replace(/\D/g, '') : '';
 
-  const getHeaders = useCallback(() => ({
-    'Authorization': `Bearer ${localStorage.getItem('token')}`,
-    'X-Company-ID':  localStorage.getItem('companyId') || '',
-  }), []);
 
   useEffect(() => { setPage(1); }, [filters, niEmitente, selectedPeriodo]);
 
@@ -215,7 +206,7 @@ export default function RFBDebitos() {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch('/api/rfb/debitos/periodos', { headers: getHeaders() });
+        const res = await fetch('/api/rfb/debitos/periodos');
         if (res.ok) {
           const data = await res.json();
           const raw: string[] = (data.periodos || []).map(normalizePeriodo).filter((p: string) => p.length >= 6);
@@ -228,7 +219,7 @@ export default function RFBDebitos() {
       } catch { /* silent */ } finally { setLoadingList(false); }
     }
     load();
-  }, [getHeaders]);
+  }, []);
 
   // Anos distintos a partir dos períodos disponíveis
   const anos = [...new Set(periodos.map(p => p.slice(0, 4)))];
@@ -261,7 +252,7 @@ export default function RFBDebitos() {
       if (clienteDebounced)   params.set('ni_adquirente', clienteDebounced.replace(/\D/g, ''));
       if (niEmitente)         params.set('ni_emitente',   niEmitente);
 
-      const res = await fetch(`/api/rfb/debitos?${params}`, { headers: getHeaders() });
+      const res = await fetch(`/api/rfb/debitos?${params}`);
       if (!res.ok) throw new Error('Erro ao carregar débitos');
       return res.json();
     },
@@ -304,7 +295,7 @@ export default function RFBDebitos() {
 
     let allRows: RFBDebito[] = [];
     try {
-      const res = await fetch(`/api/rfb/debitos?${params}`, { headers: getHeaders() });
+      const res = await fetch(`/api/rfb/debitos?${params}`);
       if (res.ok) {
         const data = await res.json();
         allRows = data.debitos || [];

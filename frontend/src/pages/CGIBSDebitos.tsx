@@ -64,13 +64,8 @@ export default function CGIBSDebitos() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
 
-  const getHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
-    'X-Company-ID': localStorage.getItem('companyId') || localStorage.getItem('company_id') || '',
-  })
-
   useEffect(() => {
-    fetch('/api/cgibs/debitos/periodos', { headers: getHeaders() })
+    fetch('/api/cgibs/debitos/periodos')
       .then(r => r.ok ? r.json() : { periodos: [] })
       .then(data => setPeriodos(data.periodos || []))
   }, [])
@@ -85,7 +80,7 @@ export default function CGIBSDebitos() {
     params.set('page_size', '100')
 
     try {
-      const res = await fetch(`/api/cgibs/debitos?${params}`, { headers: getHeaders() })
+      const res = await fetch(`/api/cgibs/debitos?${params}`)
       if (res.ok) {
         const data = await res.json()
         setDebitos(data.debitos || [])

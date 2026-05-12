@@ -43,14 +43,9 @@ export default function CGIBSCredentials() {
     ambiente: 'piloto',
   })
 
-  const getHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
-    'X-Company-ID': localStorage.getItem('companyId') || localStorage.getItem('company_id') || '',
-  })
-
   const fetchCredential = async () => {
     try {
-      const res = await fetch('/api/cgibs/credentials', { headers: getHeaders() })
+      const res = await fetch('/api/cgibs/credentials')
       if (res.ok) {
         const data = await res.json()
         if (data.credential) {
@@ -87,7 +82,7 @@ export default function CGIBSCredentials() {
     try {
       const res = await fetch('/api/cgibs/credentials', {
         method: 'POST',
-        headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           cnpj_matriz: formData.cnpj_matriz.replace(/\D/g, ''),
           client_id: formData.client_id,
@@ -112,7 +107,7 @@ export default function CGIBSCredentials() {
   const handleDelete = async () => {
     if (!confirm('Excluir as credenciais CGIBS?')) return
     try {
-      const res = await fetch('/api/cgibs/credentials', { method: 'DELETE', headers: getHeaders() })
+      const res = await fetch('/api/cgibs/credentials', { method: 'DELETE' })
       if (res.ok) {
         setMessage({ type: 'success', text: 'Credenciais excluídas com sucesso!' })
         setCredential(null)
@@ -132,7 +127,7 @@ export default function CGIBSCredentials() {
     try {
       const res = await fetch('/api/cgibs/credentials/agendamento', {
         method: 'PATCH',
-        headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(scheduleData),
       })
       if (res.ok) {

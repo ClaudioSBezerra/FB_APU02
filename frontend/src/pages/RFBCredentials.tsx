@@ -46,14 +46,7 @@ export default function RFBCredentials() {
 
   const fetchCredential = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('companyId');
-      const response = await fetch('/api/rfb/credentials', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': companyId || '',
-        },
-      });
+      const response = await fetch('/api/rfb/credentials');
       if (response.ok) {
         const data = await response.json();
         if (data.credential) {
@@ -91,14 +84,10 @@ export default function RFBCredentials() {
     setSaving(true);
 
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('companyId');
       const response = await fetch('/api/rfb/credentials', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': companyId || '',
         },
         body: JSON.stringify({
           cnpj_matriz: formData.cnpj_matriz.replace(/\D/g, ''),
@@ -127,14 +116,8 @@ export default function RFBCredentials() {
     setMessage(null);
 
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('companyId');
       const response = await fetch('/api/rfb/credentials', {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': companyId || '',
-        },
       });
 
       if (response.ok) {
@@ -164,14 +147,10 @@ export default function RFBCredentials() {
     setSavingSchedule(true);
     setMessage(null);
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('companyId');
       const response = await fetch('/api/rfb/credentials/agendamento', {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'X-Company-ID': companyId || '',
         },
         body: JSON.stringify(scheduleData),
       });

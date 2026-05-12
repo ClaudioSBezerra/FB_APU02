@@ -62,18 +62,9 @@ export default function RFBApuracao() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [scheduleInfo, setScheduleInfo] = useState<{ agendamento_ativo: boolean; horario_agendamento: string } | null>(null);
 
-  const getHeaders = () => {
-    const token = localStorage.getItem('token');
-    const companyId = localStorage.getItem('companyId');
-    return {
-      'Authorization': `Bearer ${token}`,
-      'X-Company-ID': companyId || '',
-    };
-  };
-
   const fetchRequests = useCallback(async () => {
     try {
-      const response = await fetch('/api/rfb/apuracao/status', { headers: getHeaders() });
+      const response = await fetch('/api/rfb/apuracao/status');
       if (response.ok) {
         const data = await response.json();
         setRequests(data.requests || []);
@@ -88,11 +79,7 @@ export default function RFBApuracao() {
   useEffect(() => {
     fetchRequests();
     // Buscar info de agendamento para banner informativo
-    const token = localStorage.getItem('token');
-    const companyId = localStorage.getItem('companyId');
-    fetch('/api/rfb/credentials', {
-      headers: { 'Authorization': `Bearer ${token}`, 'X-Company-ID': companyId || '' },
-    })
+    fetch('/api/rfb/credentials')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.credential) {
@@ -122,7 +109,7 @@ export default function RFBApuracao() {
     try {
       const response = await fetch('/api/rfb/apuracao/solicitar', {
         method: 'POST',
-        headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
       });
       if (response.ok) {
         const data = await response.json();
@@ -142,7 +129,7 @@ export default function RFBApuracao() {
   const handleDelete = async (requestId: string) => {
     if (!confirm('Remover este registro do histórico?')) return;
     try {
-      await fetch(`/api/rfb/apuracao/${requestId}`, { method: 'DELETE', headers: getHeaders() });
+      await fetch(`/api/rfb/apuracao/${requestId}`, { method: 'DELETE' });
       setRequests(prev => prev.filter(r => r.id !== requestId));
     } catch {
       setMessage({ type: 'error', text: 'Erro ao remover registro' });
@@ -152,7 +139,7 @@ export default function RFBApuracao() {
   const handleClearErrors = async () => {
     if (!confirm('Limpar todos os registros com erro do histórico?')) return;
     try {
-      await fetch('/api/rfb/apuracao/clear-errors', { method: 'DELETE', headers: getHeaders() });
+      await fetch('/api/rfb/apuracao/clear-errors', { method: 'DELETE' });
       setRequests(prev => prev.filter(r => r.status !== 'error'));
     } catch {
       setMessage({ type: 'error', text: 'Erro ao limpar logs' });
@@ -164,7 +151,7 @@ export default function RFBApuracao() {
     try {
       const response = await fetch('/api/rfb/apuracao/reprocess', {
         method: 'POST',
-        headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ request_id: requestId }),
       });
       if (response.ok) {
@@ -184,7 +171,7 @@ export default function RFBApuracao() {
     try {
       const response = await fetch('/api/rfb/apuracao/download', {
         method: 'POST',
-        headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ request_id: requestId }),
       });
       if (response.ok) {

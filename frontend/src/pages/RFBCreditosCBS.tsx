@@ -92,15 +92,11 @@ export default function RFBCreditosCBS() {
   const fetchCreditos = useCallback(async (p: number, sit: string, per: string) => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('token');
-      const companyId = localStorage.getItem('companyId');
       const params = new URLSearchParams({ page: String(p) });
       if (sit) params.set('situacao', sit);
       if (per) params.set('periodo', per);
 
-      const response = await fetch(`/api/rfb/creditos/lista?${params}`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'X-Company-ID': companyId || '' },
-      });
+      const response = await fetch(`/api/rfb/creditos/lista?${params}`);
       if (response.ok) {
         const data = await response.json();
         setCreditos(data.creditos || []);

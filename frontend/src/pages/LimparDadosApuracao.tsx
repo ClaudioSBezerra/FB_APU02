@@ -38,10 +38,6 @@ export default function LimparDadosApuracao() {
     try {
       const res = await fetch('/api/admin/limpar-apuracao', {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'X-Company-ID':  localStorage.getItem('companyId') || '',
-        },
       });
       if (!res.ok) {
         const msg = await res.text();
