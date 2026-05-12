@@ -6,7 +6,7 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
 
 ## Phases
 
-- [ ] **Phase 1: Seguranca** - Remover credenciais expostas, ativar rate limiter, migrar JWT para sessionStorage e sanitizar erros do banco
+- [x] **Phase 1: Seguranca** - Remover credenciais expostas, ativar rate limiter, migrar JWT para sessionStorage e sanitizar erros do banco (completed 2026-05-12)
 - [ ] **Phase 2: Bugs** - Unificar a chave de company ID no localStorage e corrigir os tres componentes que leem chave errada
 - [ ] **Phase 3: Debito Tecnico** - Renumerar migrations duplicadas, corrigir erros silenciosos de DB, remover Redis ocioso e ferramentas de debug, avaliar tenant middleware
 - [ ] **Phase 4: Qualidade** - Configurar Vitest, escrever testes unitarios nos handlers criticos e incluir etapa de testes no CI
@@ -28,9 +28,9 @@ Plans:
 - [x] 01-02-PLAN.md — Rate limiter de login: aplicar LoginRL na rota /api/auth/login (SEC-02)
 - [x] 01-03-PLAN.md — JWT sessionStorage: migrar token de localStorage para sessionStorage no AuthContext (SEC-03)
 - [x] 01-04-PLAN.md — Sanitizacao de erros DB: helper sanitizeDBErr + correcao de todos os vazamentos de err.Error() (SEC-04)
-- [ ] 01-05-PLAN.md — [GAP] SEC-01: Re-expurgar historico git (commits 402bc32 e 01e5d74 ainda contem config.yaml)
+- [x] 01-05-PLAN.md — [GAP] SEC-01: Re-expurgar historico git (commits 402bc32 e 01e5d74 ainda contem config.yaml)
 - [x] 01-06-PLAN.md — [GAP] CR-02+CR-03+WR-03: Fix vazamentos em erp_bridge.go e rfb_apuracao.go + auth check em admin.go
-- [ ] 01-07-PLAN.md — [GAP] SEC-04 extensao: sanitizeDBErr nos ~12 handlers fora do escopo original
+- [x] 01-07-PLAN.md — [GAP] SEC-04 extensao: sanitizeDBErr nos ~12 handlers fora do escopo original
 
 ### Phase 2: Bugs
 **Goal**: Qualquer pagina do frontend opera sempre com a empresa correta — sem empresa errada silenciosa causada por chaves discrepantes de localStorage
@@ -69,7 +69,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Seguranca | 5/7 | In Progress|  |
+| 1. Seguranca | 7/7 | Complete   | 2026-05-12 |
 | 2. Bugs | 0/? | Not started | - |
 | 3. Debito Tecnico | 0/? | Not started | - |
 | 4. Qualidade | 0/? | Not started | - |
