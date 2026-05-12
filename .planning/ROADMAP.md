@@ -29,7 +29,7 @@ Plans:
 - [x] 01-03-PLAN.md — JWT sessionStorage: migrar token de localStorage para sessionStorage no AuthContext (SEC-03)
 - [x] 01-04-PLAN.md — Sanitizacao de erros DB: helper sanitizeDBErr + correcao de todos os vazamentos de err.Error() (SEC-04)
 - [ ] 01-05-PLAN.md — [GAP] SEC-01: Re-expurgar historico git (commits 402bc32 e 01e5d74 ainda contem config.yaml)
-- [ ] 01-06-PLAN.md — [GAP] CR-02+CR-03+WR-03: Fix vazamentos em erp_bridge.go e rfb_apuracao.go + auth check em admin.go
+- [x] 01-06-PLAN.md — [GAP] CR-02+CR-03+WR-03: Fix vazamentos em erp_bridge.go e rfb_apuracao.go + auth check em admin.go
 - [ ] 01-07-PLAN.md — [GAP] SEC-04 extensao: sanitizeDBErr nos ~12 handlers fora do escopo original
 
 ### Phase 2: Bugs
@@ -69,7 +69,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Seguranca | 0/4 | Not started | - |
+| 1. Seguranca | 5/7 | In Progress|  |
 | 2. Bugs | 0/? | Not started | - |
 | 3. Debito Tecnico | 0/? | Not started | - |
 | 4. Qualidade | 0/? | Not started | - |

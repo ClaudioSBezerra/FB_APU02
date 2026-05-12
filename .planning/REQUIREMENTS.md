@@ -10,7 +10,7 @@
 - [ ] **SEC-01**: Credencial de ERP bridge removida do `config.yaml`, rotacionada e expurgada do histórico git
 - [ ] **SEC-02**: Rate limiter `LoginRL` aplicado na rota `/auth/login` (código já existe em `handlers/auth.go`)
 - [ ] **SEC-03**: JWT de autenticação migrado de `localStorage` para `sessionStorage`
-- [ ] **SEC-04**: Mensagens de erro interno do PostgreSQL sanitizadas — cliente recebe mensagem genérica, erro real vai para log
+- [x] **SEC-04**: Mensagens de erro interno do PostgreSQL sanitizadas — cliente recebe mensagem genérica, erro real vai para log
 
 ### Bugs
 
@@ -65,7 +65,7 @@
 | SEC-01 | Fase 1 | Pending |
 | SEC-02 | Fase 1 | Pending |
 | SEC-03 | Fase 1 | Pending |
-| SEC-04 | Fase 1 | Pending |
+| SEC-04 | Fase 1 | Complete |
 | BUG-01 | Fase 2 | Pending |
 | BUG-02 | Fase 2 | Pending |
 | BUG-03 | Fase 2 | Pending |
