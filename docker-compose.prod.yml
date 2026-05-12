@@ -16,7 +16,6 @@ services:
     environment:
       - PORT=8081
       - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?sslmode=require
-      - REDIS_ADDR=redis:6379
       - JWT_SECRET=${JWT_SECRET}
       - ENVIRONMENT=production
       - LOG_LEVEL=info
@@ -32,8 +31,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_started
     volumes:
       - api_uploads:/root/uploads
       - backup_storage:/opt/fb_apu01/backups
@@ -130,39 +127,6 @@ services:
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
 
-  # Redis - Production
-  redis:
-    image: redis:7-alpine
-    container_name: fb_apu01-redis-prod
-    restart: always
-    sysctls:
-      - net.core.somaxconn=1024
-    volumes:
-      - redis_data:/data
-    networks:
-      - fb_net
-    command: >
-      redis-server
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --appendonly yes
-      --save 900 1
-      --save 300 10
-      --save 60 10000
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-
   # Monitoring - Prometheus
   prometheus:
     image: prom/prometheus:latest
@@ -229,8 +193,6 @@ networks:
 
 volumes:
   postgres_data_prod:
-    driver: local
-  redis_data:
     driver: local
   api_uploads:
     driver: local
