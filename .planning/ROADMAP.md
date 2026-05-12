@@ -24,10 +24,10 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
   4. Erros internos do PostgreSQL (nomes de tabela, query text) nunca aparecem na resposta HTTP; o browser recebe apenas uma mensagem generica
 **Plans**: 4 planos
 Plans:
-- [ ] 01-01-PLAN.md — Credencial ERP bridge: remover senha de config.yaml, gitignore e expurgar historico git (SEC-01)
-- [ ] 01-02-PLAN.md — Rate limiter de login: aplicar LoginRL na rota /api/auth/login (SEC-02)
-- [ ] 01-03-PLAN.md — JWT sessionStorage: migrar token de localStorage para sessionStorage no AuthContext (SEC-03)
-- [ ] 01-04-PLAN.md — Sanitizacao de erros DB: helper sanitizeDBErr + correcao de todos os vazamentos de err.Error() (SEC-04)
+- [x] 01-01-PLAN.md — Credencial ERP bridge: remover senha de config.yaml, gitignore e expurgar historico git (SEC-01)
+- [x] 01-02-PLAN.md — Rate limiter de login: aplicar LoginRL na rota /api/auth/login (SEC-02)
+- [x] 01-03-PLAN.md — JWT sessionStorage: migrar token de localStorage para sessionStorage no AuthContext (SEC-03)
+- [x] 01-04-PLAN.md — Sanitizacao de erros DB: helper sanitizeDBErr + correcao de todos os vazamentos de err.Error() (SEC-04)
 
 ### Phase 2: Bugs
 **Goal**: Qualquer pagina do frontend opera sempre com a empresa correta — sem empresa errada silenciosa causada por chaves discrepantes de localStorage
