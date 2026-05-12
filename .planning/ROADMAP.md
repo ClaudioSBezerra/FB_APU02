@@ -40,7 +40,10 @@ Plans:
   1. Existe uma unica constante exportada para a chave de company ID usada em todo o frontend; busca por `'company_id'` e `'selectedCompanyId'` como strings literais retorna zero ocorrencias relevantes
   2. `PainelApuracaoCBS` e `PainelApuracaoIBS` exibem dados da empresa selecionada pelo usuario, nao de outra empresa
   3. A tela de Managers carrega e exibe dados corretamente sem depender de uma chave de localStorage que nunca e escrita
-**Plans**: TBD
+**Plans**: 2 planos
+Plans:
+- [ ] 02-01-PLAN.md — BUG-01: Criar storageKeys.ts + corrigir 9 paginas que bypassam o interceptor (Wave 1)
+- [ ] 02-02-PLAN.md — BUG-02 + BUG-03: Refatorar PainelApuracaoCBS, PainelApuracaoIBS e Managers para useAuth() (Wave 2)
 **UI hint**: yes
 
 ### Phase 3: Debito Tecnico
@@ -70,6 +73,6 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Seguranca | 7/7 | Complete   | 2026-05-12 |
-| 2. Bugs | 0/? | Not started | - |
+| 2. Bugs | 0/2 | Not started | - |
 | 3. Debito Tecnico | 0/? | Not started | - |
 | 4. Qualidade | 0/? | Not started | - |
