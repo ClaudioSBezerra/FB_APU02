@@ -22,7 +22,12 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
   2. Um agente automatizado fazendo mais de 5 tentativas de login em 15 minutos recebe HTTP 429 antes de atingir a 6a tentativa
   3. Apos login bem-sucedido, o JWT esta em `sessionStorage` e nao em `localStorage`; fechar o browser encerra a sessao
   4. Erros internos do PostgreSQL (nomes de tabela, query text) nunca aparecem na resposta HTTP; o browser recebe apenas uma mensagem generica
-**Plans**: TBD
+**Plans**: 4 planos
+Plans:
+- [ ] 01-01-PLAN.md — Credencial ERP bridge: remover senha de config.yaml, gitignore e expurgar historico git (SEC-01)
+- [ ] 01-02-PLAN.md — Rate limiter de login: aplicar LoginRL na rota /api/auth/login (SEC-02)
+- [ ] 01-03-PLAN.md — JWT sessionStorage: migrar token de localStorage para sessionStorage no AuthContext (SEC-03)
+- [ ] 01-04-PLAN.md — Sanitizacao de erros DB: helper sanitizeDBErr + correcao de todos os vazamentos de err.Error() (SEC-04)
 
 ### Phase 2: Bugs
 **Goal**: Qualquer pagina do frontend opera sempre com a empresa correta — sem empresa errada silenciosa causada por chaves discrepantes de localStorage
@@ -61,7 +66,7 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Seguranca | 0/? | Not started | - |
+| 1. Seguranca | 0/4 | Not started | - |
 | 2. Bugs | 0/? | Not started | - |
 | 3. Debito Tecnico | 0/? | Not started | - |
 | 4. Qualidade | 0/? | Not started | - |
