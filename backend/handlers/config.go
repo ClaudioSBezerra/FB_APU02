@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -27,6 +28,14 @@ type TaxRate struct {
 	PercReducPisCofins float64 `json:"perc_reduc_piscofins"`
 }
 
+// sanitizeDBErr loga o erro interno do banco e retorna uma mensagem genérica ao cliente.
+// NUNCA expõe err.Error() ao cliente — previne vazamento de schema/query PostgreSQL (SEC-04).
+// Uso: sanitizeDBErr(w, http.StatusInternalServerError, "contexto da operação", err, "[HandlerName]")
+func sanitizeDBErr(w http.ResponseWriter, status int, userMsg string, err error, prefix string) {
+	log.Printf("%s %s: %v", prefix, userMsg, err)
+	jsonErr(w, status, userMsg)
+}
+
 func GetTaxRatesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -39,7 +48,7 @@ func GetTaxRatesHandler(db *sql.DB) http.HandlerFunc {
 
 		rows, err := db.Query(query)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar alíquotas", err, "[TaxRates]")
 			return
 		}
 		defer rows.Close()
@@ -48,7 +57,7 @@ func GetTaxRatesHandler(db *sql.DB) http.HandlerFunc {
 		for rows.Next() {
 			var r TaxRate
 			if err := rows.Scan(&r.Ano, &r.PercIBS_UF, &r.PercIBS_Mun, &r.PercCBS, &r.PercReducICMS, &r.PercReducPisCofins); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler alíquota", err, "[TaxRates]")
 				return
 			}
 			rates = append(rates, r)
