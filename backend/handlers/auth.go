@@ -598,6 +598,11 @@ func RegisterHandler(db *sql.DB) http.HandlerFunc {
 
 func LoginHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ip := GetClientIP(r)
+		if !LoginRL.Allow(ip) {
+			http.Error(w, "Too many requests", http.StatusTooManyRequests)
+			return
+		}
 		start := time.Now()
 		var req LoginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
