@@ -9,7 +9,7 @@ Milestone de estabilizacao do sistema de apuracao fiscal Ferreira Costa. Sem nov
 - [x] **Phase 1: Seguranca** - Remover credenciais expostas, ativar rate limiter, migrar JWT para sessionStorage e sanitizar erros do banco (completed 2026-05-12)
 - [x] **Phase 2: Bugs** - Unificar a chave de company ID no localStorage e corrigir os tres componentes que leem chave errada (completed 2026-05-12)
 - [x] **Phase 3: Debito Tecnico** - Renumerar migrations duplicadas, corrigir erros silenciosos de DB, remover Redis ocioso e ferramentas de debug, avaliar tenant middleware (completed 2026-05-12)
-- [ ] **Phase 4: Qualidade** - Configurar Vitest, escrever testes unitarios nos handlers criticos e incluir etapa de testes no CI
+- [x] **Phase 4: Qualidade** - Configurar Vitest, escrever testes unitarios nos handlers criticos e incluir etapa de testes no CI (completed 2026-05-13)
 
 ## Phase Details
 
@@ -72,7 +72,11 @@ Plans:
   1. `npm test` no diretorio `frontend/` executa o Vitest e conclui sem erros de configuracao ou dependencias faltando
   2. Os handlers `auth.go`, `filiais.go`, `nfe_entradas.go` e `nfe_saidas.go` tem arquivos `*_test.go` com testes unitarios que passam com `go test ./...`
   3. Os workflows `deploy-production.yml` e `deploy-staging.yml` executam os testes (Go e frontend) antes do build Docker; um teste falhando bloqueia o deploy
-**Plans**: TBD
+**Plans**: 3 planos
+Plans:
+- [x] 04-01-PLAN.md — QA-01: Configurar Vitest no frontend (instalar dep, script test, vite.config test block, suite mínima)
+- [x] 04-02-PLAN.md — QA-02: Testes unitários para handlers Go críticos (auth, filiais, nfe_entradas, nfe_saidas — paths pré-DB)
+- [x] 04-03-PLAN.md — QA-03: Adicionar job test ao CI (deploy-production.yml e deploy-staging.yml) bloqueando build em falha
 
 ## Progress
 
@@ -81,4 +85,4 @@ Plans:
 | 1. Seguranca | 7/7 | Complete   | 2026-05-12 |
 | 2. Bugs | 2/2 | Complete   | 2026-05-12 |
 | 3. Debito Tecnico | 5/5 | Complete   | 2026-05-12 |
-| 4. Qualidade | 0/? | Not started | - |
+| 4. Qualidade | 3/3 | Complete   | 2026-05-13 |

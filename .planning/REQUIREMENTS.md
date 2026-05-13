@@ -30,7 +30,7 @@
 
 - [ ] **QA-01**: Vitest configurado corretamente no frontend — dependência instalada, script `test` no `package.json`, rodar `vitest run` sem erros
 - [ ] **QA-02**: Testes unitários para handlers críticos do backend: `auth.go`, `filiais.go`, `nfe_entradas.go`, `nfe_saidas.go`
-- [ ] **QA-03**: Step de testes adicionado ao pipeline CI — `deploy-production.yml` e `deploy-staging.yml` rodam testes antes do build Docker
+- [x] **QA-03**: Step de testes adicionado ao pipeline CI — `deploy-production.yml` e `deploy-staging.yml` rodam testes antes do build Docker
 
 ## v2 Requirements
 
@@ -76,7 +76,7 @@
 | DEBT-05 | Fase 3 | Pending |
 | QA-01 | Fase 4 | Pending |
 | QA-02 | Fase 4 | Pending |
-| QA-03 | Fase 4 | Pending |
+| QA-03 | Fase 4 | Complete |
 
 **Cobertura:**
 - Requisitos v1: 15 total
