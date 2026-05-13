@@ -1,7 +1,7 @@
 package main
 
 // FB_APU02 — Apuração Assistida + Receita Federal
-// Version: 2.0.3
+// Version: 2.0.4
 import (
 	"context"
 	"database/sql"
@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	BackendVersion = "2.0.3"
+	BackendVersion = "2.0.4"
 	FeatureSet     = "Apuração Assistida NF-e/CT-e, Receita Federal CBS/IBS, Créditos em Risco, Apelidos de Filiais, Malha Fina"
 )
 
