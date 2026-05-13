@@ -38,14 +38,6 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Logs Importação',  path: '/importacoes/erp-bridge/logs', adminOnly: true },
     ],
   },
-  apuracao: {
-    label: 'Apuração IBS / CBS',
-    tabs: [
-      { label: 'Créditos em Risco',  path: '/apuracao/creditos-perdidos', danger: true },
-      { label: 'Apuração IBS',       path: '/rfb/apuracao-ibs' },
-      { label: 'Apuração CBS',       path: '/rfb/apuracao-cbs' },
-    ],
-  },
   cgibs: {
     label: 'CGIBS - Apuração Assistida IBS',
     tabs: [
@@ -115,14 +107,10 @@ export function getActiveModule(pathname: string): string {
 
   if (pathname.startsWith('/importacoes/')) return 'notas'
 
-  const apuracaoPaths = ['/apuracao/creditos-perdidos', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
-  if (apuracaoPaths.includes(pathname)) return 'apuracao'
-
   const cgibsPaths = ['/cgibs/apuracao-ibs', '/cgibs/apuracao', '/cgibs/debitos']
   if (cgibsPaths.some(p => pathname.startsWith(p))) return 'cgibs'
 
-  const rfbExclude = ['/rfb/credenciais', '/rfb/apuracao-ibs', '/rfb/apuracao-cbs']
-  if (pathname.startsWith('/rfb/') && !rfbExclude.includes(pathname)) return 'rfb'
+  if (pathname.startsWith('/rfb/') && pathname !== '/rfb/credenciais') return 'rfb'
 
   if (pathname.startsWith('/malha-fina/')) return 'malha'
 
