@@ -69,19 +69,19 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// ── CT-e Entradas (usa v_rec em vez de v_nf) ───────────────────────────
+		// ── CT-e Entradas (usa v_prest — v_rec foi removido na migration 083) ────
 		var cteCount int
-		var cteVRec, cteVIBS, cteVCBS, cteVBcIBS float64
+		var cteVPrest, cteVIBS, cteVCBS, cteVBcIBS float64
 		err = db.QueryRow(`
 			SELECT
 				COUNT(*),
-				COALESCE(SUM(v_rec), 0),
+				COALESCE(SUM(v_prest), 0),
 				COALESCE(SUM(v_ibs), 0),
 				COALESCE(SUM(v_cbs), 0),
 				COALESCE(SUM(v_bc_ibs_cbs), 0)
 			FROM cte_entradas
 			WHERE company_id = $1 AND mes_ano = $2
-		`, companyID, mes).Scan(&cteCount, &cteVRec, &cteVIBS, &cteVCBS, &cteVBcIBS)
+		`, companyID, mes).Scan(&cteCount, &cteVPrest, &cteVIBS, &cteVCBS, &cteVBcIBS)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar CT-e entradas", err, "[DashboardResumo]")
 			return
@@ -116,11 +116,11 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		type blocoDocCTE struct {
-			Count  int     `json:"count"`
-			VRec   float64 `json:"v_rec"`
-			VIBS   float64 `json:"v_ibs"`
-			VCBS   float64 `json:"v_cbs"`
-			VBcIBS float64 `json:"v_bc_ibs_cbs"`
+			Count   int     `json:"count"`
+			VPrest  float64 `json:"v_prest"`
+			VIBS    float64 `json:"v_ibs"`
+			VCBS    float64 `json:"v_cbs"`
+			VBcIBS  float64 `json:"v_bc_ibs_cbs"`
 		}
 
 		resp := struct {
@@ -140,7 +140,7 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 			MesAno:             mes,
 			NfeEntradas:        blocoDoc{Count: entCount, VNF: entVNF, VIBS: entVIBS, VCBS: entVCBS, VBcIBS: entVBcIBS},
 			NfeSaidas:          blocoDoc{Count: saiCount, VNF: saiVNF, VIBS: saiVIBS, VCBS: saiVCBS, VBcIBS: saiVBcIBS},
-			CteEntradas:        blocoDocCTE{Count: cteCount, VRec: cteVRec, VIBS: cteVIBS, VCBS: cteVCBS, VBcIBS: cteVBcIBS},
+			CteEntradas:        blocoDocCTE{Count: cteCount, VPrest: cteVPrest, VIBS: cteVIBS, VCBS: cteVCBS, VBcIBS: cteVBcIBS},
 			TotalCreditosIBS:   totalCreditosIBS,
 			TotalCreditosCBS:   totalCreditosCBS,
 			TotalDebitosIBS:    totalDebitosIBS,
