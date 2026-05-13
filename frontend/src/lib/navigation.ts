@@ -15,7 +15,8 @@ export const modules: Record<string, ModuleConfig> = {
   painel: {
     label: 'Painel',
     tabs: [
-      { label: 'Resumo Fiscal', path: '/painel/resumo-fiscal' },
+      { label: 'Resumo Fiscal',   path: '/painel/resumo-fiscal' },
+      { label: 'Créditos em Risco', path: '/apuracao/creditos-perdidos', danger: true },
     ],
   },
   notas: {
@@ -101,7 +102,7 @@ export const modules: Record<string, ModuleConfig> = {
 }
 
 export function getActiveModule(pathname: string): string {
-  if (pathname === '/') return 'painel'
+  if (pathname === '/' || pathname === '/apuracao/creditos-perdidos') return 'painel'
 
   if (pathname.includes('/notas')) return 'notas'
 
