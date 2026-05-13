@@ -32,6 +32,8 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 		if !mesAnoRegexp.MatchString(mes) {
 			mes = time.Now().Format("2006-01")
 		}
+		// Banco armazena mes_ano como MM/YYYY; input[type=month] envia YYYY-MM.
+		mesDB := mes[5:7] + "/" + mes[0:4]
 
 		// ── NF-e Entradas ──────────────────────────────────────────────────────
 		var entCount int
@@ -45,7 +47,7 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(SUM(v_bc_ibs_cbs), 0)
 			FROM nfe_entradas
 			WHERE company_id = $1 AND mes_ano = $2
-		`, companyID, mes).Scan(&entCount, &entVNF, &entVIBS, &entVCBS, &entVBcIBS)
+		`, companyID, mesDB).Scan(&entCount, &entVNF, &entVIBS, &entVCBS, &entVBcIBS)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar NF-e entradas", err, "[DashboardResumo]")
 			return
@@ -63,7 +65,7 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(SUM(v_bc_ibs_cbs), 0)
 			FROM nfe_saidas
 			WHERE company_id = $1 AND mes_ano = $2
-		`, companyID, mes).Scan(&saiCount, &saiVNF, &saiVIBS, &saiVCBS, &saiVBcIBS)
+		`, companyID, mesDB).Scan(&saiCount, &saiVNF, &saiVIBS, &saiVCBS, &saiVBcIBS)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar NF-e saídas", err, "[DashboardResumo]")
 			return
@@ -81,7 +83,7 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(SUM(v_bc_ibs_cbs), 0)
 			FROM cte_entradas
 			WHERE company_id = $1 AND mes_ano = $2
-		`, companyID, mes).Scan(&cteCount, &cteVPrest, &cteVIBS, &cteVCBS, &cteVBcIBS)
+		`, companyID, mesDB).Scan(&cteCount, &cteVPrest, &cteVIBS, &cteVCBS, &cteVBcIBS)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar CT-e entradas", err, "[DashboardResumo]")
 			return
@@ -137,7 +139,7 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 			CreditosApropriar  float64     `json:"creditos_apropriar"`
 			AliquotaEfetivaIBS *float64    `json:"aliquota_efetiva_ibs"`
 		}{
-			MesAno:             mes,
+			MesAno:             mesDB,
 			NfeEntradas:        blocoDoc{Count: entCount, VNF: entVNF, VIBS: entVIBS, VCBS: entVCBS, VBcIBS: entVBcIBS},
 			NfeSaidas:          blocoDoc{Count: saiCount, VNF: saiVNF, VIBS: saiVIBS, VCBS: saiVCBS, VBcIBS: saiVBcIBS},
 			CteEntradas:        blocoDocCTE{Count: cteCount, VPrest: cteVPrest, VIBS: cteVIBS, VCBS: cteVCBS, VBcIBS: cteVBcIBS},

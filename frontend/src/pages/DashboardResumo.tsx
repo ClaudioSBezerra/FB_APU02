@@ -7,7 +7,7 @@ import { formatCurrency } from '@/lib/utils'
 interface BlocoDoc {
   count: number
   v_nf?: number
-  v_rec?: number
+  v_prest?: number
   v_ibs: number
   v_cbs: number
   v_bc_ibs_cbs: number
@@ -176,7 +176,7 @@ export default function DashboardResumo() {
                       },
                       {
                         tipo: 'CT-e Entradas',
-                        entrada: chartMode === 'quantidade' ? data.cte_entradas.count : (data.cte_entradas.v_rec ?? 0),
+                        entrada: chartMode === 'quantidade' ? data.cte_entradas.count : (data.cte_entradas.v_prest ?? 0),
                         saida: 0,
                       },
                     ]}
