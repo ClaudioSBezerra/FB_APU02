@@ -646,11 +646,8 @@ def processar_sap(
 
         log.info("%d documentos encontrados no FCCORP", len(rows))
 
-        if not rows:
-            return stats
-
-        # ── Etapa 1: sincronizar parceiros (FORN/CLIE) antes dos movimentos ──
-        # Query separada via subquery — sem listas Python, sem ORA-01795
+        # ── Etapa 1: buscar parceiros ainda com a conexão Oracle aberta ──────
+        parceiros = []
         try:
             cur_p = conn_ora.cursor()
             cur_p.execute(PARCEIROS_QUERY, data_ini=data_ini, data_fim=data_fim_inc)
@@ -659,14 +656,31 @@ def processar_sap(
                 for row in cur_p.fetchall() if row[0]
             ]
             cur_p.close()
+        except Exception as exc:
+            log.warning("[Parceiros] Erro ao buscar parceiros do Oracle (não bloqueia): %s", exc)
+
+        # Fecha a conexão Oracle antes dos envios HTTP — evita DPY-4011 por
+        # idle timeout de firewall durante o envio do batch (pode levar minutos).
+        conn_ora.close()
+        log.info("Conexão Oracle encerrada — iniciando envios HTTP")
+
+        if not rows:
             if parceiros:
                 result_p = fbtax.sync_parceiros(parceiros)
                 log.info("[Parceiros] Sincronizados: %d (upserted=%d)",
                          len(parceiros), result_p.get("upserted", 0))
-            else:
-                log.info("[Parceiros] Nenhum parceiro encontrado no período.")
-        except Exception as exc:
-            log.warning("[Parceiros] Erro na sincronização (não bloqueia movimentos): %s", exc)
+            return stats
+
+        # Sincroniza parceiros via HTTP agora que Oracle está fechado
+        if parceiros:
+            try:
+                result_p = fbtax.sync_parceiros(parceiros)
+                log.info("[Parceiros] Sincronizados: %d (upserted=%d)",
+                         len(parceiros), result_p.get("upserted", 0))
+            except Exception as exc:
+                log.warning("[Parceiros] Erro na sincronização HTTP (não bloqueia movimentos): %s", exc)
+        else:
+            log.info("[Parceiros] Nenhum parceiro encontrado no período.")
 
         # ── Etapa 2: converter movimentos (sem lookup de nomes) ──────────────
         documents = []
@@ -781,8 +795,10 @@ def processar_sap(
         log.error("Erro durante processamento SAP: %s", exc)
         stats["sap_batch"]["erros"] = 1
         stats["sap_batch"]["erro_msg"] = str(exc)
-    finally:
-        conn_ora.close()
+        try:
+            conn_ora.close()
+        except Exception:
+            pass
 
     return stats
 
@@ -806,96 +822,104 @@ def processar_servidor(
     log.info("Periodo  : %s -> %s", data_ini, data_fim)
     log.info("Tipos    : %s", ", ".join(tipos))
 
-    try:
-        conn_ora = oracledb.connect(
-            user=srv["usuario"],
-            password=srv["senha"],
-            dsn=srv["dsn"],
-            expire_time=2,  # keepalive TCP a cada 2 min — evita firewall cortar conexão longa
-        )
-        log.info("Conectado ao Oracle (thin mode)")
-    except Exception as exc:
-        log.error("Falha ao conectar em %s: %s", nome, exc)
-        return stats
+    for tipo in tipos:
+        fonte = FONTES.get(tipo)
+        if fonte is None:
+            log.warning("Tipo desconhecido ignorado: %s", tipo)
+            continue
 
-    try:
-        for tipo in tipos:
-            fonte = FONTES.get(tipo)
-            if fonte is None:
-                log.warning("Tipo desconhecido ignorado: %s", tipo)
+        log.info("-" * 40)
+        log.info("Consultando %s...", fonte["descricao"])
+
+        # Conecta ao Oracle por tipo — fecha antes dos envios HTTP para evitar
+        # DPY-4011 (firewall/Oracle derruba conexão ociosa durante os envios).
+        try:
+            conn_ora = oracledb.connect(
+                user=srv["usuario"],
+                password=srv["senha"],
+                dsn=srv["dsn"],
+                expire_time=2,
+            )
+        except Exception as exc:
+            log.error("Falha ao conectar em %s para %s: %s", nome, tipo, exc)
+            stats[tipo]["erros"] += 1
+            continue
+
+        try:
+            cur = conn_ora.cursor()
+            cur.execute(fonte["sql"], data_ini=data_ini, data_fim=data_fim)
+            rows = []
+            for raw_row in cur:
+                rows.append((
+                    str(raw_row[fonte["chave_col"]]).strip(),
+                    clob_para_str(raw_row[fonte["xml_col"]]),
+                ))
+            cur.close()
+        except Exception as exc:
+            log.error("Erro na query %s: %s", tipo, exc)
+            try:
+                conn_ora.close()
+            except Exception:
+                pass
+            continue
+        finally:
+            # Fecha conexão Oracle antes de iniciar envios HTTP
+            try:
+                conn_ora.close()
+            except Exception:
+                pass
+
+        total_rows = len(rows)
+        log.info("%d registros encontrados — Oracle desconectado, iniciando envios HTTP", total_rows)
+
+        for chave, xml_str in rows:
+            if not xml_str:
+                log.debug("  XML nulo para %s — ignorado", chave)
+                stats[tipo]["ignorados"] += 1
                 continue
 
-            log.info("-" * 40)
-            log.info("Consultando %s...", fonte["descricao"])
+            if ja_enviado(tracker, nome, tipo, chave):
+                stats[tipo]["ignorados"] += 1
+                continue
 
             try:
-                cur = conn_ora.cursor()
-                cur.execute(fonte["sql"], data_ini=data_ini, data_fim=data_fim)
-                rows = []
-                for raw_row in cur:
-                    rows.append((
-                        str(raw_row[fonte["chave_col"]]).strip(),
-                        clob_para_str(raw_row[fonte["xml_col"]]),
-                    ))
-                cur.close()
+                xml_bytes = normalizar_xml(xml_str, adicionar_decl=fonte["adicionar_decl"])
             except Exception as exc:
-                log.error("Erro na query %s: %s", tipo, exc)
+                log.error("  Erro ao normalizar XML %s: %s", chave, exc)
+                stats[tipo]["erros"] += 1
+                marcar(tracker, nome, tipo, chave, "erro_xml")
                 continue
 
-            total_rows = len(rows)
-            log.info("%d registros encontrados", total_rows)
-
-            for chave, xml_str in rows:
-                if not xml_str:
-                    log.debug("  XML nulo para %s — ignorado", chave)
+            try:
+                result = fbtax.enviar(fonte["endpoint"], chave, xml_bytes)
+                sc = result["status"]
+                if sc in (200, 201):
+                    stats[tipo]["enviados"] += 1
+                    marcar(tracker, nome, tipo, chave, "ok")
+                    log.debug("  OK  %s", chave)
+                elif sc == 409:
                     stats[tipo]["ignorados"] += 1
-                    continue
-
-                if ja_enviado(tracker, nome, tipo, chave):
-                    stats[tipo]["ignorados"] += 1
-                    continue
-
-                try:
-                    xml_bytes = normalizar_xml(xml_str, adicionar_decl=fonte["adicionar_decl"])
-                except Exception as exc:
-                    log.error("  Erro ao normalizar XML %s: %s", chave, exc)
+                    marcar(tracker, nome, tipo, chave, "ok")
+                else:
+                    log.warning("  HTTP %d para %s: %s", sc, chave, result["body"])
                     stats[tipo]["erros"] += 1
-                    marcar(tracker, nome, tipo, chave, "erro_xml")
-                    continue
-
-                try:
-                    result = fbtax.enviar(fonte["endpoint"], chave, xml_bytes)
-                    sc = result["status"]
-                    if sc in (200, 201):
-                        stats[tipo]["enviados"] += 1
-                        marcar(tracker, nome, tipo, chave, "ok")
-                        log.debug("  OK  %s", chave)
-                    elif sc == 409:
-                        stats[tipo]["ignorados"] += 1
-                        marcar(tracker, nome, tipo, chave, "ok")
-                    else:
-                        log.warning("  HTTP %d para %s: %s", sc, chave, result["body"])
-                        stats[tipo]["erros"] += 1
-                        marcar(tracker, nome, tipo, chave, f"erro_{sc}")
-                except Exception as exc:
-                    log.error("  Erro ao enviar %s: %s", chave, exc)
-                    stats[tipo]["erros"] += 1
-
-                s = stats[tipo]
-                print(
-                    f"\r  {nome:<20} | {tipo:<14} | "
-                    f"env:{s['enviados']:>5,}  ign:{s['ignorados']:>5,}  err:{s['erros']:>3,}  ",
-                    end="", flush=True
-                )
+                    marcar(tracker, nome, tipo, chave, f"erro_{sc}")
+            except Exception as exc:
+                log.error("  Erro ao enviar %s: %s", chave, exc)
+                stats[tipo]["erros"] += 1
 
             s = stats[tipo]
             print(
                 f"\r  {nome:<20} | {tipo:<14} | "
-                f"env:{s['enviados']:>5,}  ign:{s['ignorados']:>5,}  err:{s['erros']:>3,}  "
+                f"env:{s['enviados']:>5,}  ign:{s['ignorados']:>5,}  err:{s['erros']:>3,}  ",
+                end="", flush=True
             )
 
-    finally:
-        conn_ora.close()
+        s = stats[tipo]
+        print(
+            f"\r  {nome:<20} | {tipo:<14} | "
+            f"env:{s['enviados']:>5,}  ign:{s['ignorados']:>5,}  err:{s['erros']:>3,}  "
+        )
 
     return stats
 
