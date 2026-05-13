@@ -1,4 +1,4 @@
-import { Calculator, Landmark, Scale, Settings, LogOut, KeyRound, Telescope, FileText } from 'lucide-react'
+import { Calculator, Landmark, LayoutDashboard, Scale, Settings, LogOut, KeyRound, Telescope, FileText } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
@@ -31,6 +31,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 
 const mainItems = [
+  { id: 'painel',      icon: LayoutDashboard,  label: 'Painel',           path: '/painel/resumo-fiscal' },
   { id: 'notas',       icon: FileText,         label: 'Notas Importadas', path: '/apuracao/saida/notas' },
   { id: 'apuracao',    icon: Calculator,       label: 'Apuração IBS/CBS', path: '/apuracao/creditos-perdidos' },
   { id: 'cgibs',       icon: Scale,            label: 'CGIBS — IBS',      path: '/cgibs/apuracao-ibs' },
