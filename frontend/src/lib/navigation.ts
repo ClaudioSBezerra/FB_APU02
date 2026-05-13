@@ -14,7 +14,9 @@ export interface ModuleConfig {
 export const modules: Record<string, ModuleConfig> = {
   painel: {
     label: 'Painel',
-    tabs: [],
+    tabs: [
+      { label: 'Resumo Fiscal', path: '/painel/resumo-fiscal' },
+    ],
   },
   notas: {
     label: 'Notas Importadas',

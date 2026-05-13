@@ -32,6 +32,7 @@ import CGIBSPainel from './pages/CGIBSPainel'
 import CGIBSApuracao from './pages/CGIBSApuracao'
 import CGIBSCredentials from './pages/CGIBSCredentials'
 import CGIBSDebitos from './pages/CGIBSDebitos'
+import DashboardResumo from './pages/DashboardResumo'
 import Login from './pages/Login'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
@@ -199,6 +200,9 @@ function AppLayout() {
           <div className="p-4">
             <Routes>
               <Route path="/" element={<Navigate to="/rfb/gestao-creditos" replace />} />
+
+              {/* Painel */}
+              <Route path="/painel/resumo-fiscal" element={<DashboardResumo />} />
 
               {/* Configurações */}
               <Route path="/config/aliquotas"       element={<TabelaAliquotas />} />
