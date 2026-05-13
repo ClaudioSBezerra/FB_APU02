@@ -325,6 +325,9 @@ func main() {
 	http.HandleFunc("/api/admin/user-activity",         withAuth(handlers.ListUserActivityHandler, "admin"))
 	http.HandleFunc("/api/admin/user-activity/modules", withAuth(handlers.ListModuleActivityHandler, "admin"))
 
+	// Dashboard Endpoints
+	http.HandleFunc("/api/dashboard/resumo", withAuth(handlers.DashboardResumoHandler, ""))
+
 	// Configuration Endpoints
 	http.HandleFunc("/api/config/aliquotas", withAuth(handlers.GetTaxRatesHandler, ""))
 	http.HandleFunc("/api/config/cfop", withAuth(handlers.ListCFOPsHandler, ""))
