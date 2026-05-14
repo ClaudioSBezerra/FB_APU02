@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
@@ -10,8 +11,9 @@ const TABELAS = [
 ]
 
 export default function LimparDadosApuracao() {
+  const { companyId } = useAuth()
   const [periodos, setPeriodos] = useState<string[]>([])
-  const [mesSelecionado, setMesSelecionado] = useState<string>('')
+  const [mesSelecionado, setMesSelecionado] = useState<string>('__all__')
   const [tabelasSelecionadas, setTabelasSelecionadas] = useState<string[]>(
     TABELAS.map(t => t.id)
   )
@@ -23,11 +25,14 @@ export default function LimparDadosApuracao() {
   const [confirmando, setConfirmando] = useState(false)
 
   useEffect(() => {
+    if (!companyId) return
     fetch('/api/admin/limpeza-base')
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => setPeriodos(d.periodos ?? []))
       .catch(() => {})
-  }, [])
+  }, [companyId])
+
+  const mesParaAPI = mesSelecionado === '__all__' ? '' : mesSelecionado
 
   function toggleTabela(id: string) {
     setTabelasSelecionadas(prev =>
@@ -41,7 +46,7 @@ export default function LimparDadosApuracao() {
     if (tabelasSelecionadas.length === 0) return
     setLoadingPreview(true)
     setErro(null)
-    const params = mesSelecionado ? `?mes_ano=${encodeURIComponent(mesSelecionado)}` : ''
+    const params = mesParaAPI ? `?mes_ano=${encodeURIComponent(mesParaAPI)}` : ''
     fetch(`/api/admin/limpeza-base${params}`)
       .then(async r => {
         if (!r.ok) throw new Error('Erro ao consultar contagens')
@@ -58,7 +63,7 @@ export default function LimparDadosApuracao() {
     fetch('/api/admin/limpeza-base', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tabelas: tabelasSelecionadas, mes_ano: mesSelecionado }),
+      body: JSON.stringify({ tabelas: tabelasSelecionadas, mes_ano: mesParaAPI }),
     })
       .then(async r => {
         const d = await r.json()
@@ -125,7 +130,7 @@ export default function LimparDadosApuracao() {
               <SelectValue placeholder="Todos os períodos" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Todos os períodos</SelectItem>
+              <SelectItem value="__all__">Todos os períodos</SelectItem>
               {periodos.map(m => (
                 <SelectItem key={m} value={m}>{m}</SelectItem>
               ))}
