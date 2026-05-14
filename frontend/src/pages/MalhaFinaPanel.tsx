@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'; // useMemo: emitenteOptions
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
+import { useFiliais } from '@/contexts/FilialContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -265,6 +266,7 @@ function DetalheMalhaFina({ row, onClose, token, companyId }: {
 // ── Painel principal ───────────────────────────────────────────────────────────
 export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel = true }: Props) {
   const { token, companyId } = useAuth();
+  const { selectedFiliais } = useFiliais();
 
   const hoje = new Date();
   const defaultDataDe = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}-01`;
@@ -301,7 +303,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
     return () => clearTimeout(t);
   }, [filterCNPJ]);
 
-  useEffect(() => { setPage(1); }, [dataDe, dataAte, statusFilt, cnpjDeb, sortCol, sortDir]);
+  useEffect(() => { setPage(1); }, [dataDe, dataAte, statusFilt, cnpjDeb, sortCol, sortDir, selectedFiliais]);
 
   function handleSort(col: string) {
     if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
@@ -316,7 +318,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   }
 
   const { data, isFetching, isError } = useQuery<MalhaFinaApiResponse>({
-    queryKey: ['malha-fina', tipo, companyId, { page, dataDe, dataAte, statusFilt, cnpjDeb, sortCol, sortDir }],
+    queryKey: ['malha-fina', tipo, companyId, selectedFiliais, { page, dataDe, dataAte, statusFilt, cnpjDeb, sortCol, sortDir }],
     queryFn: async () => {
       const params = new URLSearchParams();
       params.set('page', String(page));
@@ -326,6 +328,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
       if (dataAte) params.set('data_ate', dataAte);
       if (statusFilt) params.set('status', statusFilt);
       if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
+      if (selectedFiliais.length > 0) params.set('filial_cnpj', selectedFiliais.join(','));
       const res = await fetch(`/api/malha-fina/${tipo}?${params}`, { headers: authHeaders });
       if (!res.ok) throw new Error(res.statusText);
       return res.json();

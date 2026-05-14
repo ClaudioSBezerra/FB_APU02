@@ -75,6 +75,15 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	statusFilt := q.Get("status")     // "ausente" | "cancelada" | "" = todas
 	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
 
+	// filial_cnpj: CNPJs da empresa (ni_adquirente) separados por vírgula — vazio = todas
+	cleanCNPJ := strings.NewReplacer(".", "", "/", "", "-", "")
+	var filialCNPJs []string
+	for _, raw := range strings.Split(q.Get("filial_cnpj"), ",") {
+		if c := cleanCNPJ.Replace(strings.TrimSpace(raw)); c != "" {
+			filialCNPJs = append(filialCNPJs, c)
+		}
+	}
+
 	safeColsMalha := map[string]string{
 		"data_dfe_emissao":     "rd.data_dfe_emissao",
 		"valor_cbs_total":      "rd.valor_cbs_total",
@@ -124,6 +133,14 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	if filterCNPJ != "" {
 		args = append(args, filterCNPJ+"%")
 		where += fmt.Sprintf(" AND rd.ni_emitente LIKE $%d", len(args))
+	}
+	if len(filialCNPJs) > 0 {
+		placeholders := make([]string, len(filialCNPJs))
+		for i, cnpj := range filialCNPJs {
+			args = append(args, cnpj)
+			placeholders[i] = fmt.Sprintf("$%d", len(args))
+		}
+		where += fmt.Sprintf(" AND rd.ni_adquirente IN (%s)", strings.Join(placeholders, ","))
 	}
 
 	// ── COUNT + TOTAIS em 1 query (LEFT JOIN — sem CTE, sem subconsultas) ─────
