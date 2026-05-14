@@ -188,18 +188,15 @@ function DS({ title, children }: { title: string; children: React.ReactNode }) {
   );
 }
 
-function DetalheMalhaFina({ row, onClose, token, companyId }: {
+function DetalheMalhaFina({ row, onClose }: {
   row: MalhaFinaRow; onClose: () => void;
-  token: string | null; companyId: string | null;
 }) {
   const [danfeLoading, setDanfeLoading] = useState(false);
 
   async function openDanfe() {
     setDanfeLoading(true);
     try {
-      const res = await fetch(`/api/danfe/${row.chave_dfe}`, {
-        headers: { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' },
-      });
+      const res = await fetch(`/api/danfe/${row.chave_dfe}`);
       if (!res.ok) {
         if (res.status === 404) {
           toast.warning('XML não disponível. Importe este documento para gerar o DANFE.');
@@ -265,7 +262,7 @@ function DetalheMalhaFina({ row, onClose, token, companyId }: {
 
 // ── Painel principal ───────────────────────────────────────────────────────────
 export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel = true }: Props) {
-  const { token, companyId } = useAuth();
+  const { companyId } = useAuth();
   const { selectedFiliais } = useFiliais();
 
   const hoje = new Date();
@@ -284,11 +281,9 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
   // Apelidos de filiais
   const [apelidos, setApelidos] = useState<Record<string, string>>({});
 
-  const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId || '' };
-
   useEffect(() => {
-    if (!token) return;
-    fetch('/api/config/filial-apelidos', { headers: authHeaders })
+    if (!companyId) return;
+    fetch('/api/config/filial-apelidos')
       .then(r => r.ok ? r.json() : [])
       .then((list: { cnpj: string; apelido: string }[]) => {
         const map: Record<string, string> = {};
@@ -296,7 +291,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
         setApelidos(map);
       })
       .catch(() => {});
-  }, [token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const t = setTimeout(() => setCnpjDeb(filterCNPJ), 400);
@@ -329,12 +324,12 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
       if (statusFilt) params.set('status', statusFilt);
       if (cnpjDeb) params.set('emit_cnpj', cnpjDeb.replace(/\D/g, ''));
       if (selectedFiliais.length > 0) params.set('filial_cnpj', selectedFiliais.join(','));
-      const res = await fetch(`/api/malha-fina/${tipo}?${params}`, { headers: authHeaders });
+      const res = await fetch(`/api/malha-fina/${tipo}?${params}`);
       if (!res.ok) throw new Error(res.statusText);
       return res.json();
     },
     placeholderData: keepPreviousData,
-    enabled: !!token && !!companyId && rfbDisponivel,
+    enabled: !!companyId && rfbDisponivel,
   });
 
   // Resumo por tipo (da MV) — apenas data_de, sem filtro de emitente para sempre mostrar todas as opções
@@ -344,12 +339,12 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
       const params = new URLSearchParams();
       if (dataDe) params.set('data_de', dataDe);
       if (dataAte) params.set('data_ate', dataAte);
-      const res = await fetch(`/api/malha-fina/${tipo}/resumo?${params}`, { headers: authHeaders });
+      const res = await fetch(`/api/malha-fina/${tipo}/resumo?${params}`);
       if (!res.ok) throw new Error(res.statusText);
       return res.json();
     },
     placeholderData: keepPreviousData,
-    enabled: !!token && !!companyId && rfbDisponivel,
+    enabled: !!companyId && rfbDisponivel,
   });
 
   const items      = data?.items      ?? [];
@@ -606,8 +601,6 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
         <DetalheMalhaFina
           row={selected}
           onClose={() => setSelected(null)}
-          token={token}
-          companyId={companyId}
         />
       )}
     </div>
