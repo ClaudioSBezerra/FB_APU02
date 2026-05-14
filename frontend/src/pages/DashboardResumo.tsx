@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip as UITooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { HelpCircle } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils'
 
 interface BlocoDoc {
@@ -33,6 +35,22 @@ interface DashboardData {
   saldo_cbs: number
   creditos_apropriar: number
   aliquota_efetiva_ibs: number | null
+  aliquota_efetiva_cbs: number | null
+}
+
+function InfoTip({ children }: { children: React.ReactNode }) {
+  return (
+    <TooltipProvider delayDuration={200}>
+      <UITooltip>
+        <TooltipTrigger asChild>
+          <HelpCircle className="h-3.5 w-3.5 text-muted-foreground/60 cursor-help shrink-0" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="max-w-[260px] text-xs leading-relaxed">
+          {children}
+        </TooltipContent>
+      </UITooltip>
+    </TooltipProvider>
+  )
 }
 
 export default function DashboardResumo() {
@@ -99,7 +117,7 @@ export default function DashboardResumo() {
       {data && (
         <>
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             {/* Card 1: Total de Documentos */}
             <Card>
               <CardHeader className="pb-2">
@@ -115,10 +133,17 @@ export default function DashboardResumo() {
               </CardContent>
             </Card>
 
-            {/* Card 2: Total de Créditos */}
+            {/* Card 2: Créditos Líquidos */}
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Créditos Líquidos</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                  Créditos Líquidos
+                  <InfoTip>
+                    Soma dos créditos IBS+CBS de fornecedores com CNPJ identificado que <strong>não estão</strong> no Simples Nacional. São os créditos com menor risco de glosa pela RFB.
+                    <br /><br />
+                    = Créditos totais − créditos de fornecedores Simples Nacional − créditos sem CNPJ (ex.: importações)
+                  </InfoTip>
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">{formatCurrency(data.creditos_ibs_liquidos + data.creditos_cbs_liquidos)}</p>
@@ -159,11 +184,41 @@ export default function DashboardResumo() {
             {/* Card 5: Alíquota Efetiva IBS */}
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Alíquota Efetiva IBS</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                  Alíquota Efetiva IBS
+                  <InfoTip>
+                    Alíquota real de IBS cobrada sobre as saídas no período.
+                    <br /><br />
+                    Fórmula: IBS debitado ÷ base de cálculo das saídas × 100
+                    <br /><br />
+                    Abaixo da alíquota nominal (17,7%) indica saídas com isenção, redução de base ou regime especial.
+                  </InfoTip>
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">
-                  {data.aliquota_efetiva_ibs !== null ? `${data.aliquota_efetiva_ibs.toFixed(2)}%` : '--'}
+                  {data.aliquota_efetiva_ibs != null ? `${data.aliquota_efetiva_ibs.toFixed(2)}%` : '--'}
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Card 6: Alíquota Efetiva CBS */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1.5">
+                  Alíquota Efetiva CBS
+                  <InfoTip>
+                    Alíquota real de CBS cobrada sobre as saídas no período.
+                    <br /><br />
+                    Fórmula: CBS debitada ÷ base de cálculo das saídas × 100
+                    <br /><br />
+                    Usa a mesma base do IBS. Abaixo da alíquota nominal (8,8%) indica saídas com isenção ou redução.
+                  </InfoTip>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">
+                  {data.aliquota_efetiva_cbs != null ? `${data.aliquota_efetiva_cbs.toFixed(2)}%` : '--'}
                 </p>
               </CardContent>
             </Card>

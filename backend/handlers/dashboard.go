@@ -140,10 +140,12 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 		creditosIBSEmRisco  := totalCreditosIBS - creditosIBSLiquidos
 		creditosCBSEmRisco  := totalCreditosCBS - creditosCBSLiquidos
 
-		var aliquotaEfetivaIBS *float64
+		var aliquotaEfetivaIBS, aliquotaEfetivaCBS *float64
 		if saiVBcIBS > 0 {
 			v := (totalDebitosIBS / saiVBcIBS) * 100
 			aliquotaEfetivaIBS = &v
+			c := (totalDebitosCBS / saiVBcIBS) * 100
+			aliquotaEfetivaCBS = &c
 		}
 
 		creditosApropriar := totalCreditosIBS + totalCreditosCBS - (totalDebitosIBS + totalDebitosCBS)
@@ -187,6 +189,7 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 			SaldoCBS              float64     `json:"saldo_cbs"`
 			CreditosApropriar     float64     `json:"creditos_apropriar"`
 			AliquotaEfetivaIBS    *float64    `json:"aliquota_efetiva_ibs"`
+			AliquotaEfetivaCBS    *float64    `json:"aliquota_efetiva_cbs"`
 		}{
 			MesesDisponiveis:      mesesDisp,
 			MesSelecionado:        mesDB,
@@ -206,6 +209,7 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 			SaldoCBS:              saldoCBS,
 			CreditosApropriar:     creditosApropriar,
 			AliquotaEfetivaIBS:    aliquotaEfetivaIBS,
+			AliquotaEfetivaCBS:    aliquotaEfetivaCBS,
 		}
 
 		json.NewEncoder(w).Encode(resp)
