@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 Phase: 3 of 4 (Debito Tecnico) — IN PROGRESS
 Plan: 1/5 complete
 Status: Phase 3 Plan 01 (DEBT-01) concluido; aguardando planos 02-05
-Last activity: 2026-05-14 - Completed quick task 260514-mnw: Limpeza de Base de Dados granular em Configurações
+Last activity: 2026-05-14 - Completed quick task 260514-n0j: Refresh automático de mv_malha_fina_resumo + covering indexes + LEFT JOIN dashboard
 
 Progress: [██████████] 100%
 
@@ -84,6 +84,7 @@ None.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260514-mnw | Limpeza de Base de Dados granular em Configurações | 2026-05-14 | 88a84de | [260514-mnw-limpeza-base-dados](.planning/quick/260514-mnw-limpeza-base-dados/) |
+| 260514-n0j | Refresh automático de views após delete/import + covering indexes + LEFT JOIN dashboard | 2026-05-14 | 9c49acf | [260514-n0j-views-refresh-perf](.planning/quick/260514-n0j-views-refresh-perf/) |
 
 ### Blockers/Concerns
 
