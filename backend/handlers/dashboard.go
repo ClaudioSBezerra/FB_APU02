@@ -69,8 +69,10 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(SUM(v_cbs), 0),
 				COALESCE(SUM(v_bc_ibs_cbs), 0),
 				COALESCE(SUM(CASE WHEN (ne.v_ibs > 0 OR ne.v_cbs > 0) AND fs.cnpj IS NULL
+				                       AND ne.forn_cnpj IS NOT NULL AND ne.forn_cnpj != ''
 				              THEN ne.v_ibs ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN (ne.v_ibs > 0 OR ne.v_cbs > 0) AND fs.cnpj IS NULL
+				                       AND ne.forn_cnpj IS NOT NULL AND ne.forn_cnpj != ''
 				              THEN ne.v_cbs ELSE 0 END), 0)
 			FROM nfe_entradas ne
 			LEFT JOIN forn_simples fs ON fs.cnpj = ne.forn_cnpj
@@ -110,8 +112,10 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(SUM(v_cbs), 0),
 				COALESCE(SUM(v_bc_ibs_cbs), 0),
 				COALESCE(SUM(CASE WHEN (ce.v_ibs > 0 OR ce.v_cbs > 0) AND fs.cnpj IS NULL
+				                       AND ce.emit_cnpj IS NOT NULL AND ce.emit_cnpj != ''
 				              THEN ce.v_ibs ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN (ce.v_ibs > 0 OR ce.v_cbs > 0) AND fs.cnpj IS NULL
+				                       AND ce.emit_cnpj IS NOT NULL AND ce.emit_cnpj != ''
 				              THEN ce.v_cbs ELSE 0 END), 0)
 			FROM cte_entradas ce
 			LEFT JOIN forn_simples fs ON fs.cnpj = ce.emit_cnpj
