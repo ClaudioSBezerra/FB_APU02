@@ -68,14 +68,13 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(SUM(v_ibs), 0),
 				COALESCE(SUM(v_cbs), 0),
 				COALESCE(SUM(v_bc_ibs_cbs), 0),
-				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
-				                   AND forn_cnpj NOT IN (SELECT cnpj FROM forn_simples)
-				              THEN v_ibs ELSE 0 END), 0),
-				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
-				                   AND forn_cnpj NOT IN (SELECT cnpj FROM forn_simples)
-				              THEN v_cbs ELSE 0 END), 0)
-			FROM nfe_entradas
-			WHERE company_id = $1 AND mes_ano = $2
+				COALESCE(SUM(CASE WHEN (ne.v_ibs > 0 OR ne.v_cbs > 0) AND fs.cnpj IS NULL
+				              THEN ne.v_ibs ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN (ne.v_ibs > 0 OR ne.v_cbs > 0) AND fs.cnpj IS NULL
+				              THEN ne.v_cbs ELSE 0 END), 0)
+			FROM nfe_entradas ne
+			LEFT JOIN forn_simples fs ON fs.cnpj = ne.forn_cnpj
+			WHERE ne.company_id = $1 AND ne.mes_ano = $2
 		`, companyID, mesDB).Scan(&entCount, &entVNF, &entVIBS, &entVCBS, &entVBcIBS, &entVIBSLiq, &entVCBSLiq)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar NF-e entradas", err, "[DashboardResumo]")
@@ -110,14 +109,13 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 				COALESCE(SUM(v_ibs), 0),
 				COALESCE(SUM(v_cbs), 0),
 				COALESCE(SUM(v_bc_ibs_cbs), 0),
-				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
-				                   AND emit_cnpj NOT IN (SELECT cnpj FROM forn_simples)
-				              THEN v_ibs ELSE 0 END), 0),
-				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
-				                   AND emit_cnpj NOT IN (SELECT cnpj FROM forn_simples)
-				              THEN v_cbs ELSE 0 END), 0)
-			FROM cte_entradas
-			WHERE company_id = $1 AND mes_ano = $2
+				COALESCE(SUM(CASE WHEN (ce.v_ibs > 0 OR ce.v_cbs > 0) AND fs.cnpj IS NULL
+				              THEN ce.v_ibs ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN (ce.v_ibs > 0 OR ce.v_cbs > 0) AND fs.cnpj IS NULL
+				              THEN ce.v_cbs ELSE 0 END), 0)
+			FROM cte_entradas ce
+			LEFT JOIN forn_simples fs ON fs.cnpj = ce.emit_cnpj
+			WHERE ce.company_id = $1 AND ce.mes_ano = $2
 		`, companyID, mesDB).Scan(&cteCount, &cteVPrest, &cteVIBS, &cteVCBS, &cteVBcIBS, &cteVIBSLiq, &cteVCBSLiq)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar CT-e entradas", err, "[DashboardResumo]")

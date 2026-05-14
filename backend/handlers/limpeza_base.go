@@ -152,6 +152,12 @@ func LimpezaBaseHandler(db *sql.DB) http.HandlerFunc {
 				}
 			}
 
+			go func() {
+				if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo"); err != nil {
+					log.Printf("[LimpezaBase] Aviso: refresh mv_malha_fina_resumo: %v", err)
+				}
+			}()
+
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"message":       "Registros removidos com sucesso",
 				"totais":        totais,

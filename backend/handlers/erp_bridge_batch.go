@@ -183,6 +183,11 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 
 		log.Printf("[BatchImport] company=%s inserted=%d ignored=%d errors=%d",
 			companyID, result.Inserted, result.Ignored, result.Errors)
+		go func() {
+			if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo"); err != nil {
+				log.Printf("[BatchImport] Aviso: refresh mv_malha_fina_resumo: %v", err)
+			}
+		}()
 		json.NewEncoder(w).Encode(result)
 	}
 }

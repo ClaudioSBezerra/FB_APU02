@@ -77,6 +77,12 @@ func LimparDadosApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("[LimparApuracao] reset_tracker sinalizado para empresa %s", companyID)
 		}
 
+		go func() {
+			if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo"); err != nil {
+				log.Printf("[LimparApuracao] Aviso: refresh mv_malha_fina_resumo: %v", err)
+			}
+		}()
+
 		totals := map[string]int64{}
 		for _, r := range results {
 			totals[r.table] = r.deleted
