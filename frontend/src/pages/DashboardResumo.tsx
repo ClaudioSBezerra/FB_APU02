@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { formatCurrency } from '@/lib/utils'
 
 interface BlocoDoc {
@@ -14,6 +15,8 @@ interface BlocoDoc {
 }
 
 interface DashboardData {
+  meses_disponiveis: string[]
+  mes_selecionado: string
   mes_ano: string
   nfe_entradas: BlocoDoc
   nfe_saidas: BlocoDoc
@@ -33,18 +36,19 @@ interface DashboardData {
 }
 
 export default function DashboardResumo() {
-  const [mes, setMes] = useState<string>(new Date().toISOString().slice(0, 7))
+  const [mesSelecionado, setMesSelecionado] = useState('')
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [chartMode, setChartMode] = useState<'quantidade' | 'valores'>('quantidade')
   const { companyId } = useAuth()
 
-  useEffect(() => {
+  const fetchData = (mes?: string) => {
     if (!companyId) return
     setLoading(true)
     setErro(null)
-    fetch(`/api/dashboard/resumo?mes=${mes}`)
+    const params = mes ? `?mes_ano=${encodeURIComponent(mes)}` : ''
+    fetch(`/api/dashboard/resumo${params}`)
       .then(async res => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: 'Erro desconhecido' }))
@@ -52,10 +56,20 @@ export default function DashboardResumo() {
         }
         return res.json() as Promise<DashboardData>
       })
-      .then(json => setData(json))
+      .then(json => {
+        setData(json)
+        if (!mes && json.mes_selecionado) setMesSelecionado(json.mes_selecionado)
+      })
       .catch((e: Error) => setErro(e.message))
       .finally(() => setLoading(false))
-  }, [mes, companyId])
+  }
+
+  function handleMesChange(mes: string) {
+    setMesSelecionado(mes)
+    fetchData(mes)
+  }
+
+  useEffect(() => { fetchData() }, [companyId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="p-6 space-y-6">
@@ -65,12 +79,18 @@ export default function DashboardResumo() {
           <h1 className="text-2xl font-bold">Resumo Fiscal</h1>
           <p className="text-muted-foreground text-sm">Visão consolidada dos documentos fiscais e apuração IBS/CBS</p>
         </div>
-        <input
-          type="month"
-          value={mes}
-          onChange={e => setMes(e.target.value)}
-          className="border rounded px-3 py-2 text-sm"
-        />
+        <div className="w-36">
+          <Select value={mesSelecionado} onValueChange={handleMesChange} disabled={loading}>
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Período" />
+            </SelectTrigger>
+            <SelectContent>
+              {(data?.meses_disponiveis ?? []).map(m => (
+                <SelectItem key={m} value={m} className="text-sm">{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {loading && <p className="text-muted-foreground">Carregando...</p>}

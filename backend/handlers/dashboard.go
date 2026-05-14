@@ -4,11 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"regexp"
-	"time"
 )
-
-var mesAnoRegexp = regexp.MustCompile(`^\d{4}-\d{2}$`)
 
 // DashboardResumoHandler retorna visão consolidada de documentos fiscais e apuração IBS/CBS
 // filtrada por company_id e mes_ano.
@@ -28,12 +24,39 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		mes := r.URL.Query().Get("mes")
-		if !mesAnoRegexp.MatchString(mes) {
-			mes = time.Now().Format("2006-01")
+		// Meses disponíveis (apenas anos >= 2025)
+		perRows, _ := db.Query(`
+			SELECT mes_ano FROM (
+				SELECT DISTINCT mes_ano FROM (
+					SELECT mes_ano FROM nfe_entradas WHERE company_id = $1
+					UNION
+					SELECT mes_ano FROM cte_entradas WHERE company_id = $1
+				) t
+				WHERE mes_ano IS NOT NULL AND mes_ano != ''
+				  AND SPLIT_PART(mes_ano, '/', 2) >= '2025'
+			) u
+			ORDER BY SPLIT_PART(mes_ano, '/', 2) DESC,
+			         SPLIT_PART(mes_ano, '/', 1) DESC
+		`, companyID)
+		var mesesDisp []string
+		if perRows != nil {
+			defer perRows.Close()
+			for perRows.Next() {
+				var m string
+				if perRows.Scan(&m) == nil {
+					mesesDisp = append(mesesDisp, m)
+				}
+			}
 		}
-		// Banco armazena mes_ano como MM/YYYY; input[type=month] envia YYYY-MM.
-		mesDB := mes[5:7] + "/" + mes[0:4]
+		if mesesDisp == nil {
+			mesesDisp = []string{}
+		}
+
+		// Mês selecionado: parâmetro ?mes_ano=MM/YYYY; padrão = mais recente
+		mesDB := r.URL.Query().Get("mes_ano")
+		if mesDB == "" && len(mesesDisp) > 0 {
+			mesDB = mesesDisp[0]
+		}
 
 		// ── NF-e Entradas ──────────────────────────────────────────────────────
 		var entCount int
@@ -144,6 +167,8 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		resp := struct {
+			MesesDisponiveis      []string    `json:"meses_disponiveis"`
+			MesSelecionado        string      `json:"mes_selecionado"`
 			MesAno                string      `json:"mes_ano"`
 			NfeEntradas           blocoDoc    `json:"nfe_entradas"`
 			NfeSaidas             blocoDoc    `json:"nfe_saidas"`
@@ -161,6 +186,8 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 			CreditosApropriar     float64     `json:"creditos_apropriar"`
 			AliquotaEfetivaIBS    *float64    `json:"aliquota_efetiva_ibs"`
 		}{
+			MesesDisponiveis:      mesesDisp,
+			MesSelecionado:        mesDB,
 			MesAno:                mesDB,
 			NfeEntradas:           blocoDoc{Count: entCount, VNF: entVNF, VIBS: entVIBS, VCBS: entVCBS, VBcIBS: entVBcIBS},
 			NfeSaidas:             blocoDoc{Count: saiCount, VNF: saiVNF, VIBS: saiVIBS, VCBS: saiVCBS, VBcIBS: saiVBcIBS},
