@@ -1,153 +1,220 @@
-import { useState } from 'react';
-import { AlertTriangle, Trash2, CheckCircle2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { toast } from 'sonner';
+import { useState, useEffect } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 
-interface LimparResult {
-  nfe_saidas: number;
-  nfe_entradas: number;
-  cte_entradas: number;
-  dfe_xml: number;
-}
-
-function fmtN(n: number) {
-  return new Intl.NumberFormat('pt-BR').format(n);
-}
-
-const CONFIRM_WORD = 'LIMPAR';
-
-const DATA_ITEMS = [
-  { label: 'NF-e Saídas',      desc: 'Notas fiscais de saída importadas' },
-  { label: 'NF-e Entradas',    desc: 'Notas fiscais de entrada importadas' },
-  { label: 'CT-e Entradas',    desc: 'Conhecimentos de transporte importados' },
-  { label: 'XMLs armazenados', desc: 'Arquivos XML brutos (dfe_xml)' },
-];
+const TABELAS = [
+  { id: 'nfe_entradas', label: 'NF-e Entradas' },
+  { id: 'nfe_saidas',   label: 'NF-e Saídas' },
+  { id: 'cte_entradas', label: 'CT-e Entradas' },
+]
 
 export default function LimparDadosApuracao() {
-  const [confirmText, setConfirmText] = useState('');
-  const [loading,     setLoading]     = useState(false);
-  const [result,      setResult]      = useState<LimparResult | null>(null);
+  const [periodos, setPeriodos] = useState<string[]>([])
+  const [mesSelecionado, setMesSelecionado] = useState<string>('')
+  const [tabelasSelecionadas, setTabelasSelecionadas] = useState<string[]>(
+    TABELAS.map(t => t.id)
+  )
+  const [preview, setPreview] = useState<Record<string, number> | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [executing, setExecuting] = useState(false)
+  const [resultado, setResultado] = useState<Record<string, number> | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [confirmando, setConfirmando] = useState(false)
 
-  const confirmed = confirmText === CONFIRM_WORD;
+  useEffect(() => {
+    fetch('/api/admin/limpeza-base')
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => setPeriodos(d.periodos ?? []))
+      .catch(() => {})
+  }, [])
 
-  async function handleLimpar() {
-    if (!confirmed) return;
-    setLoading(true);
-    try {
-      const res = await fetch('/api/admin/limpar-apuracao', {
-        method: 'DELETE',
-      });
-      if (!res.ok) {
-        const msg = await res.text();
-        toast.error('Erro ao limpar dados: ' + msg);
-        return;
-      }
-      const data = await res.json();
-      setResult(data.totals);
-      setConfirmText('');
-      toast.success('Dados de apuração removidos com sucesso.');
-    } catch {
-      toast.error('Erro de conexão ao tentar limpar os dados.');
-    } finally {
-      setLoading(false);
-    }
+  function toggleTabela(id: string) {
+    setTabelasSelecionadas(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+    setPreview(null)
+    setResultado(null)
   }
 
-  if (result) {
-    const total = Object.values(result).reduce((a, b) => a + b, 0);
-    return (
-      <div className="max-w-lg mx-auto mt-8 space-y-4">
-        <div className="flex items-center gap-3 p-4 rounded-lg border border-green-200 bg-green-50">
-          <CheckCircle2 className="h-6 w-6 text-green-600 shrink-0" />
-          <div>
-            <p className="font-semibold text-green-800">Limpeza concluída</p>
-            <p className="text-sm text-green-700">{fmtN(total)} registros removidos no total.</p>
-          </div>
-        </div>
-
-        <div className="border rounded-lg divide-y text-sm">
-          {[
-            { label: 'NF-e Saídas',      value: result.nfe_saidas },
-            { label: 'NF-e Entradas',    value: result.nfe_entradas },
-            { label: 'CT-e Entradas',    value: result.cte_entradas },
-            { label: 'XMLs armazenados', value: result.dfe_xml },
-          ].map(row => (
-            <div key={row.label} className="flex justify-between items-center px-4 py-2">
-              <span className="text-muted-foreground">{row.label}</span>
-              <span className="font-mono font-medium">{fmtN(row.value)}</span>
-            </div>
-          ))}
-        </div>
-
-        <Button variant="outline" className="w-full" onClick={() => setResult(null)}>
-          Fechar
-        </Button>
-      </div>
-    );
+  function handlePreview() {
+    if (tabelasSelecionadas.length === 0) return
+    setLoadingPreview(true)
+    setErro(null)
+    const params = mesSelecionado ? `?mes_ano=${encodeURIComponent(mesSelecionado)}` : ''
+    fetch(`/api/admin/limpeza-base${params}`)
+      .then(async r => {
+        if (!r.ok) throw new Error('Erro ao consultar contagens')
+        return r.json()
+      })
+      .then(d => setPreview(d.contagens ?? {}))
+      .catch((e: Error) => setErro(e.message))
+      .finally(() => setLoadingPreview(false))
   }
+
+  function handleExecutar() {
+    setExecuting(true)
+    setErro(null)
+    fetch('/api/admin/limpeza-base', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tabelas: tabelasSelecionadas, mes_ano: mesSelecionado }),
+    })
+      .then(async r => {
+        const d = await r.json()
+        if (!r.ok) throw new Error(d.error ?? 'Erro ao executar limpeza')
+        setResultado(d.totais ?? {})
+        setPreview(null)
+        setConfirmando(false)
+      })
+      .catch((e: Error) => setErro(e.message))
+      .finally(() => setExecuting(false))
+  }
+
+  const totalPreview = tabelasSelecionadas.reduce(
+    (s, t) => s + ((preview?.[t] ?? 0) as number), 0
+  )
 
   return (
-    <div className="max-w-lg mx-auto mt-8 space-y-6">
-
-      {/* Aviso */}
-      <div className="flex gap-3 p-4 rounded-lg border border-red-200 bg-red-50">
-        <AlertTriangle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <p className="font-semibold text-red-800 text-sm">Ação irreversível</p>
-          <p className="text-sm text-red-700">
-            Esta operação remove <strong>permanentemente</strong> todos os dados de apuração
-            IBS/CBS da empresa ativa. Use apenas para limpar dados de teste antes de iniciar
-            a operação com dados reais.
-          </p>
-        </div>
-      </div>
-
-      {/* O que será apagado */}
+    <div className="p-6 space-y-6 max-w-2xl">
       <div>
-        <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-2">
-          Dados que serão removidos
+        <h1 className="text-2xl font-bold">Limpeza de Base de Dados</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Remova documentos fiscais por tabela e período. A operação é restrita à empresa selecionada e não pode ser desfeita.
         </p>
-        <div className="border rounded-lg divide-y">
-          {DATA_ITEMS.map(item => (
-            <div key={item.label} className="flex items-start gap-3 px-4 py-2.5">
-              <Trash2 className="h-3.5 w-3.5 text-red-400 mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium">{item.label}</p>
-                <p className="text-xs text-muted-foreground">{item.desc}</p>
-              </div>
-            </div>
+      </div>
+
+      {/* Tabelas */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Tabelas</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {TABELAS.map(t => (
+            <label key={t.id} className="flex items-center gap-3 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={tabelasSelecionadas.includes(t.id)}
+                onChange={() => toggleTabela(t.id)}
+                className="h-4 w-4 rounded border border-input"
+              />
+              <span className="text-sm font-medium">{t.label}</span>
+            </label>
           ))}
-        </div>
-        <p className="text-xs text-muted-foreground mt-2">
-          Importações da RFB (débitos CBS), configurações (alíquotas, CFOP, credenciais) e usuários <strong>não</strong> serão afetados.
-        </p>
-      </div>
+          <button
+            type="button"
+            className="text-xs text-primary underline mt-1"
+            onClick={() => { setTabelasSelecionadas(TABELAS.map(t => t.id)); setPreview(null) }}
+          >
+            Selecionar todas
+          </button>
+        </CardContent>
+      </Card>
 
-      {/* Confirmação */}
-      <div className="space-y-2">
-        <Label className="text-sm">
-          Para confirmar, digite <span className="font-mono font-bold text-red-600">{CONFIRM_WORD}</span> abaixo:
-        </Label>
-        <Input
-          value={confirmText}
-          onChange={e => setConfirmText(e.target.value.toUpperCase())}
-          placeholder={CONFIRM_WORD}
-          className="font-mono"
-          disabled={loading}
-        />
-      </div>
+      {/* Período */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Período</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Select
+            value={mesSelecionado}
+            onValueChange={v => { setMesSelecionado(v); setPreview(null); setResultado(null) }}
+          >
+            <SelectTrigger className="w-52">
+              <SelectValue placeholder="Todos os períodos" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Todos os períodos</SelectItem>
+              {periodos.map(m => (
+                <SelectItem key={m} value={m}>{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Sem seleção: remove todos os períodos das tabelas escolhidas.
+          </p>
+        </CardContent>
+      </Card>
 
+      {/* Pré-visualizar */}
       <Button
-        variant="destructive"
-        className="w-full gap-2"
-        disabled={!confirmed || loading}
-        onClick={handleLimpar}
+        variant="outline"
+        onClick={handlePreview}
+        disabled={tabelasSelecionadas.length === 0 || loadingPreview}
       >
-        <Trash2 className="h-4 w-4" />
-        {loading ? 'Removendo dados...' : 'Limpar todos os dados de apuração'}
+        {loadingPreview ? 'Consultando…' : 'Pré-visualizar'}
       </Button>
+
+      {/* Preview */}
+      {preview !== null && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base text-amber-800">Registros que serão removidos</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {TABELAS.filter(t => tabelasSelecionadas.includes(t.id)).map(t => (
+              <div key={t.id} className="flex justify-between text-sm">
+                <span className="text-amber-900">{t.label}</span>
+                <span className="font-bold text-amber-900">
+                  {((preview[t.id] ?? 0) as number).toLocaleString('pt-BR')}
+                </span>
+              </div>
+            ))}
+            <div className="flex justify-between text-sm font-bold border-t border-amber-300 pt-2">
+              <span className="text-amber-900">Total</span>
+              <span className="text-amber-900">{totalPreview.toLocaleString('pt-BR')}</span>
+            </div>
+
+            <div className="pt-3">
+              {!confirmando ? (
+                <Button
+                  variant="destructive"
+                  onClick={() => setConfirmando(true)}
+                  disabled={totalPreview === 0}
+                >
+                  Confirmar Exclusão
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-red-700 font-medium">
+                    Esta ação removerá {totalPreview.toLocaleString('pt-BR')} registros e não pode ser desfeita. Confirma?
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="destructive" onClick={handleExecutar} disabled={executing}>
+                      {executing ? 'Removendo…' : 'Sim, remover'}
+                    </Button>
+                    <Button variant="outline" onClick={() => setConfirmando(false)}>
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Resultado */}
+      {resultado !== null && (
+        <Card className="border-green-300 bg-green-50">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base text-green-800">Limpeza concluída</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {TABELAS.filter(t => resultado[t.id] !== undefined).map(t => (
+              <div key={t.id} className="flex justify-between text-sm">
+                <span className="text-green-900">{t.label}</span>
+                <span className="font-bold text-green-900">
+                  {(resultado[t.id] as number).toLocaleString('pt-BR')} registros removidos
+                </span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {erro && <p className="text-sm text-red-600">{erro}</p>}
     </div>
-  );
+  )
 }
