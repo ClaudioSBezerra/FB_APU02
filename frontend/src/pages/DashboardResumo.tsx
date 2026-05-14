@@ -20,6 +20,10 @@ interface DashboardData {
   cte_entradas: BlocoDoc
   total_creditos_ibs: number
   total_creditos_cbs: number
+  creditos_ibs_liquidos: number
+  creditos_cbs_liquidos: number
+  creditos_ibs_em_risco: number
+  creditos_cbs_em_risco: number
   total_debitos_ibs: number
   total_debitos_cbs: number
   saldo_ibs: number
@@ -94,13 +98,18 @@ export default function DashboardResumo() {
             {/* Card 2: Total de Créditos */}
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">Total de Créditos</CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Créditos Líquidos</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{formatCurrency(data.total_creditos_ibs + data.total_creditos_cbs)}</p>
+                <p className="text-2xl font-bold">{formatCurrency(data.creditos_ibs_liquidos + data.creditos_cbs_liquidos)}</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  IBS: {formatCurrency(data.total_creditos_ibs)} | CBS: {formatCurrency(data.total_creditos_cbs)}
+                  IBS: {formatCurrency(data.creditos_ibs_liquidos)} | CBS: {formatCurrency(data.creditos_cbs_liquidos)}
                 </p>
+                {(data.creditos_ibs_em_risco + data.creditos_cbs_em_risco) > 0 && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    ⚠ Em risco: {formatCurrency(data.creditos_ibs_em_risco + data.creditos_cbs_em_risco)}
+                  </p>
+                )}
               </CardContent>
             </Card>
 
@@ -209,13 +218,14 @@ export default function DashboardResumo() {
                 </div>
                 {[
                   { label: 'Débitos', ibs: data.total_debitos_ibs, cbs: data.total_debitos_cbs },
-                  { label: 'Créditos', ibs: data.total_creditos_ibs, cbs: data.total_creditos_cbs },
+                  { label: 'Créditos Líquidos', ibs: data.creditos_ibs_liquidos, cbs: data.creditos_cbs_liquidos },
+                  { label: 'Em Risco', ibs: data.creditos_ibs_em_risco, cbs: data.creditos_cbs_em_risco, risk: true },
                   { label: 'Saldo a Recolher', ibs: data.saldo_ibs, cbs: data.saldo_cbs },
                 ].map(row => (
                   <div key={row.label} className="grid grid-cols-3 text-sm py-1 border-b last:border-0">
-                    <span className="font-medium">{row.label}</span>
-                    <span className="text-right">{formatCurrency(row.ibs)}</span>
-                    <span className="text-right">{formatCurrency(row.cbs)}</span>
+                    <span className={`font-medium ${'risk' in row && row.risk ? 'text-amber-600' : ''}`}>{row.label}</span>
+                    <span className={`text-right ${'risk' in row && row.risk ? 'text-amber-600' : ''}`}>{formatCurrency(row.ibs)}</span>
+                    <span className={`text-right ${'risk' in row && row.risk ? 'text-amber-600' : ''}`}>{formatCurrency(row.cbs)}</span>
                   </div>
                 ))}
               </CardContent>

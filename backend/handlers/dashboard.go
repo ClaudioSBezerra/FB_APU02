@@ -37,17 +37,23 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 
 		// ── NF-e Entradas ──────────────────────────────────────────────────────
 		var entCount int
-		var entVNF, entVIBS, entVCBS, entVBcIBS float64
+		var entVNF, entVIBS, entVCBS, entVBcIBS, entVIBSLiq, entVCBSLiq float64
 		err = db.QueryRow(`
 			SELECT
 				COUNT(*),
 				COALESCE(SUM(v_nf), 0),
 				COALESCE(SUM(v_ibs), 0),
 				COALESCE(SUM(v_cbs), 0),
-				COALESCE(SUM(v_bc_ibs_cbs), 0)
+				COALESCE(SUM(v_bc_ibs_cbs), 0),
+				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
+				                   AND forn_cnpj NOT IN (SELECT cnpj FROM forn_simples)
+				              THEN v_ibs ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
+				                   AND forn_cnpj NOT IN (SELECT cnpj FROM forn_simples)
+				              THEN v_cbs ELSE 0 END), 0)
 			FROM nfe_entradas
 			WHERE company_id = $1 AND mes_ano = $2
-		`, companyID, mesDB).Scan(&entCount, &entVNF, &entVIBS, &entVCBS, &entVBcIBS)
+		`, companyID, mesDB).Scan(&entCount, &entVNF, &entVIBS, &entVCBS, &entVBcIBS, &entVIBSLiq, &entVCBSLiq)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar NF-e entradas", err, "[DashboardResumo]")
 			return
@@ -73,17 +79,23 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 
 		// ── CT-e Entradas (usa v_prest — v_rec foi removido na migration 083) ────
 		var cteCount int
-		var cteVPrest, cteVIBS, cteVCBS, cteVBcIBS float64
+		var cteVPrest, cteVIBS, cteVCBS, cteVBcIBS, cteVIBSLiq, cteVCBSLiq float64
 		err = db.QueryRow(`
 			SELECT
 				COUNT(*),
 				COALESCE(SUM(v_prest), 0),
 				COALESCE(SUM(v_ibs), 0),
 				COALESCE(SUM(v_cbs), 0),
-				COALESCE(SUM(v_bc_ibs_cbs), 0)
+				COALESCE(SUM(v_bc_ibs_cbs), 0),
+				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
+				                   AND emit_cnpj NOT IN (SELECT cnpj FROM forn_simples)
+				              THEN v_ibs ELSE 0 END), 0),
+				COALESCE(SUM(CASE WHEN (v_ibs > 0 OR v_cbs > 0)
+				                   AND emit_cnpj NOT IN (SELECT cnpj FROM forn_simples)
+				              THEN v_cbs ELSE 0 END), 0)
 			FROM cte_entradas
 			WHERE company_id = $1 AND mes_ano = $2
-		`, companyID, mesDB).Scan(&cteCount, &cteVPrest, &cteVIBS, &cteVCBS, &cteVBcIBS)
+		`, companyID, mesDB).Scan(&cteCount, &cteVPrest, &cteVIBS, &cteVCBS, &cteVBcIBS, &cteVIBSLiq, &cteVCBSLiq)
 		if err != nil {
 			sanitizeDBErr(w, 500, "Erro ao consultar CT-e entradas", err, "[DashboardResumo]")
 			return
@@ -96,6 +108,12 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 		totalDebitosCBS := saiVCBS
 		saldoIBS := totalDebitosIBS - totalCreditosIBS
 		saldoCBS := totalDebitosCBS - totalCreditosCBS
+
+		// Créditos líquidos: excluem Simples Nacional e entradas sem IBS/CBS
+		creditosIBSLiquidos := entVIBSLiq + cteVIBSLiq
+		creditosCBSLiquidos := entVCBSLiq + cteVCBSLiq
+		creditosIBSEmRisco  := totalCreditosIBS - creditosIBSLiquidos
+		creditosCBSEmRisco  := totalCreditosCBS - creditosCBSLiquidos
 
 		var aliquotaEfetivaIBS *float64
 		if saiVBcIBS > 0 {
@@ -126,31 +144,39 @@ func DashboardResumoHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		resp := struct {
-			MesAno             string      `json:"mes_ano"`
-			NfeEntradas        blocoDoc    `json:"nfe_entradas"`
-			NfeSaidas          blocoDoc    `json:"nfe_saidas"`
-			CteEntradas        blocoDocCTE `json:"cte_entradas"`
-			TotalCreditosIBS   float64     `json:"total_creditos_ibs"`
-			TotalCreditosCBS   float64     `json:"total_creditos_cbs"`
-			TotalDebitosIBS    float64     `json:"total_debitos_ibs"`
-			TotalDebitosCBS    float64     `json:"total_debitos_cbs"`
-			SaldoIBS           float64     `json:"saldo_ibs"`
-			SaldoCBS           float64     `json:"saldo_cbs"`
-			CreditosApropriar  float64     `json:"creditos_apropriar"`
-			AliquotaEfetivaIBS *float64    `json:"aliquota_efetiva_ibs"`
+			MesAno                string      `json:"mes_ano"`
+			NfeEntradas           blocoDoc    `json:"nfe_entradas"`
+			NfeSaidas             blocoDoc    `json:"nfe_saidas"`
+			CteEntradas           blocoDocCTE `json:"cte_entradas"`
+			TotalCreditosIBS      float64     `json:"total_creditos_ibs"`
+			TotalCreditosCBS      float64     `json:"total_creditos_cbs"`
+			CreditosIBSLiquidos   float64     `json:"creditos_ibs_liquidos"`
+			CreditosCBSLiquidos   float64     `json:"creditos_cbs_liquidos"`
+			CreditosIBSEmRisco    float64     `json:"creditos_ibs_em_risco"`
+			CreditosCBSEmRisco    float64     `json:"creditos_cbs_em_risco"`
+			TotalDebitosIBS       float64     `json:"total_debitos_ibs"`
+			TotalDebitosCBS       float64     `json:"total_debitos_cbs"`
+			SaldoIBS              float64     `json:"saldo_ibs"`
+			SaldoCBS              float64     `json:"saldo_cbs"`
+			CreditosApropriar     float64     `json:"creditos_apropriar"`
+			AliquotaEfetivaIBS    *float64    `json:"aliquota_efetiva_ibs"`
 		}{
-			MesAno:             mesDB,
-			NfeEntradas:        blocoDoc{Count: entCount, VNF: entVNF, VIBS: entVIBS, VCBS: entVCBS, VBcIBS: entVBcIBS},
-			NfeSaidas:          blocoDoc{Count: saiCount, VNF: saiVNF, VIBS: saiVIBS, VCBS: saiVCBS, VBcIBS: saiVBcIBS},
-			CteEntradas:        blocoDocCTE{Count: cteCount, VPrest: cteVPrest, VIBS: cteVIBS, VCBS: cteVCBS, VBcIBS: cteVBcIBS},
-			TotalCreditosIBS:   totalCreditosIBS,
-			TotalCreditosCBS:   totalCreditosCBS,
-			TotalDebitosIBS:    totalDebitosIBS,
-			TotalDebitosCBS:    totalDebitosCBS,
-			SaldoIBS:           saldoIBS,
-			SaldoCBS:           saldoCBS,
-			CreditosApropriar:  creditosApropriar,
-			AliquotaEfetivaIBS: aliquotaEfetivaIBS,
+			MesAno:                mesDB,
+			NfeEntradas:           blocoDoc{Count: entCount, VNF: entVNF, VIBS: entVIBS, VCBS: entVCBS, VBcIBS: entVBcIBS},
+			NfeSaidas:             blocoDoc{Count: saiCount, VNF: saiVNF, VIBS: saiVIBS, VCBS: saiVCBS, VBcIBS: saiVBcIBS},
+			CteEntradas:           blocoDocCTE{Count: cteCount, VPrest: cteVPrest, VIBS: cteVIBS, VCBS: cteVCBS, VBcIBS: cteVBcIBS},
+			TotalCreditosIBS:      totalCreditosIBS,
+			TotalCreditosCBS:      totalCreditosCBS,
+			CreditosIBSLiquidos:   creditosIBSLiquidos,
+			CreditosCBSLiquidos:   creditosCBSLiquidos,
+			CreditosIBSEmRisco:    creditosIBSEmRisco,
+			CreditosCBSEmRisco:    creditosCBSEmRisco,
+			TotalDebitosIBS:       totalDebitosIBS,
+			TotalDebitosCBS:       totalDebitosCBS,
+			SaldoIBS:              saldoIBS,
+			SaldoCBS:              saldoCBS,
+			CreditosApropriar:     creditosApropriar,
+			AliquotaEfetivaIBS:    aliquotaEfetivaIBS,
 		}
 
 		json.NewEncoder(w).Encode(resp)

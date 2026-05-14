@@ -375,37 +375,37 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 			PorFornecedor:  nfeFornList,
 		}
 
-		// ── 2. Simples Nacional (EFD) ────────────────────────────────────────
-		simplesRows, err := db.Query(`
+		// ── 2. Simples Nacional — join direto em forn_simples com v_ibs/v_cbs reais ────
+		var simplesFornList []credPerdSimplesForn
+		var simplesTotalValor, simplesIBS, simplesCBS float64
+
+		// NF-e de fornecedores Simples Nacional
+		simplesNFeRows, err := db.Query(`
 			SELECT
-				fornecedor_cnpj,
-				fornecedor_nome,
-				SUM(total_valor) AS valor_total
-			FROM mv_operacoes_simples
-			WHERE company_id = $1
-			  AND ($2 = '' OR mes_ano = $2)
-			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = fornecedor_cnpj)
-			GROUP BY fornecedor_cnpj, fornecedor_nome
+				ne.forn_cnpj,
+				COALESCE((SELECT nome FROM parceiros WHERE company_id = $1 AND cnpj = ne.forn_cnpj LIMIT 1), '') AS forn_nome,
+				COALESCE(SUM(ne.v_nf), 0)  AS valor_total,
+				COALESCE(SUM(ne.v_ibs), 0) AS ibs_perdido,
+				COALESCE(SUM(ne.v_cbs), 0) AS cbs_perdido
+			FROM nfe_entradas ne
+			INNER JOIN forn_simples fs ON fs.cnpj = ne.forn_cnpj
+			WHERE ne.company_id = $1
+			  AND ($2 = '' OR ne.mes_ano = $2)
+			  AND NOT EXISTS (SELECT 1 FROM filial_apelidos fa WHERE fa.company_id = $1 AND fa.cnpj = ne.forn_cnpj)
+			GROUP BY ne.forn_cnpj
 			ORDER BY valor_total DESC
 			LIMIT 50
 		`, companyID, mesAno)
 		if err != nil {
-			log.Printf("CreditosPerdidos simples query error: %v", err)
-			// Não aborta — retorna sem dados do Simples
+			log.Printf("CreditosPerdidos simples nfe query error: %v", err)
 		}
-
-		var simplesFornList []credPerdSimplesForn
-		var simplesTotalValor, simplesIBS, simplesCBS float64
-
-		if simplesRows != nil {
-			defer simplesRows.Close()
-			for simplesRows.Next() {
+		if simplesNFeRows != nil {
+			defer simplesNFeRows.Close()
+			for simplesNFeRows.Next() {
 				var f credPerdSimplesForn
-				if err := simplesRows.Scan(&f.FornCNPJ, &f.FornNome, &f.ValorTotal); err != nil {
+				if err := simplesNFeRows.Scan(&f.FornCNPJ, &f.FornNome, &f.ValorTotal, &f.IBSPerdido, &f.CBSPerdido); err != nil {
 					continue
 				}
-				f.IBSPerdido = f.ValorTotal * (ibsRate / 100.0)
-				f.CBSPerdido = f.ValorTotal * (cbsRate / 100.0)
 				f.TotalPerdido = f.IBSPerdido + f.CBSPerdido
 				simplesFornList = append(simplesFornList, f)
 				simplesTotalValor += f.ValorTotal
@@ -413,6 +413,41 @@ func CreditosPerdidosHandler(db *sql.DB) http.HandlerFunc {
 				simplesCBS += f.CBSPerdido
 			}
 		}
+
+		// CT-e de transportadoras Simples Nacional
+		simplesCTeRows, err := db.Query(`
+			SELECT
+				ce.emit_cnpj,
+				COALESCE((SELECT nome FROM parceiros WHERE company_id = $1 AND cnpj = ce.emit_cnpj LIMIT 1), '') AS emit_nome,
+				COALESCE(SUM(ce.v_prest), 0) AS valor_total,
+				COALESCE(SUM(ce.v_ibs), 0)   AS ibs_perdido,
+				COALESCE(SUM(ce.v_cbs), 0)   AS cbs_perdido
+			FROM cte_entradas ce
+			INNER JOIN forn_simples fs ON fs.cnpj = ce.emit_cnpj
+			WHERE ce.company_id = $1
+			  AND ($2 = '' OR ce.mes_ano = $2)
+			GROUP BY ce.emit_cnpj
+			ORDER BY valor_total DESC
+			LIMIT 50
+		`, companyID, mesAno)
+		if err != nil {
+			log.Printf("CreditosPerdidos simples cte query error: %v", err)
+		}
+		if simplesCTeRows != nil {
+			defer simplesCTeRows.Close()
+			for simplesCTeRows.Next() {
+				var f credPerdSimplesForn
+				if err := simplesCTeRows.Scan(&f.FornCNPJ, &f.FornNome, &f.ValorTotal, &f.IBSPerdido, &f.CBSPerdido); err != nil {
+					continue
+				}
+				f.TotalPerdido = f.IBSPerdido + f.CBSPerdido
+				simplesFornList = append(simplesFornList, f)
+				simplesTotalValor += f.ValorTotal
+				simplesIBS += f.IBSPerdido
+				simplesCBS += f.CBSPerdido
+			}
+		}
+
 		if simplesFornList == nil {
 			simplesFornList = []credPerdSimplesForn{}
 		}
