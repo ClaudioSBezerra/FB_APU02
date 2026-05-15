@@ -35,11 +35,19 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'NF-e ABI',         path: '#', disabled: true },
       { label: 'ND-e',             path: '#', disabled: true },
       { label: 'NC-e',             path: '#', disabled: true },
-      { label: 'Importar NF-e Entradas', path: '/importacoes/nfe-entrada' },
-      { label: 'Importar NF-e Saídas',  path: '/importacoes/nfe-saida' },
-      { label: 'Importar CT-e',         path: '/importacoes/cte-entrada' },
-      { label: 'Importar ERP',          path: '/importacoes/erp-bridge',      adminOnly: true },
-      { label: 'Logs Importação',       path: '/importacoes/erp-bridge/logs', adminOnly: true },
+    ],
+  },
+  importacoes: {
+    label: 'Importações',
+    tabs: [
+      { label: 'NF-e Entradas (XML)',  path: '/importacoes/nfe-entrada' },
+      { label: 'NF-e Saídas (XML)',    path: '/importacoes/nfe-saida' },
+      { label: 'CT-e Entradas (XML)',  path: '/importacoes/cte-entrada' },
+      { label: 'NFS-e Entradas (XML)', path: '#', disabled: true },
+      { label: 'NFS-e Saídas (XML)',   path: '#', disabled: true },
+      { label: 'CT-e Saídas (XML)',    path: '#', disabled: true },
+      { label: 'Importar via ERP',     path: '/importacoes/erp-bridge',      adminOnly: true },
+      { label: 'Logs ERP',             path: '/importacoes/erp-bridge/logs', adminOnly: true },
     ],
   },
   cgibs: {
@@ -109,7 +117,7 @@ export function getActiveModule(pathname: string): string {
 
   if (pathname.includes('/notas')) return 'notas'
 
-  if (pathname.startsWith('/importacoes/')) return 'notas'
+  if (pathname.startsWith('/importacoes/')) return 'importacoes'
 
   const cgibsPaths = ['/cgibs/apuracao-ibs', '/cgibs/apuracao', '/cgibs/debitos']
   if (cgibsPaths.some(p => pathname.startsWith(p))) return 'cgibs'
