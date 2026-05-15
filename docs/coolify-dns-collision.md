@@ -84,15 +84,15 @@ O alias é definido dentro de `fb_net` (rede privada do stack) e portanto só ex
 
 ## Status de cada produto
 
-| Produto     | Alias aplicado      | Nginx atualizado | Data do fix |
-|-------------|---------------------|------------------|-------------|
-| FB_APU02    | `apu02-api`         | sim              | 2026-05-15  |
-| FB_APU04    | `apu04-api`         | sim              | 2026-05-15  |
-| FB_APU01    | `apu01-api`         | sim              | 2026-05-15  |
-| FBTAX_CLOUD | `fbtax-cloud-api`   | sim              | 2026-05-15  |
-| FB_APU03    | N/A (sem coolify)   | N/A              | não afetado |
-| FB_SMARTPICK| pendente            | pendente         | —           |
-| FB_FAROL    | pendente            | pendente         | —           |
+| Produto     | Alias aplicado      | Nginx atualizado | Data do fix | Observação |
+|-------------|---------------------|------------------|-------------|------------|
+| FB_APU02    | `apu02-api`         | sim              | 2026-05-15  | Fix original |
+| FB_APU04    | `apu04-api`         | sim              | 2026-05-15  | api removida da rede coolify |
+| FB_APU01    | `apu01-api`         | sim              | 2026-05-15  | |
+| FBTAX_CLOUD | N/A                 | N/A              | não afetado | Arquitetura diferente: Traefik roteia /api/* direto para api; nginx só serve SPA estático; sem upstream backend |
+| FB_APU03    | N/A (sem coolify)   | N/A              | não afetado | Não usa rede coolify |
+| FB_SMARTPICK| pendente            | pendente         | —           | Repo não disponível localmente |
+| FB_FAROL    | pendente            | pendente         | —           | Repo não disponível localmente |
 
 ---
 
@@ -107,6 +107,15 @@ Ao criar um novo produto que vai rodar no mesmo servidor Coolify:
 - [ ] O router Traefik usa um nome único (ex: `fbtax-cloud`, `simu`, `apuracao`) — sem repetição entre produtos
 
 ---
+
+## Nota sobre FBTAX_CLOUD
+
+FBTAX_CLOUD usa uma arquitetura diferente: o Traefik roteia `/api/*` diretamente para o container `api` via Traefik labels (sem passar pelo nginx do `web`). Por isso:
+- O `api` precisa estar na rede `coolify` (Traefik precisa alcançá-lo)
+- O `nginx.conf` do `web` não tem upstream backend — serve apenas o SPA React
+- Não há risco de colisão de DNS no nginx porque ele não tenta resolver `api`
+
+**Compatibilidade:** Como os outros produtos agora usam aliases únicos (`apu01-api`, `apu02-api`, `apu04-api`) em vez do nome genérico `api`, o fato de FBTAX_CLOUD ter `api` na rede `coolify` não causa mais colisão.
 
 ## Para FB_SMARTPICK e FB_FAROL
 
