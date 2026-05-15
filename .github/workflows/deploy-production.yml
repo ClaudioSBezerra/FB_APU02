@@ -175,6 +175,12 @@ jobs:
     runs-on: [self-hosted, cliente-aws]
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Sync docker-compose.yml para o deploy
+        run: cp installer/cliente-aws/docker-compose.yml /opt/apps/fbtax/cliente-aws/docker-compose.yml
+
       - name: Pull latest images
         working-directory: /opt/apps/fbtax/cliente-aws
         run: docker compose pull

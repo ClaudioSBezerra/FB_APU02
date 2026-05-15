@@ -13,6 +13,12 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Sync docker-compose.yml para o deploy
+        run: cp installer/cliente-aws/docker-compose.yml /opt/apps/fbtax/cliente-aws/docker-compose.yml
+
       - name: Pull latest images from GHCR
         working-directory: /opt/apps/fbtax/cliente-aws
         run: |
