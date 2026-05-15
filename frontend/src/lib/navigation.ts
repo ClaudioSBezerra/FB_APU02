@@ -43,6 +43,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'NF-e Entradas (XML)',  path: '/importacoes/nfe-entrada' },
       { label: 'NF-e Saídas (XML)',    path: '/importacoes/nfe-saida' },
       { label: 'CT-e Entradas (XML)',  path: '/importacoes/cte-entrada' },
+      { label: 'Pag. Fornecedores (CSV)', path: '/importacoes/pagamentos-fornecedores' },
       { label: 'NFS-e Entradas (XML)', path: '#', disabled: true },
       { label: 'NFS-e Saídas (XML)',   path: '#', disabled: true },
       { label: 'CT-e Saídas (XML)',    path: '#', disabled: true },
