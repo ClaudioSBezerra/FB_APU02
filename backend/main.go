@@ -449,6 +449,9 @@ func main() {
 	http.HandleFunc("/api/rfb/creditos/status", withAuth(handlers.StatusCreditosHandler, ""))
 	http.HandleFunc("/api/rfb/creditos/lista", withAuth(handlers.ListarCreditosHandler, ""))
 
+	// RFB Pgtos Fornecedores — conciliação pagamentos vs CBS RFB
+	http.HandleFunc("/api/rfb/pagamentos-fornecedores", withAuth(handlers.RFBPagamentosFornecedoresHandler, ""))
+
 	// RFB Webhook (PUBLIC - no JWT auth)
 	http.HandleFunc("/api/rfb/webhook", withDB(handlers.RFBWebhookHandler))
 
