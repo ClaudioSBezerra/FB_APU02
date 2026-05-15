@@ -1,168 +1,38 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { Upload, FolderOpen, FileText, CheckCircle, AlertCircle, SkipForward, Truck } from 'lucide-react';
+import { Upload, FolderOpen, FileText, CheckCircle, AlertCircle, SkipForward } from 'lucide-react';
 
-function buildMesAnoOptions() {
-  const opts: { value: string; label: string }[] = [];
-  const now = new Date();
-  for (let i = 0; i < 24; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    opts.push({ value: `${mm}/${d.getFullYear()}`, label: `${mm}/${d.getFullYear()}` });
-  }
-  return opts;
-}
-const MES_ANO_OPTIONS = buildMesAnoOptions();
+interface UploadError { arquivo: string; erro: string; }
+interface UploadResult { importados: number; ignorados: number; erros: UploadError[]; }
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-interface UploadError {
-  arquivo: string;
-  erro: string;
-}
-
-interface UploadResult {
-  importados: number;
-  ignorados: number;
-  erros: UploadError[];
-}
-
-interface CteRow {
-  id: string;
-  chave_cte: string;
-  modelo: number;
-  serie: string;
-  numero_cte: string;
-  data_emissao: string;
-  mes_ano: string;
-  nat_op: string;
-  cfop: string;
-  modal: string;
-  emit_cnpj: string;
-  emit_nome: string;
-  emit_uf: string;
-  rem_cnpj_cpf: string;
-  rem_nome: string;
-  rem_uf: string;
-  dest_cnpj_cpf: string;
-  dest_nome: string;
-  dest_uf: string;
-  v_prest: number;
-  v_rec: number;
-  v_carga: number;
-  v_bc_icms: number;
-  v_icms: number;
-  v_bc_ibs_cbs: number | null;
-  v_ibs: number | null;
-  v_cbs: number | null;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function fmtBRL(v: number | null | undefined): string {
-  if (v == null) return '—';
-  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
-function fmtNum(v: number | null | undefined): string {
-  if (v == null) return '—';
-  return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-
-const MODAL_LABELS: Record<string, string> = {
-  '01': 'Rodoviário',
-  '02': 'Aéreo',
-  '03': 'Aquaviário',
-  '04': 'Ferroviário',
-  '05': 'Dutoviário',
-  '06': 'Multimodal',
-};
-
-function fmtModal(m: string): string {
-  return MODAL_LABELS[m] || m || '—';
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 export default function ImportarXMLsCTe() {
-  const { companyId } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const [xmlFiles, setXmlFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<UploadResult | null>(null);
-  const [cteList, setCteList] = useState<CteRow[]>([]);
-  const [loadingList, setLoadingList] = useState(false);
-  const [filterMes, setFilterMes] = useState(MES_ANO_OPTIONS[0]?.value ?? '');
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(f =>
-      f.name.toLowerCase().endsWith('.xml')
-    );
-    setXmlFiles(files);
+    setXmlFiles(Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith('.xml')));
     setResult(null);
   }, []);
 
   const handleUpload = async () => {
-    if (xmlFiles.length === 0) {
-      toast.error('Selecione uma pasta com arquivos XML antes de importar.');
-      return;
-    }
-
+    if (xmlFiles.length === 0) { toast.error('Selecione uma pasta com arquivos XML antes de importar.'); return; }
     setUploading(true);
     setResult(null);
-
     try {
       const formData = new FormData();
       xmlFiles.forEach(f => formData.append('xmls', f));
-
-      const res = await fetch('/api/cte-entradas/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
+      const res = await fetch('/api/cte-entradas/upload', { method: 'POST', body: formData });
       const data: UploadResult = await res.json();
-
-      if (!res.ok) {
-        toast.error('Erro no upload: ' + ((data as unknown as { error: string }).error || res.statusText));
-        return;
-      }
-
+      if (!res.ok) { toast.error('Erro no upload: ' + ((data as unknown as { error: string }).error || res.statusText)); return; }
       setResult(data);
-
-      if (data.importados > 0) {
-        toast.success(`${data.importados} CT-e(s) importado(s) com sucesso.`);
-        fetchList();
-      } else if (data.ignorados > 0 && data.importados === 0) {
-        toast.info('Todos os CT-es já estavam importados (duplicatas ignoradas).');
-      }
-
-      if (data.erros && data.erros.length > 0) {
-        toast.warning(`${data.erros.length} arquivo(s) com erro — veja detalhes abaixo.`);
-      }
+      if (data.importados > 0) toast.success(`${data.importados} CT-e(s) importado(s). Visualize em "Notas Importadas".`);
+      else if (data.ignorados > 0) toast.info('Todos os CT-es já estavam importados (duplicatas ignoradas).');
+      if (data.erros?.length > 0) toast.warning(`${data.erros.length} arquivo(s) com erro — veja detalhes abaixo.`);
     } catch (err: unknown) {
       toast.error('Erro inesperado: ' + String(err));
     } finally {
@@ -170,37 +40,16 @@ export default function ImportarXMLsCTe() {
     }
   };
 
-  const fetchList = async (mes?: string) => {
-    setLoadingList(true);
-    try {
-      const params = new URLSearchParams();
-      const mesFilter = mes ?? filterMes;
-      if (mesFilter) params.set('mes_ano', mesFilter);
-
-      const res = await fetch(`/api/cte-entradas?${params}`);
-      if (!res.ok) throw new Error(res.statusText);
-      const data = await res.json();
-      setCteList(data.items || []);
-    } catch (err: unknown) {
-      toast.error('Erro ao carregar lista: ' + String(err));
-    } finally {
-      setLoadingList(false);
-    }
-  };
-
-  useEffect(() => { if (companyId) fetchList(filterMes); }, [filterMes, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Importar XMLs CT-e de Entrada</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Importe Conhecimentos de Transporte Eletrônico (CT-e mod. 57) recebidos de transportadoras a partir de arquivos XML.
-          Selecione a pasta e clique em Importar.
+          Importe Conhecimentos de Transporte Eletrônico (CT-e mod. 57) a partir de arquivos XML.
+          Após importar, visualize os dados em <strong>Notas Importadas → CT-e Entradas</strong>.
         </p>
       </div>
 
-      {/* ── Card de upload ── */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -209,44 +58,24 @@ export default function ImportarXMLsCTe() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <input
-            ref={fileInputRef}
-            type="file"
+          <input ref={fileInputRef} type="file"
             // @ts-expect-error webkitdirectory não está no tipo padrão
-            webkitdirectory=""
-            multiple
-            accept=".xml"
-            className="hidden"
-            onChange={handleFileChange}
-          />
+            webkitdirectory="" multiple accept=".xml" className="hidden" onChange={handleFileChange} />
 
           <div className="flex items-center gap-3 flex-wrap">
-            <Button
-              variant="outline"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-            >
-              <FolderOpen className="h-4 w-4 mr-2" />
-              Selecionar Pasta
+            <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <FolderOpen className="h-4 w-4 mr-2" />Selecionar Pasta
             </Button>
-
             {xmlFiles.length > 0 && (
               <span className="text-sm text-muted-foreground">
-                <FileText className="h-4 w-4 inline mr-1" />
-                {xmlFiles.length} arquivo(s) .xml encontrado(s)
+                <FileText className="h-4 w-4 inline mr-1" />{xmlFiles.length} arquivo(s) .xml encontrado(s)
               </span>
             )}
-
-            <Button
-              onClick={handleUpload}
-              disabled={uploading || xmlFiles.length === 0}
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              {uploading ? 'Importando...' : 'Importar'}
+            <Button onClick={handleUpload} disabled={uploading || xmlFiles.length === 0}>
+              <Upload className="h-4 w-4 mr-2" />{uploading ? 'Importando...' : 'Importar'}
             </Button>
           </div>
 
-          {/* ── Resultado do upload ── */}
           {result && (
             <div className="rounded-lg border p-4 space-y-3">
               <div className="flex gap-4 flex-wrap">
@@ -268,104 +97,13 @@ export default function ImportarXMLsCTe() {
                   </div>
                 )}
               </div>
-
               {result.erros.length > 0 && (
                 <div className="text-xs space-y-1 max-h-40 overflow-auto">
                   {result.erros.map((e, i) => (
-                    <div key={i} className="text-red-600">
-                      <span className="font-medium">{e.arquivo}:</span> {e.erro}
-                    </div>
+                    <div key={i} className="text-red-600"><span className="font-medium">{e.arquivo}:</span> {e.erro}</div>
                   ))}
                 </div>
               )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Card de listagem ── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Truck className="h-4 w-4" />
-              CT-e Entradas Importados
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <Select value={filterMes} onValueChange={setFilterMes}>
-                <SelectTrigger className="h-8 w-32 text-[11px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {MES_ANO_OPTIONS.map(o => (
-                    <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {loadingList && <span className="text-xs text-muted-foreground">Carregando...</span>}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {cteList.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-8">
-              {loadingList
-                ? 'Carregando...'
-                : 'Nenhum CT-e importado. Faça uma importação ou filtre por Mês/Ano.'}
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Série/Nº</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Data</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Transportadora</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Remetente</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px]">Destinatário</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-center">Modal</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">vPrest (R$)</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vIBS (R$)</TableHead>
-                    <TableHead className="py-1.5 px-2 text-[11px] text-right">vCBS (R$)</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {cteList.map(row => (
-                    <TableRow key={row.id}>
-                      <TableCell className="py-0.5 px-2 text-[11px] font-mono whitespace-nowrap">
-                        {row.serie}/{row.numero_cte}
-                      </TableCell>
-                      <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">{row.data_emissao}</TableCell>
-                      <TableCell className="py-0.5 px-2 max-w-[160px]">
-                        <div className="truncate text-[11px] font-medium" title={`${row.emit_uf} · ${row.emit_nome}`}>
-                          <span className="text-[10px] text-muted-foreground mr-1">{row.emit_uf}</span>
-                          {row.emit_nome || '—'}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-0.5 px-2 max-w-[150px]">
-                        <div className="truncate text-[11px]" title={row.rem_nome}>
-                          {row.rem_nome || '—'}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-0.5 px-2 max-w-[150px]">
-                        <div className="truncate text-[11px]" title={row.dest_nome}>
-                          {row.dest_nome || '—'}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-0.5 px-2 text-center">
-                        <Badge variant="outline" className="text-[10px] px-1 py-0 whitespace-nowrap">
-                          {fmtModal(row.modal)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="py-0.5 px-2 text-right text-[11px] font-semibold whitespace-nowrap">{fmtNum(row.v_prest)}</TableCell>
-                      <TableCell className="py-0.5 px-2 text-right text-[11px]">
-                        {row.v_ibs != null ? fmtNum(row.v_ibs) : <span className="text-muted-foreground">—</span>}
-                      </TableCell>
-                      <TableCell className="py-0.5 px-2 text-right text-[11px]">
-                        {row.v_cbs != null ? fmtNum(row.v_cbs) : <span className="text-muted-foreground">—</span>}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
             </div>
           )}
         </CardContent>
