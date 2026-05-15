@@ -28,7 +28,9 @@ services:
     volumes:
       - api_uploads:/root/uploads
     networks:
-      - fb_net
+      fb_net:
+        aliases:
+          - apu02-api
 
   # Frontend (React/Nginx)
   web:
