@@ -1,4 +1,4 @@
-# Build Stage — cache bust: 2026-03-31b
+# Build Stage — cache bust: 2026-05-15a (502 fix verification)
 FROM node:18-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
