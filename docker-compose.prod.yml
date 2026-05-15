@@ -34,7 +34,9 @@ services:
       - backup_storage:/opt/fb_apu01/backups
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
-      - fb_net
+      fb_net:
+        aliases:
+          - apu02-api
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/api/health"]
       interval: 30s

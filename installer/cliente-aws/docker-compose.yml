@@ -30,7 +30,9 @@ services:
     volumes:
       - api_uploads:/root/uploads
     networks:
-      - cliente_net
+      cliente_net:
+        aliases:
+          - apu02-api
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/api/health || exit 1"]
       interval: 30s
