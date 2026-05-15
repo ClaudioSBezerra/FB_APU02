@@ -24,6 +24,7 @@ import ERPBridgeCredenciais from './pages/ERPBridgeCredenciais'
 import ImportarXMLsEntrada from './pages/ImportarXMLsEntrada'
 import ImportarXMLsSaida from './pages/ImportarXMLsSaida'
 import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
+import ImportarPagamentosFornecedores from './pages/ImportarPagamentosFornecedores'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
 import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
@@ -224,6 +225,7 @@ function AppLayout() {
               <Route path="/importacoes/nfe-entrada"      element={<ImportarXMLsEntrada />} />
               <Route path="/importacoes/nfe-saida"       element={<ImportarXMLsSaida />} />
               <Route path="/importacoes/cte-entrada"     element={<ImportarXMLsCTe />} />
+              <Route path="/importacoes/pagamentos-fornecedores" element={<ImportarPagamentosFornecedores />} />
               <Route path="/importacoes/erp-bridge"      element={<AdminRoute><ERPBridgeConfig /></AdminRoute>} />
               <Route path="/importacoes/erp-bridge/logs" element={<AdminRoute><ERPBridgeLogs /></AdminRoute>} />
 
