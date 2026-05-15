@@ -507,6 +507,13 @@ func main() {
 	http.HandleFunc("/api/cte-entradas/competencias", withAuth(handlers.CteEntradasCompetenciasHandler, ""))
 	http.HandleFunc("/api/cte-entradas",              withAuth(handlers.CteEntradasListHandler, ""))
 
+	// Pagamentos a Fornecedores (CSV import)
+	http.HandleFunc("/api/pagamentos-fornecedores/import",   withAuth(handlers.PagamentosFornecedoresImportHandler, ""))
+	http.HandleFunc("/api/pagamentos-fornecedores/imports/", withAuth(handlers.PagamentosImportsDeleteHandler, ""))
+	http.HandleFunc("/api/pagamentos-fornecedores/imports",  withAuth(handlers.PagamentosImportsListHandler, ""))
+	http.HandleFunc("/api/pagamentos-fornecedores/template", withAuth(handlers.PagamentosTemplateHandler, ""))
+	http.HandleFunc("/api/pagamentos-fornecedores",          withAuth(handlers.PagamentosFornecedoresListHandler, ""))
+
 	// Créditos em Risco
 	http.HandleFunc("/api/apuracao/creditos-perdidos/notas", withAuth(handlers.CreditosPerdidosNotasHandler, ""))
 	http.HandleFunc("/api/apuracao/creditos-perdidos",       withAuth(handlers.CreditosPerdidosHandler, ""))
