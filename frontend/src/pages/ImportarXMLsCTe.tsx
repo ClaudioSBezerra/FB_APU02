@@ -108,7 +108,7 @@ function fmtModal(m: string): string {
 // Component
 // ---------------------------------------------------------------------------
 export default function ImportarXMLsCTe() {
-  const { token, companyId } = useAuth();
+  const { companyId } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [xmlFiles, setXmlFiles] = useState<File[]>([]);
@@ -117,11 +117,6 @@ export default function ImportarXMLsCTe() {
   const [cteList, setCteList] = useState<CteRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [filterMes, setFilterMes] = useState(MES_ANO_OPTIONS[0]?.value ?? '');
-
-  const authHeaders = {
-    Authorization: `Bearer ${token}`,
-    'X-Company-ID': companyId || '',
-  };
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter(f =>
@@ -146,7 +141,6 @@ export default function ImportarXMLsCTe() {
 
       const res = await fetch('/api/cte-entradas/upload', {
         method: 'POST',
-        headers: authHeaders,
         body: formData,
       });
 
@@ -183,7 +177,7 @@ export default function ImportarXMLsCTe() {
       const mesFilter = mes ?? filterMes;
       if (mesFilter) params.set('mes_ano', mesFilter);
 
-      const res = await fetch(`/api/cte-entradas?${params}`, { headers: authHeaders });
+      const res = await fetch(`/api/cte-entradas?${params}`);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       setCteList(data.items || []);
@@ -194,7 +188,7 @@ export default function ImportarXMLsCTe() {
     }
   };
 
-  useEffect(() => { if (token && companyId) fetchList(filterMes); }, [filterMes, token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (companyId) fetchList(filterMes); }, [filterMes, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">

@@ -25,8 +25,11 @@ type nfeSaidaRow struct {
 	DataAutorizacao string  `json:"data_autorizacao"`
 	MesAno          string  `json:"mes_ano"`
 	EmitCNPJ        string  `json:"emit_cnpj"`
+	EmitNome        string  `json:"emit_nome"`
+	EmitUF          string  `json:"emit_uf"`
 	DestCNPJCPF     string  `json:"dest_cnpj_cpf"`
 	DestNome        string  `json:"dest_nome"`
+	DestUF          string  `json:"dest_uf"`
 	VNF             float64 `json:"v_nf"`
 	VBCIbsCbs       float64 `json:"v_bc_ibs_cbs"`
 	VIBSuf          float64 `json:"v_ibs_uf"`
@@ -158,23 +161,31 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 		offset := (page - 1) * pageSize
 		selectQ := `
 			SELECT
-				id, chave_nfe, modelo, serie, numero_nfe,
-				TO_CHAR(data_emissao, 'DD/MM/YYYY'),
-				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
-				mes_ano,
-				emit_cnpj, COALESCE(dest_cnpj_cpf,''),
-				COALESCE((
+				ns.id, ns.chave_nfe, ns.modelo, ns.serie, ns.numero_nfe,
+				TO_CHAR(ns.data_emissao, 'DD/MM/YYYY'),
+				COALESCE(TO_CHAR(ns.data_autorizacao, 'DD/MM/YYYY'),''),
+				ns.mes_ano,
+				ns.emit_cnpj,
+				COALESCE(ns.emit_nome, (
 					SELECT nome FROM parceiros
-					WHERE company_id = nfe_saidas.company_id AND cnpj = nfe_saidas.dest_cnpj_cpf
+					WHERE company_id = ns.company_id AND cnpj = ns.emit_cnpj
+					LIMIT 1
+				), '') AS emit_nome,
+				COALESCE(ns.emit_uf, '') AS emit_uf,
+				COALESCE(ns.dest_cnpj_cpf,''),
+				COALESCE(ns.dest_nome, (
+					SELECT nome FROM parceiros
+					WHERE company_id = ns.company_id AND cnpj = ns.dest_cnpj_cpf
 					LIMIT 1
 				), '') AS dest_nome,
-				v_nf,
-				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
-				COALESCE(base_icms,0), COALESCE(icms,0), COALESCE(icms_st,0), COALESCE(ipi,0),
-				COALESCE(base_pis,0), COALESCE(pis,0), COALESCE(base_cofins,0), COALESCE(cofins,0),
-				COALESCE(base_partilha,0), COALESCE(icms_partilha,0),
-				COALESCE(cancelado, 'N') AS cancelado
-			FROM nfe_saidas ` + where +
+				COALESCE(ns.dest_uf, '') AS dest_uf,
+				ns.v_nf,
+				ns.v_bc_ibs_cbs, ns.v_ibs_uf, ns.v_ibs_mun, ns.v_ibs, ns.v_cbs,
+				COALESCE(ns.base_icms,0), COALESCE(ns.icms,0), COALESCE(ns.icms_st,0), COALESCE(ns.ipi,0),
+				COALESCE(ns.base_pis,0), COALESCE(ns.pis,0), COALESCE(ns.base_cofins,0), COALESCE(ns.cofins,0),
+				COALESCE(ns.base_partilha,0), COALESCE(ns.icms_partilha,0),
+				COALESCE(ns.cancelado, 'N') AS cancelado
+			FROM nfe_saidas ns ` + where +
 			fmt.Sprintf(" ORDER BY %s %s, numero_nfe DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
 
@@ -192,7 +203,7 @@ func NfeSaidasListHandler(db *sql.DB) http.HandlerFunc {
 			if err := rows.Scan(
 				&row.ID, &row.ChaveNFe, &row.Modelo, &row.Serie, &row.NumeroNFe,
 				&row.DataEmissao, &row.DataAutorizacao, &row.MesAno,
-				&row.EmitCNPJ, &row.DestCNPJCPF, &row.DestNome,
+				&row.EmitCNPJ, &row.EmitNome, &row.EmitUF, &row.DestCNPJCPF, &row.DestNome, &row.DestUF,
 				&row.VNF,
 				&row.VBCIbsCbs, &row.VIBSuf, &row.VIBSMun, &row.VIBS, &row.VCBS,
 				&row.BaseIcms, &row.Icms, &row.IcmsSt, &row.Ipi,

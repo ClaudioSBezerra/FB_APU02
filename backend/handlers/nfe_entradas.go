@@ -60,7 +60,10 @@ type nfeEntradaRow struct {
 	MesAno          string  `json:"mes_ano"`
 	FornCNPJ        string  `json:"forn_cnpj"`
 	FornNome        string  `json:"forn_nome"`
+	FornUF          string  `json:"forn_uf"`
 	DestCNPJCPF     string  `json:"dest_cnpj_cpf"`
+	DestNome        string  `json:"dest_nome"`
+	DestUF          string  `json:"dest_uf"`
 	VNF             float64 `json:"v_nf"`
 	VBCIbsCbs       float64 `json:"v_bc_ibs_cbs"`
 	VIBSuf          float64 `json:"v_ibs_uf"`
@@ -159,24 +162,27 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 		offset := (page - 1) * pageSize
 		selectQ := `
 			SELECT
-				id, chave_nfe, modelo, serie, numero_nfe,
-				TO_CHAR(data_emissao, 'DD/MM/YYYY'),
-				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
-				mes_ano,
-				forn_cnpj,
-				COALESCE((
+				ne.id, ne.chave_nfe, ne.modelo, ne.serie, ne.numero_nfe,
+				TO_CHAR(ne.data_emissao, 'DD/MM/YYYY'),
+				COALESCE(TO_CHAR(ne.data_autorizacao, 'DD/MM/YYYY'),''),
+				ne.mes_ano,
+				ne.forn_cnpj,
+				COALESCE(ne.forn_nome, (
 					SELECT nome FROM parceiros
-					WHERE company_id = nfe_entradas.company_id AND cnpj = nfe_entradas.forn_cnpj
+					WHERE company_id = ne.company_id AND cnpj = ne.forn_cnpj
 					LIMIT 1
 				), '') AS forn_nome,
-				COALESCE(dest_cnpj_cpf,''),
-				v_nf,
-				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
-				COALESCE(base_icms,0), COALESCE(icms,0), COALESCE(icms_st,0), COALESCE(ipi,0),
-				COALESCE(base_pis,0), COALESCE(pis,0), COALESCE(base_cofins,0), COALESCE(cofins,0),
-				COALESCE(base_partilha,0), COALESCE(icms_partilha,0),
-				COALESCE(cancelado, 'N') AS cancelado
-			FROM nfe_entradas ` + where +
+				COALESCE(ne.forn_uf, '') AS forn_uf,
+				COALESCE(ne.dest_cnpj_cpf,''),
+				COALESCE(ne.dest_nome, '') AS dest_nome,
+				COALESCE(ne.dest_uf, '') AS dest_uf,
+				ne.v_nf,
+				ne.v_bc_ibs_cbs, ne.v_ibs_uf, ne.v_ibs_mun, ne.v_ibs, ne.v_cbs,
+				COALESCE(ne.base_icms,0), COALESCE(ne.icms,0), COALESCE(ne.icms_st,0), COALESCE(ne.ipi,0),
+				COALESCE(ne.base_pis,0), COALESCE(ne.pis,0), COALESCE(ne.base_cofins,0), COALESCE(ne.cofins,0),
+				COALESCE(ne.base_partilha,0), COALESCE(ne.icms_partilha,0),
+				COALESCE(ne.cancelado, 'N') AS cancelado
+			FROM nfe_entradas ne ` + where +
 			fmt.Sprintf(" ORDER BY %s %s, numero_nfe DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
 
@@ -194,7 +200,7 @@ func NfeEntradasListHandler(db *sql.DB) http.HandlerFunc {
 			if err := rows.Scan(
 				&row.ID, &row.ChaveNFe, &row.Modelo, &row.Serie, &row.NumeroNFe,
 				&row.DataEmissao, &row.DataAutorizacao, &row.MesAno,
-				&row.FornCNPJ, &row.FornNome, &row.DestCNPJCPF,
+				&row.FornCNPJ, &row.FornNome, &row.FornUF, &row.DestCNPJCPF, &row.DestNome, &row.DestUF,
 				&row.VNF,
 				&row.VBCIbsCbs, &row.VIBSuf, &row.VIBSMun, &row.VIBS, &row.VCBS,
 				&row.BaseIcms, &row.Icms, &row.IcmsSt, &row.Ipi,

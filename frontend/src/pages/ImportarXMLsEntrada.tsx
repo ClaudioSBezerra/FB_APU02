@@ -92,7 +92,7 @@ function fmtNum(v: number | null | undefined): string {
 // Component
 // ---------------------------------------------------------------------------
 export default function ImportarXMLsEntrada() {
-  const { token, companyId } = useAuth();
+  const { companyId } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [xmlFiles, setXmlFiles] = useState<File[]>([]);
@@ -101,11 +101,6 @@ export default function ImportarXMLsEntrada() {
   const [nfeList, setNfeList] = useState<NfeEntradaRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [filterMes, setFilterMes] = useState(MES_ANO_OPTIONS[0]?.value ?? '');
-
-  const authHeaders = {
-    Authorization: `Bearer ${token}`,
-    'X-Company-ID': companyId || '',
-  };
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter(f =>
@@ -130,7 +125,6 @@ export default function ImportarXMLsEntrada() {
 
       const res = await fetch('/api/nfe-entradas/upload', {
         method: 'POST',
-        headers: authHeaders,
         body: formData,
       });
 
@@ -167,7 +161,7 @@ export default function ImportarXMLsEntrada() {
       const mesFilter = mes ?? filterMes;
       if (mesFilter) params.set('mes_ano', mesFilter);
 
-      const res = await fetch(`/api/nfe-entradas?${params}`, { headers: authHeaders });
+      const res = await fetch(`/api/nfe-entradas?${params}`);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       setNfeList(data.items || []);
@@ -178,7 +172,7 @@ export default function ImportarXMLsEntrada() {
     }
   };
 
-  useEffect(() => { if (token && companyId) fetchList(filterMes); }, [filterMes, token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (companyId) fetchList(filterMes); }, [filterMes, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-6">

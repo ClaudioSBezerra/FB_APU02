@@ -35,8 +35,11 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'NF-e ABI',         path: '#', disabled: true },
       { label: 'ND-e',             path: '#', disabled: true },
       { label: 'NC-e',             path: '#', disabled: true },
-      { label: 'Importar ERP',     path: '/importacoes/erp-bridge',      adminOnly: true },
-      { label: 'Logs Importação',  path: '/importacoes/erp-bridge/logs', adminOnly: true },
+      { label: 'Importar NF-e Entradas', path: '/importacoes/nfe-entrada' },
+      { label: 'Importar NF-e Saídas',  path: '/importacoes/nfe-saida' },
+      { label: 'Importar CT-e',         path: '/importacoes/cte-entrada' },
+      { label: 'Importar ERP',          path: '/importacoes/erp-bridge',      adminOnly: true },
+      { label: 'Logs Importação',       path: '/importacoes/erp-bridge/logs', adminOnly: true },
     ],
   },
   cgibs: {

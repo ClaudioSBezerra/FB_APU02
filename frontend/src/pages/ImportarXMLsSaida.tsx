@@ -93,7 +93,7 @@ function fmtNum(v: number | null | undefined): string {
 // Component
 // ---------------------------------------------------------------------------
 export default function ImportarXMLsSaida() {
-  const { token, companyId } = useAuth();
+  const { companyId } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [xmlFiles, setXmlFiles] = useState<File[]>([]);
@@ -102,11 +102,6 @@ export default function ImportarXMLsSaida() {
   const [nfeList, setNfeList] = useState<NfeSaidaRow[]>([]);
   const [loadingList, setLoadingList] = useState(false);
   const [filterMes, setFilterMes] = useState(MES_ANO_OPTIONS[0]?.value ?? '');
-
-  const authHeaders = {
-    Authorization: `Bearer ${token}`,
-    'X-Company-ID': companyId || '',
-  };
 
   // ── Seleção de pasta / arquivos ──────────────────────────────────────────
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,7 +128,6 @@ export default function ImportarXMLsSaida() {
 
       const res = await fetch('/api/nfe-saidas/upload', {
         method: 'POST',
-        headers: authHeaders,
         body: formData,
       });
 
@@ -171,7 +165,7 @@ export default function ImportarXMLsSaida() {
       const mesFilter = mes ?? filterMes;
       if (mesFilter) params.set('mes_ano', mesFilter);
 
-      const res = await fetch(`/api/nfe-saidas?${params}`, { headers: authHeaders });
+      const res = await fetch(`/api/nfe-saidas?${params}`);
       if (!res.ok) throw new Error(res.statusText);
       const data = await res.json();
       setNfeList(data.items || []);
@@ -182,7 +176,7 @@ export default function ImportarXMLsSaida() {
     }
   };
 
-  useEffect(() => { if (token && companyId) fetchList(filterMes); }, [filterMes, token, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (companyId) fetchList(filterMes); }, [filterMes, companyId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ───────────────────────────────────────────────────────────────
   return (

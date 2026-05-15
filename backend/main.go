@@ -490,16 +490,19 @@ func main() {
 	http.HandleFunc("/api/cgibs/debitos",          withAuth(handlers.ListarDebitosIBSHandler, ""))
 
 	// NF-e Saídas
+	http.HandleFunc("/api/nfe-saidas/upload",       withAuth(handlers.NfeSaidasUploadHandler, ""))
 	http.HandleFunc("/api/nfe-saidas/filiais",      withAuth(handlers.NfeSaidasFiliaisHandler, ""))
 	http.HandleFunc("/api/nfe-saidas/competencias", withAuth(handlers.NfeSaidasCompetenciasHandler, ""))
 	http.HandleFunc("/api/nfe-saidas",              withAuth(handlers.NfeSaidasListHandler, ""))
 
 	// NF-e Entradas
+	http.HandleFunc("/api/nfe-entradas/upload",       withAuth(handlers.NfeEntradasUploadHandler, ""))
 	http.HandleFunc("/api/nfe-entradas/filiais",      withAuth(handlers.NfeEntradasFiliaisHandler, ""))
 	http.HandleFunc("/api/nfe-entradas/competencias", withAuth(handlers.NfeEntradasCompetenciasHandler, ""))
 	http.HandleFunc("/api/nfe-entradas",              withAuth(handlers.NfeEntradasListHandler, ""))
 
 	// CT-e Entradas
+	http.HandleFunc("/api/cte-entradas/upload",       withAuth(handlers.CteEntradasUploadHandler, ""))
 	http.HandleFunc("/api/cte-entradas/filiais",      withAuth(handlers.CteEntradasFiliaisHandler, ""))
 	http.HandleFunc("/api/cte-entradas/competencias", withAuth(handlers.CteEntradasCompetenciasHandler, ""))
 	http.HandleFunc("/api/cte-entradas",              withAuth(handlers.CteEntradasListHandler, ""))

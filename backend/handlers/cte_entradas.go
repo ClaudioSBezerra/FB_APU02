@@ -60,7 +60,11 @@ type cteRow struct {
 	MesAno          string  `json:"mes_ano"`
 	EmitCNPJ        string  `json:"emit_cnpj"`
 	EmitNome        string  `json:"emit_nome"`
+	EmitUF          string  `json:"emit_uf"`
+	RemNome         string  `json:"rem_nome"`
 	DestCNPJCPF     string  `json:"dest_cnpj_cpf"`
+	DestNome        string  `json:"dest_nome"`
+	Modal           string  `json:"modal"`
 	VPrest          float64 `json:"v_prest"`
 	VBcIbsCbs       float64 `json:"v_bc_ibs_cbs"`
 	VIbsUf          float64 `json:"v_ibs_uf"`
@@ -159,24 +163,28 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 		offset := (page - 1) * pageSize
 		selectQ := `
 			SELECT
-				id, chave_cte, modelo, serie, numero_cte,
-				TO_CHAR(data_emissao, 'DD/MM/YYYY'),
-				COALESCE(TO_CHAR(data_autorizacao, 'DD/MM/YYYY'),''),
-				mes_ano,
-				emit_cnpj,
-				COALESCE((
+				ce.id, ce.chave_cte, ce.modelo, ce.serie, ce.numero_cte,
+				TO_CHAR(ce.data_emissao, 'DD/MM/YYYY'),
+				COALESCE(TO_CHAR(ce.data_autorizacao, 'DD/MM/YYYY'),''),
+				ce.mes_ano,
+				ce.emit_cnpj,
+				COALESCE(ce.emit_nome, (
 					SELECT nome FROM parceiros
-					WHERE company_id = cte_entradas.company_id AND cnpj = cte_entradas.emit_cnpj
+					WHERE company_id = ce.company_id AND cnpj = ce.emit_cnpj
 					LIMIT 1
 				), '') AS emit_nome,
-				COALESCE(dest_cnpj_cpf,''),
-				v_prest,
-				v_bc_ibs_cbs, v_ibs_uf, v_ibs_mun, v_ibs, v_cbs,
-				COALESCE(base_icms,0), COALESCE(icms,0), COALESCE(icms_st,0), COALESCE(ipi,0),
-				COALESCE(base_pis,0), COALESCE(pis,0), COALESCE(base_cofins,0), COALESCE(cofins,0),
-				COALESCE(base_partilha,0), COALESCE(icms_partilha,0),
-				COALESCE(cancelado, 'N') AS cancelado
-			FROM cte_entradas ` + where +
+				COALESCE(ce.emit_uf, '') AS emit_uf,
+				COALESCE(ce.rem_nome, '') AS rem_nome,
+				COALESCE(ce.dest_cnpj_cpf,''),
+				COALESCE(ce.dest_nome, '') AS dest_nome,
+				COALESCE(ce.modal, '') AS modal,
+				ce.v_prest,
+				ce.v_bc_ibs_cbs, ce.v_ibs_uf, ce.v_ibs_mun, ce.v_ibs, ce.v_cbs,
+				COALESCE(ce.base_icms,0), COALESCE(ce.icms,0), COALESCE(ce.icms_st,0), COALESCE(ce.ipi,0),
+				COALESCE(ce.base_pis,0), COALESCE(ce.pis,0), COALESCE(ce.base_cofins,0), COALESCE(ce.cofins,0),
+				COALESCE(ce.base_partilha,0), COALESCE(ce.icms_partilha,0),
+				COALESCE(ce.cancelado, 'N') AS cancelado
+			FROM cte_entradas ce ` + where +
 			fmt.Sprintf(" ORDER BY %s %s, numero_cte DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
 
@@ -194,7 +202,7 @@ func CteEntradasListHandler(db *sql.DB) http.HandlerFunc {
 			if err := rows.Scan(
 				&row.ID, &row.ChaveCTe, &row.Modelo, &row.Serie, &row.NumeroCTe,
 				&row.DataEmissao, &row.DataAutorizacao, &row.MesAno,
-				&row.EmitCNPJ, &row.EmitNome, &row.DestCNPJCPF,
+				&row.EmitCNPJ, &row.EmitNome, &row.EmitUF, &row.RemNome, &row.DestCNPJCPF, &row.DestNome, &row.Modal,
 				&row.VPrest,
 				&row.VBcIbsCbs, &row.VIbsUf, &row.VIbsMun, &row.VIBS, &row.VCBS,
 				&row.BaseIcms, &row.Icms, &row.IcmsSt, &row.Ipi,
