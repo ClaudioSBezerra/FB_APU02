@@ -128,7 +128,10 @@ export default function DashboardResumo() {
                   {(data.nfe_entradas.count + data.nfe_saidas.count + data.cte_entradas.count).toLocaleString('pt-BR')}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Entrada: {(data.nfe_entradas.count + data.cte_entradas.count).toLocaleString('pt-BR')} | Saída: {data.nfe_saidas.count.toLocaleString('pt-BR')}
+                  Entrada: {(data.nfe_entradas.count + data.cte_entradas.count).toLocaleString('pt-BR')}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Saída: {data.nfe_saidas.count.toLocaleString('pt-BR')}
                 </p>
               </CardContent>
             </Card>
@@ -148,7 +151,10 @@ export default function DashboardResumo() {
               <CardContent>
                 <p className="text-2xl font-bold">{formatCurrency(data.creditos_ibs_liquidos + data.creditos_cbs_liquidos)}</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  IBS: {formatCurrency(data.creditos_ibs_liquidos)} | CBS: {formatCurrency(data.creditos_cbs_liquidos)}
+                  IBS: {formatCurrency(data.creditos_ibs_liquidos)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  CBS: {formatCurrency(data.creditos_cbs_liquidos)}
                 </p>
                 {(data.creditos_ibs_em_risco + data.creditos_cbs_em_risco) > 0 && (
                   <p className="text-xs text-amber-600 mt-1">
@@ -166,7 +172,10 @@ export default function DashboardResumo() {
               <CardContent>
                 <p className="text-2xl font-bold">{formatCurrency(data.total_debitos_ibs + data.total_debitos_cbs)}</p>
                 <p className="text-xs text-muted-foreground mt-1">
-                  IBS: {formatCurrency(data.total_debitos_ibs)} | CBS: {formatCurrency(data.total_debitos_cbs)}
+                  IBS: {formatCurrency(data.total_debitos_ibs)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  CBS: {formatCurrency(data.total_debitos_cbs)}
                 </p>
               </CardContent>
             </Card>
