@@ -71,7 +71,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Débitos mês',         path: '/rfb/debitos' },
       { label: 'Créditos CBS',        path: '/rfb/creditos-cbs' },
       { label: 'Pagamentos CBS',      path: '/rfb/pagamentos-cbs',          disabled: true },
-      { label: 'Pgtos Fornecedores',       path: '/rfb/pagamentos-fornecedores',  disabled: true },
+      { label: 'Pgtos Fornecedores',       path: '/rfb/pagamentos-fornecedores' },
       { label: 'Gestão Eventos Cred/Deb.', path: '/rfb/gestao-eventos-cred-deb', disabled: true },
       { label: 'Concluir apuração',        path: '/rfb/concluir-apuracao',        disabled: true },
     ],
