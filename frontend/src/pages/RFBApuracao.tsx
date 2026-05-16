@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Globe, Send, RefreshCw, AlertTriangle, Download, Trash2, RotateCcw, CheckCircle2, CalendarClock } from 'lucide-react';
+import { Globe, Send, RefreshCw, AlertTriangle, Download, Trash2, RotateCcw, CheckCircle2, CalendarClock, XCircle } from 'lucide-react';
 
 interface RFBResumo {
   total_debitos: number;
@@ -24,6 +24,7 @@ interface RFBRequest {
   error_message?: string;
   created_at: string;
   updated_at: string;
+  has_raw_json: boolean;
   resumo?: RFBResumo;
 }
 
@@ -33,6 +34,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   webhook_received: { label: 'Processando',   color: 'bg-blue-100 text-blue-700' },
   downloading:      { label: 'Baixando',      color: 'bg-blue-100 text-blue-700' },
   reprocessing:     { label: 'Reprocessando', color: 'bg-purple-100 text-purple-700' },
+  stuck:            { label: 'Travado',       color: 'bg-orange-100 text-orange-700' },
   completed:        { label: 'Concluído',     color: 'bg-green-100 text-green-700' },
   error:            { label: 'Erro',          color: 'bg-red-100 text-red-700' },
 };
@@ -60,6 +62,8 @@ export default function RFBApuracao() {
   const [loading, setLoading] = useState(true);
   const [soliciting, setSoliciting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [aborting, setAborting] = useState<string | null>(null);
+  const [resoliciting, setResoliciting] = useState<string | null>(null);
   const [scheduleInfo, setScheduleInfo] = useState<{ agendamento_ativo: boolean; horario_agendamento: string } | null>(null);
 
   const fetchRequests = useCallback(async () => {
@@ -166,6 +170,50 @@ export default function RFBApuracao() {
     }
   };
 
+  const handleAbort = async (requestId: string) => {
+    setAborting(requestId);
+    try {
+      const response = await fetch('/api/rfb/apuracao/abort', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        setMessage({ type: 'error', text: text || 'Erro ao abortar' });
+        return;
+      }
+      setMessage({ type: 'success', text: 'Solicitação abortada. Use "Re-solicitar" para reenviar.' });
+      fetchRequests();
+    } catch {
+      setMessage({ type: 'error', text: 'Erro ao abortar solicitação' });
+    } finally {
+      setAborting(null);
+    }
+  };
+
+  const handleResolicitar = async (requestId: string) => {
+    setResoliciting(requestId);
+    try {
+      const response = await fetch('/api/rfb/apuracao/resolicitar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        setMessage({ type: 'error', text: text || 'Erro ao resolicitar' });
+        return;
+      }
+      setMessage({ type: 'success', text: 'Solicitação reenviada à RFB. Aguarde processamento.' });
+      fetchRequests();
+    } catch {
+      setMessage({ type: 'error', text: 'Erro ao resolicitar' });
+    } finally {
+      setResoliciting(null);
+    }
+  };
+
   const handleDownloadManual = async (requestId: string) => {
     setMessage(null);
     try {
@@ -255,8 +303,10 @@ export default function RFBApuracao() {
           ) : (
             <div className="space-y-4">
               {requests.map((req) => {
-                const sc = statusConfig[req.status] || statusConfig.pending;
                 const isPending = ['pending', 'requested', 'webhook_received', 'downloading', 'reprocessing'].includes(req.status);
+                const isStuck = isPending && (Date.now() - new Date(req.updated_at).getTime()) > 5 * 60 * 60 * 1000;
+                const displayStatus = isStuck ? 'stuck' : req.status;
+                const sc = statusConfig[displayStatus] || statusConfig.pending;
                 const { resumo } = req;
 
                 return (
@@ -286,6 +336,26 @@ export default function RFBApuracao() {
                             <Download className="mr-1 h-3 w-3" /> Download Manual
                           </Button>
                         )}
+                        {isStuck && (
+                          <button
+                            onClick={() => handleAbort(req.id)}
+                            disabled={aborting === req.id}
+                            className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-50"
+                          >
+                            <XCircle className="mr-1 h-3 w-3" />
+                            {aborting === req.id ? 'Abortando...' : 'Abortar'}
+                          </button>
+                        )}
+                        {req.status === 'error' && !req.has_raw_json && (
+                          <button
+                            onClick={() => handleResolicitar(req.id)}
+                            disabled={resoliciting === req.id}
+                            className="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50"
+                          >
+                            <RefreshCw className="mr-1 h-3 w-3" />
+                            {resoliciting === req.id ? 'Reenviando...' : 'Re-solicitar'}
+                          </button>
+                        )}
                         {req.status === 'completed' && (
                           <Button size="sm" variant="ghost" className="text-purple-600 hover:bg-purple-50 text-xs"
                             onClick={() => handleReprocess(req.id)}>
@@ -295,7 +365,7 @@ export default function RFBApuracao() {
                         {req.status === 'error' && (
                           <>
                             <Badge variant="destructive" className="text-xs">{req.error_code}</Badge>
-                            {!req.tiquete_download && (
+                            {req.has_raw_json && (
                               <Button size="sm" variant="outline" className="text-purple-600 hover:bg-purple-50"
                                 onClick={() => handleReprocess(req.id)}>
                                 <RotateCcw className="mr-1 h-3 w-3" /> Reprocessar
