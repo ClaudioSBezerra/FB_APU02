@@ -439,6 +439,8 @@ func main() {
 	http.HandleFunc("/api/rfb/apuracao/reprocess", withAuth(handlers.ReprocessHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/clear-errors", withAuth(handlers.ClearErrorsHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/status", withAuth(handlers.StatusApuracaoHandler, ""))
+	http.HandleFunc("/api/rfb/apuracao/abort",      withAuth(handlers.AbortRequestHandler, ""))
+	http.HandleFunc("/api/rfb/apuracao/resolicitar", withAuth(handlers.RessolicitarHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/", withAuth(handlers.DetalheApuracaoHandler, ""))
 
 	// RFB Débitos — consulta acumulada por período/ano (não depende de request_id)

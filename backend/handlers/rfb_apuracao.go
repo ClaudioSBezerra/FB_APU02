@@ -33,6 +33,7 @@ type RFBRequest struct {
 	ErrorMessage     *string     `json:"error_message,omitempty"`
 	CreatedAt        time.Time   `json:"created_at"`
 	UpdatedAt        time.Time   `json:"updated_at"`
+	HasRawJSON       bool        `json:"has_raw_json"`
 	Resumo           *RFBResumo  `json:"resumo,omitempty"`
 }
 
@@ -290,6 +291,91 @@ func ClearErrorsHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+// AbortRequestHandler aborta manualmente uma solicitação presa em estado intermediário.
+func AbortRequestHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := claims["user_id"].(string)
+		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa")
+			return
+		}
+		var req struct {
+			RequestID string `json:"request_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+			jsonErr(w, http.StatusBadRequest, "request_id obrigatório")
+			return
+		}
+		res, err := db.Exec(`
+			UPDATE rfb_requests
+			SET status = 'error', error_code = 'MANUAL_ABORT',
+			    error_message = 'Solicitação abortada manualmente pelo usuário',
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1 AND company_id = $2
+			  AND status IN ('requested', 'webhook_received', 'downloading', 'reprocessing')
+		`, req.RequestID, companyID)
+		if err != nil {
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao abortar solicitação", err, "[AbortRequest]")
+			return
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			jsonErr(w, http.StatusNotFound, "Solicitação não encontrada ou já concluída")
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "aborted"})
+	}
+}
+
+// RessolicitarHandler reseta uma solicitação com erro (sem raw_json) para pending,
+// permitindo que o scheduler a reenvie à API RFB.
+func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		userID := claims["user_id"].(string)
+		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
+		if err != nil {
+			jsonErr(w, http.StatusInternalServerError, "Erro ao obter empresa")
+			return
+		}
+		var req struct {
+			RequestID string `json:"request_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.RequestID == "" {
+			jsonErr(w, http.StatusBadRequest, "request_id obrigatório")
+			return
+		}
+		res, err := db.Exec(`
+			UPDATE rfb_requests
+			SET status = 'pending', error_code = NULL, error_message = NULL,
+			    tiquete = NULL, tiquete_download = NULL, raw_json = NULL,
+			    updated_at = CURRENT_TIMESTAMP
+			WHERE id = $1 AND company_id = $2
+			  AND status = 'error' AND raw_json IS NULL
+		`, req.RequestID, companyID)
+		if err != nil {
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao resolicitar", err, "[Resolicitar]")
+			return
+		}
+		if rows, _ := res.RowsAffected(); rows == 0 {
+			jsonErr(w, http.StatusNotFound, "Solicitação não encontrada, não está em erro, ou já possui dados baixados")
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+	}
+}
+
 // ReprocessHandler re-parses the raw JSON already stored in the DB for a request.
 // Useful when download succeeded but JSON parse failed (e.g. datetime format issue).
 func ReprocessHandler(db *sql.DB) http.HandlerFunc {
@@ -509,6 +595,7 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			SELECT r.id, r.company_id, r.cnpj_base, COALESCE(r.tiquete, ''), r.tiquete_download,
 				r.status, r.ambiente,
 				r.error_code, r.error_message, r.created_at, r.updated_at,
+				(r.raw_json IS NOT NULL) AS has_raw_json,
 				res.id, res.request_id, COALESCE(res.data_apuracao, ''), res.total_debitos,
 				res.valor_cbs_total, res.valor_cbs_extinto, res.valor_cbs_nao_extinto,
 				res.total_corrente, res.total_ajuste, res.total_extemporaneo
@@ -535,6 +622,7 @@ func StatusApuracaoHandler(db *sql.DB) http.HandlerFunc {
 				&req.ID, &req.CompanyID, &req.CNPJBase, &req.Tiquete, &req.TiqueteDownload,
 				&req.Status, &req.Ambiente,
 				&req.ErrorCode, &req.ErrorMessage, &req.CreatedAt, &req.UpdatedAt,
+				&req.HasRawJSON,
 				&resID, &resReqID, &resData, &resTotalDebitos,
 				&resCBSTotal, &resCBSExtinto, &resCBSNaoExtinto,
 				&resCorrente, &resAjuste, &resExtemp,
