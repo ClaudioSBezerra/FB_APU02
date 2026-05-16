@@ -225,6 +225,15 @@ func StartRFBScheduler(dbFn func() *sql.DB) {
 	}
 	log.Println("[RFB Scheduler] Banco pronto. Scheduler RFB iniciado.")
 
+	// Goroutine separada: aborta requests travadas > 5h, a cada 5 minutos
+	stuckTicker := time.NewTicker(5 * time.Minute)
+	go func() {
+		defer stuckTicker.Stop()
+		for range stuckTicker.C {
+			AbortStuckRFBRequests(db)
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
@@ -267,5 +276,25 @@ func StartRFBScheduler(dbFn func() *sql.DB) {
 				}
 			}()
 		}
+	}
+}
+
+// AbortStuckRFBRequests aborta solicitações presas em estados intermediários por mais de 5 horas.
+func AbortStuckRFBRequests(db *sql.DB) {
+	res, err := db.Exec(`
+		UPDATE rfb_requests
+		SET status        = 'error',
+		    error_code    = 'TIMEOUT',
+		    error_message = 'Solicitação abortada automaticamente: sem resposta por mais de 5 horas',
+		    updated_at    = CURRENT_TIMESTAMP
+		WHERE status IN ('requested', 'webhook_received', 'downloading', 'reprocessing')
+		  AND updated_at < NOW() - INTERVAL '5 hours'
+	`)
+	if err != nil {
+		log.Printf("[RFB Scheduler] Erro ao abortar requests travadas: %v", err)
+		return
+	}
+	if rows, _ := res.RowsAffected(); rows > 0 {
+		log.Printf("[RFB Scheduler] Abortadas %d solicitação(ões) travadas há mais de 5h", rows)
 	}
 }
