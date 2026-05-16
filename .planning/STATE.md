@@ -87,6 +87,7 @@ None.
 | 260514-n0j | Refresh automático de views após delete/import + covering indexes + LEFT JOIN dashboard | 2026-05-14 | 9c49acf | [260514-n0j-views-refresh-perf](.planning/quick/260514-n0j-views-refresh-perf/) |
 | 260515-gh9 | implementação completa da feature Pagamentos a Fornecedores | 2026-05-15 | 720633b | [260515-gh9-implementa-o-completa-da-feature-pagamen](.planning/quick/260515-gh9-implementa-o-completa-da-feature-pagamen/) |
 | 260515-j7y | RFB Pgtos Fornecedores — Painel de Conciliação CBS | 2026-05-15 | 5ffb203 | [260515-j7y-rfb-pgtos-fornecedores-painel-de-concili](.planning/quick/260515-j7y-rfb-pgtos-fornecedores-painel-de-concili/) |
+| 260516-da8 | Abortar solicitações RFB travadas + auto-abort scheduler > 5h | 2026-05-16 | 7f6d82d | [260516-da8-abortar-rfb-travadas](.planning/quick/260516-da8-abortar-rfb-travadas/) |
 
 ### Blockers/Concerns
 
