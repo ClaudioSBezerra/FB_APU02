@@ -24,11 +24,7 @@ func LogActivityHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		userID := claims["user_id"].(string)
-		companyID, err := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
-		if err != nil {
-			sanitizeDBErr(w, http.StatusBadRequest, "Empresa não encontrada ou sem acesso", err, "[UserActivity]")
-			return
-		}
+		companyID, _ := GetEffectiveCompanyID(db, userID, r.Header.Get("X-Company-ID"))
 
 		var body struct {
 			Module          string `json:"module"`

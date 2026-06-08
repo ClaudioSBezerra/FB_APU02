@@ -532,6 +532,26 @@ class FBTaxClient:
             log.warning("Nao foi possivel verificar status do run %s: %s", run_id, exc)
         return False
 
+    def report_progress(self, run_id: str, enviados: int, ignorados: int, erros: int) -> None:
+        """Atualiza contadores parciais na UI sem finalizar o run."""
+        try:
+            resp = self.session.patch(
+                f"{self.base_url}/api/erp-bridge/runs/{run_id}",
+                json={"status": "running", "total_enviados": enviados,
+                      "total_ignorados": ignorados, "total_erros": erros},
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                self.login()
+                self.session.patch(
+                    f"{self.base_url}/api/erp-bridge/runs/{run_id}",
+                    json={"status": "running", "total_enviados": enviados,
+                          "total_ignorados": ignorados, "total_erros": erros},
+                    timeout=10,
+                )
+        except Exception as exc:
+            log.warning("Nao foi possivel reportar progresso: %s", exc)
+
     def report_items(self, run_id: str, totais: dict) -> None:
         items = []
         for servidor, tipos in totais.items():
@@ -602,6 +622,7 @@ def processar_sap(
     data_ini: date,
     data_fim: date,
     fbtax: FBTaxClient,
+    run_id: str | None = None,
 ) -> dict:
     """Lê s4i_nfe + s4i_nfe_impostos do FCCORP e envia via /api/erp-bridge/import/batch."""
     NOME = "FCCORP"
@@ -770,13 +791,15 @@ def processar_sap(
                 log.error("Erro ao enviar lote %d: %s", i // BATCH_SIZE + 1, exc)
                 total_errors += len(lote)
 
-            # Log de progresso a cada 2 minutos
+            # Log de progresso + atualiza UI a cada 2 minutos
             if _time.monotonic() - _prog_ts >= 120:
                 pct = processados / len(documents) * 100
                 log.info("[Progresso] %d/%d docs (%.0f%%) — env=%d  ign=%d  err=%d",
                          processados, len(documents), pct,
                          total_inserted, total_ignored, total_errors)
                 _prog_ts = _time.monotonic()
+                if run_id:
+                    fbtax.report_progress(run_id, total_inserted, total_ignored, total_errors)
 
         stats["sap_batch"]["enviados"]  = total_inserted
         stats["sap_batch"]["ignorados"] = total_ignored
@@ -986,7 +1009,7 @@ def executar_importacao(
             log.error("erp_type=sap_s4hana mas 'oracle.dsn' nao configurado em config.yaml")
             return 1
 
-        stats = processar_sap(oracle_cfg, data_ini, data_fim, fbtax)
+        stats = processar_sap(oracle_cfg, data_ini, data_fim, fbtax, run_id=run_id)
 
         for s in stats.values():
             grand["enviados"]  += s["enviados"]
@@ -1294,6 +1317,36 @@ def main() -> int:
         dias = cfg.get("dias_padrao", 7)
         data_ini = date.fromisoformat(args.data)     if args.data     else date.today() - timedelta(days=dias)
         data_fim = date.fromisoformat(args.data_fim) if args.data_fim else date.today() + timedelta(days=1)
+
+    # Busca credenciais do servidor FBTax (mesmo fluxo do daemon)
+    if fbtax.api_key:
+        creds = fbtax.fetch_credentials()
+        if creds:
+            if creds.get("fbtax_email"):
+                fbtax.email = creds["fbtax_email"]
+            if creds.get("fbtax_password"):
+                fbtax.password = creds["fbtax_password"]
+            if creds.get("erp_type"):
+                cfg["erp_type"] = creds["erp_type"]
+                erp_type = creds["erp_type"]
+            if erp_type == "sap_s4hana":
+                if "oracle" not in cfg:
+                    cfg["oracle"] = {}
+                if creds.get("oracle_usuario"):
+                    cfg["oracle"]["usuario"] = creds["oracle_usuario"]
+                if creds.get("oracle_senha"):
+                    cfg["oracle"]["senha"] = creds["oracle_senha"]
+                if creds.get("oracle_dsn"):
+                    cfg["oracle"]["dsn"] = creds["oracle_dsn"]
+            else:
+                for srv in cfg.get("servidores", []):
+                    if creds.get("oracle_usuario"):
+                        srv["usuario"] = creds["oracle_usuario"]
+                    if creds.get("oracle_senha"):
+                        srv["senha"] = creds["oracle_senha"]
+            log.info("Credenciais carregadas do servidor FBTax (erp_type=%s).", erp_type)
+        else:
+            log.warning("api_key configurada mas nao foi possivel buscar credenciais. Usando config.yaml.")
 
     if not args.dry_run:
         try:

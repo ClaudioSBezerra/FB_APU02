@@ -175,7 +175,7 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				return
 			}
 			// Atualiza credenciais individualmente se fornecidas
-			if req.FBTaxEmail != nil {
+			if req.FBTaxEmail != nil && *req.FBTaxEmail != "" {
 				if _, err := db.Exec(`UPDATE erp_bridge_config SET fbtax_email = $2 WHERE company_id = $1`, companyID, *req.FBTaxEmail); err != nil {
 					log.Printf("[ERPBridge] Erro ao atualizar fbtax_email: %v", err)
 				}
@@ -187,7 +187,7 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 					}
 				}
 			}
-			if req.OracleUsuario != nil {
+			if req.OracleUsuario != nil && *req.OracleUsuario != "" {
 				if enc, encErr := EncryptField(*req.OracleUsuario); encErr == nil {
 					if _, err := db.Exec(`UPDATE erp_bridge_config SET oracle_usuario = $2 WHERE company_id = $1`, companyID, enc); err != nil {
 						log.Printf("[ERPBridge] Erro ao atualizar oracle_usuario: %v", err)
@@ -392,10 +392,15 @@ func ERPBridgeRunHandler(db *sql.DB) http.HandlerFunc {
 			}
 			var execErr error
 			if req.Status == "running" {
-				// Início de execução: apenas marca como running, sem finalizado_em
+				// Início de execução ou atualização de progresso parcial
 				_, execErr = db.Exec(`
-					UPDATE erp_bridge_runs SET status = 'running' WHERE id = $1
-				`, runID)
+					UPDATE erp_bridge_runs
+					SET status          = 'running',
+					    total_enviados  = CASE WHEN $2 > 0 THEN $2 ELSE COALESCE(total_enviados, 0) END,
+					    total_ignorados = CASE WHEN $3 > 0 THEN $3 ELSE COALESCE(total_ignorados, 0) END,
+					    total_erros     = CASE WHEN $4 > 0 THEN $4 ELSE COALESCE(total_erros, 0) END
+					WHERE id = $1
+				`, runID, req.TotalEnviados, req.TotalIgnorados, req.TotalErros)
 			} else if req.Status == "cancelled" {
 				// Cancelamento: finaliza imediatamente sem totais
 				_, execErr = db.Exec(`

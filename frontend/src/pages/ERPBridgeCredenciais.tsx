@@ -56,13 +56,11 @@ export default function ERPBridgeCredenciais() {
 
   const saveCredentialsMutation = useMutation({
     mutationFn: async () => {
-      const body: Record<string, string> = {
-        erp_type: erpType,
-        fbtax_email: fbtaxEmail,
-        oracle_dsn: oracleDsn,
-        oracle_usuario: oracleUsuario,
-      };
+      const body: Record<string, string> = { erp_type: erpType };
+      if (fbtaxEmail)     body.fbtax_email    = fbtaxEmail;
       if (fbtaxPassword)  body.fbtax_password = fbtaxPassword;
+      if (oracleDsn)      body.oracle_dsn     = oracleDsn;
+      if (oracleUsuario)  body.oracle_usuario = oracleUsuario;
       if (oracleSenha)    body.oracle_senha   = oracleSenha;
       const res = await fetch('/api/erp-bridge/config', {
         method: 'PATCH',

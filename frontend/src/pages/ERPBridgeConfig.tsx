@@ -284,7 +284,7 @@ const abortMutation = useMutation({
               <Button
                 size="sm" variant="ghost"
                 className="h-7 px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                onClick={() => abortMutation.mutate(pendingRun.id)}
+                onClick={() => { if (window.confirm('Confirmar: cancelar esta importação?')) abortMutation.mutate(pendingRun.id) }}
                 disabled={abortMutation.isPending}
                 title="Cancelar importação antes de o daemon iniciar"
               >
@@ -326,7 +326,7 @@ const abortMutation = useMutation({
                 <Button
                   size="sm" variant="ghost"
                   className="h-7 px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
-                  onClick={() => abortMutation.mutate(runningRun.id)}
+                  onClick={() => { if (window.confirm('Confirmar: abortar a importação em andamento?')) abortMutation.mutate(runningRun.id) }}
                   disabled={abortMutation.isPending}
                   title="Interrompe após concluir o servidor atual"
                 >
