@@ -2,7 +2,7 @@ export default function ArgusPortal() {
   return (
     <iframe
       src="/argus-portal-fiscal.html"
-      title="Portal Fiscal CBS/IBS (Argus)"
+      title="Portal Fiscal CBS/IBS"
       style={{
         border: 'none',
         display: 'block',

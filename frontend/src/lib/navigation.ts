@@ -97,7 +97,7 @@ export const modules: Record<string, ModuleConfig> = {
   argus: {
     label: 'Portal Fiscal CBS/IBS (Demo)',
     tabs: [
-      { label: 'Portal Argus', path: '/argus' },
+      { label: 'Portal', path: '/argus' },
     ],
   },
   config: {
