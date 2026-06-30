@@ -1,4 +1,4 @@
-import { Landmark, LayoutDashboard, Scale, Settings, LogOut, KeyRound, Telescope, FileText, Upload } from 'lucide-react'
+import { Landmark, LayoutDashboard, Scale, Settings, LogOut, KeyRound, Telescope, FileText, Upload, Globe } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
@@ -37,6 +37,7 @@ const mainItems = [
   { id: 'cgibs',        icon: Scale,            label: 'CGIBS — IBS',      path: '/cgibs/apuracao-ibs' },
   { id: 'rfb',          icon: Landmark,         label: 'Receita Federal',  path: '/rfb/gestao-creditos' },
   { id: 'malha',        icon: Telescope,        label: 'Malha Fina',       path: '/malha-fina/nfe-entradas' },
+  { id: 'argus',        icon: Globe,            label: 'Portal Fiscal CBS/IBS', path: '/argus' },
 ]
 
 export function AppRail() {
