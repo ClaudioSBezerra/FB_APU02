@@ -30,6 +30,7 @@ import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
 import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
 import MalhaFinaCTe from './pages/MalhaFinaCTe'
+import ArgusPortal from './pages/ArgusPortal'
 import AdminUsers from './pages/AdminUsers'
 import UserActivity from './pages/UserActivity'
 import LimparDadosApuracao from './pages/LimparDadosApuracao'
@@ -243,6 +244,9 @@ function AppLayout() {
               <Route path="/malha-fina/nfe-entradas"  element={<MalhaFinaNFeEntradas />} />
               <Route path="/malha-fina/nfe-saidas"    element={<MalhaFinaNFeSaidas />} />
               <Route path="/malha-fina/cte"           element={<MalhaFinaCTe />} />
+
+              {/* Portal Argus (Demo) */}
+              <Route path="/argus" element={<ArgusPortal />} />
 
               {/* CGIBS */}
               <Route path="/cgibs/apuracao-ibs"   element={<CGIBSPainel />} />

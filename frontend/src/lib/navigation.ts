@@ -94,6 +94,12 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'NC-e',             path: '#', disabled: true },
     ],
   },
+  argus: {
+    label: 'Portal Fiscal CBS/IBS (Demo)',
+    tabs: [
+      { label: 'Portal Argus', path: '/argus' },
+    ],
+  },
   config: {
     label: 'Configurações',
     tabs: [
@@ -126,6 +132,8 @@ export function getActiveModule(pathname: string): string {
   if (pathname.startsWith('/rfb/') && pathname !== '/rfb/credenciais') return 'rfb'
 
   if (pathname.startsWith('/malha-fina/')) return 'malha'
+
+  if (pathname.startsWith('/argus')) return 'argus'
 
   if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais' || pathname === '/cgibs/credenciais') return 'config'
 
