@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Argus — Portal Fiscal CBS / IBS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/dist/tabler-icons.min.css" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f6f9; --surface:#ffffff; --surface-1:#eef1f5; --surface-2:#e7ebf1;
+  --border:#e2e6ec; --border-strong:#cfd5de;
+  --text:#181b21; --text-2:#5a616e; --text-muted:#8b919d;
+  --accent:#2f6fed; --accent-fill:#2f6fed; --accent-bg:#e7f0fe; --accent-text:#1a4fb5;
+  --success:#1f9d57; --success-bg:#e6f6ed; --success-text:#15793f;
+  --warning:#bd7a0c; --warning-bg:#fcf2df; --warning-text:#8a5907;
+  --danger:#d33f3f; --danger-bg:#fbeaea; --danger-text:#a52e2e;
+  --radius:8px; --shadow:0 1px 2px rgba(20,30,50,.04);
+}
+[data-theme="dark"]{
+  --bg:#0f1217; --surface:#181c22; --surface-1:#20252d; --surface-2:#272d36;
+  --border:#272d36; --border-strong:#39414c;
+  --text:#e8eaef; --text-2:#a6adb9; --text-muted:#727a87;
+  --accent:#4d86f7; --accent-fill:#3f72e0; --accent-bg:#16243d; --accent-text:#9dc0ff;
+  --success:#39b46e; --success-bg:#13301f; --success-text:#62cf93;
+  --warning:#d99528; --warning-bg:#2f240f; --warning-text:#e6ad55;
+  --danger:#e25b5b; --danger-bg:#321818; --danger-text:#f09191;
+  --shadow:0 1px 2px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit}
+.muted{color:var(--text-muted)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+
+.topbar{display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 16px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:20}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:32px;height:32px;border-radius:9px;background:var(--accent-fill);color:#fff;display:flex;align-items:center;justify-content:center;font-size:19px}
+.brand .nm{font-size:16px;font-weight:600;letter-spacing:.2px}
+.brand .sub{font-size:10px;color:var(--text-muted);margin-top:-3px}
+.top-right{display:flex;align-items:center;gap:8px}
+.companybtn{display:flex;align-items:center;gap:7px;height:34px;padding:0 12px;border:1px solid var(--border-strong);background:transparent;color:var(--text);border-radius:var(--radius);font-size:13px;cursor:pointer}
+.companybtn:hover{background:var(--surface-1)}
+.iconbtn{width:34px;height:34px;border:1px solid var(--border-strong);background:transparent;color:var(--text-2);border-radius:var(--radius);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:18px}
+.iconbtn:hover{background:var(--surface-1);color:var(--text)}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--accent-bg);color:var(--accent-text);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+.hamb{display:none}
+
+.layout{display:flex;min-height:calc(100vh - 56px)}
+.sidebar{width:252px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);padding:12px 12px 24px;display:flex;flex-direction:column;gap:1px;overflow-y:auto;max-height:calc(100vh - 56px)}
+.nav-group{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-muted);padding:13px 10px 5px}
+.nav a,.nav-parent{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--radius);color:var(--text-2);font-size:13.5px;cursor:pointer;border:0;background:transparent;width:100%;text-align:left;white-space:nowrap}
+.nav a i,.nav-parent>i{font-size:18px}
+.nav a:hover,.nav-parent:hover{background:var(--surface-1);color:var(--text)}
+.nav a.active{background:var(--accent-bg);color:var(--accent-text);font-weight:500}
+.nav-parent .chev{margin-left:auto;font-size:15px;color:var(--text-muted);transition:transform .15s}
+.nav-parent.open .chev{transform:rotate(90deg)}
+.submenu{display:none;flex-direction:column;gap:1px;margin:1px 0 3px}
+.submenu.open{display:flex}
+.submenu a{padding:7px 10px 7px 30px;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub-parent{display:flex;align-items:center;gap:8px;padding:7px 10px 7px 30px;font-size:12px;white-space:nowrap;color:var(--text-2);border:0;background:transparent;width:100%;text-align:left;cursor:pointer;border-radius:var(--radius)}
+.sub-parent:hover{background:var(--surface-1);color:var(--text)}
+.sub-parent .chev{margin-left:auto;font-size:14px;color:var(--text-muted);transition:transform .15s}
+.sub-parent.open .chev{transform:rotate(90deg)}
+.subsubmenu{display:none;flex-direction:column;gap:1px;margin:1px 0 2px}
+.subsubmenu.open{display:flex}
+.subsubmenu a{padding:6px 10px 6px 44px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.content{flex:1;min-width:0;padding:22px 26px;overflow-x:hidden}
+@media(max-width:880px){
+  .hamb{display:flex}
+  .companybtn .lbl{display:none}
+  .sidebar{position:fixed;top:56px;left:0;bottom:0;z-index:30;transform:translateX(-100%);transition:transform .2s;box-shadow:var(--shadow)}
+  .sidebar.open{transform:translateX(0)}
+  .content{padding:18px 16px}
+  .scrim{position:fixed;inset:56px 0 0;background:rgba(0,0,0,.35);z-index:25;display:none}
+  .scrim.show{display:block}
+}
+
+.screen{display:none;animation:fade .18s ease}
+.screen.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.page-head .eyebrow{font-size:11px;color:var(--text-muted)}
+.page-head h1{font-size:20px;font-weight:600;margin:2px 0 0}
+.page-head .desc{font-size:12.5px;color:var(--text-muted);margin-top:3px}
+.head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+select,.btn{height:34px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);border-radius:var(--radius);font-size:13px;padding:0 12px;cursor:pointer}
+select:hover,.btn:hover{background:var(--surface-1)}
+.btn{display:inline-flex;align-items:center;gap:7px}
+.btn.primary{background:var(--accent-fill);border-color:var(--accent-fill);color:#fff}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.sm{height:28px;font-size:12px;padding:0 10px}
+.seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--radius);overflow:hidden}
+.seg button{height:32px;border:0;background:transparent;color:var(--text-2);font-size:12.5px;padding:0 14px;display:flex;align-items:center;gap:6px;cursor:pointer}
+.seg button:hover{background:var(--surface-1)}
+.seg button.on{background:var(--accent-bg);color:var(--accent-text);font-weight:500}
+.filters{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.filters label{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text-2)}
+.filters input[type=date]{height:34px;border:1px solid var(--border-strong);background:var(--surface);color:var(--text);border-radius:var(--radius);font-size:13px;padding:0 10px;font-family:inherit}
+
+.grid{display:grid;gap:14px}
+.kpis{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.kpi .lbl{font-size:12px;color:var(--text-2)}
+.kpi .val{font-size:23px;font-weight:600;margin-top:5px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px}
+.card-title{font-size:13.5px;font-weight:600;margin:0 0 14px;display:flex;align-items:center;gap:9px}
+.card-title .badge{margin-left:auto}
+
+.bar-track{height:10px;background:var(--surface-1);border-radius:20px;overflow:hidden}
+.bar-fill{height:100%;border-radius:20px}
+.row-between{display:flex;justify-content:space-between;align-items:center}
+
+.pill{font-size:11px;padding:3px 9px;border-radius:20px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.p-accent{background:var(--accent-bg);color:var(--accent-text)}
+.p-success{background:var(--success-bg);color:var(--success-text)}
+.p-warning{background:var(--warning-bg);color:var(--warning-text)}
+.p-danger{background:var(--danger-bg);color:var(--danger-text)}
+.p-neutral{background:var(--surface-1);color:var(--text-2)}
+
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+table.tbl th{text-align:left;font-weight:400;color:var(--text-muted);font-size:11.5px;padding:8px 8px;border-bottom:1px solid var(--border)}
+table.tbl td{padding:11px 8px;border-bottom:1px solid var(--border)}
+table.tbl tr:last-child td{border-bottom:0}
+
+.kanban{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media(max-width:760px){.kanban{grid-template-columns:1fr}}
+.kcol{background:var(--surface-1);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:9px}
+.kcol-head{display:flex;justify-content:space-between;align-items:center}
+.kcol-head .t{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%}
+.kcol .total{font-size:11.5px;color:var(--text-muted);margin-top:-3px}
+.kcard{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 12px;cursor:pointer}
+.kcard:hover{border-color:var(--border-strong)}
+.kcard .top{display:flex;justify-content:space-between;gap:6px}
+.kcard .ref{font-size:12.5px;font-weight:600}
+.kcard .val{font-size:12.5px;font-weight:600;white-space:nowrap}
+.kcard .forn{font-size:11.5px;color:var(--text-muted);margin:3px 0 7px}
+.kcard .tax{font-size:11px;color:var(--text-2)}
+.kcard .st{display:flex;align-items:center;gap:5px;font-size:11px;margin-top:7px}
+.more{font-size:12px;color:var(--accent-text);text-align:center;padding:5px;cursor:pointer}
+.more:hover{text-decoration:underline}
+
+.stepper{display:flex;align-items:flex-start}
+.step{display:flex;flex-direction:column;align-items:center;gap:7px;flex:0 0 auto;width:96px}
+.step .circle{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px}
+.step .lbl{font-size:11px;text-align:center;line-height:1.35;color:var(--text-2)}
+.connector{height:3px;flex:1;border-radius:2px;margin-top:16px}
+
+.note{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--text-muted)}
+.section-label{font-size:13.5px;font-weight:600;margin:0 0 10px}
+.cyc{display:grid;grid-template-columns:repeat(3,1fr);gap:11px}
+@media(max-width:600px){.cyc{grid-template-columns:1fr}}
+.cyc .b{border-radius:var(--radius);padding:12px 14px}
+.cyc .b .l{font-size:12px}
+.cyc .b .v{font-size:18px;font-weight:600;margin-top:2px}
+
+.list-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid var(--border)}
+.list-row:last-child{border-bottom:0}
+.conn-card{display:flex;align-items:center;gap:13px;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}
+.conn-ico{width:40px;height:40px;border-radius:10px;background:var(--surface-1);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--text-2)}
+.toggle{position:relative;width:38px;height:22px;border-radius:20px;background:var(--surface-2);border:1px solid var(--border-strong);cursor:pointer;flex-shrink:0}
+.toggle::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--text-muted);transition:.15s}
+.toggle.on{background:var(--accent-bg)}
+.toggle.on::after{left:18px;background:var(--accent)}
+
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--border);border-radius:20px;font-size:12px;background:var(--surface)}
+.hnode{padding:11px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-1);min-width:120px}
+.hnode .l{font-size:11px;color:var(--text-muted)}
+.hnode .v{font-size:14px;font-weight:600;margin-top:2px}
+.hsep{color:var(--text-muted);font-size:18px}
+
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:var(--radius);font-size:13px;opacity:0;transition:.2s;z-index:50;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <button class="iconbtn hamb" id="hamb" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+    <div class="logo"><i class="ti ti-eye"></i></div>
+    <div><div class="nm">Argus</div><div class="sub">portal fiscal CBS / IBS</div></div>
+  </div>
+  <div class="top-right">
+    <button class="companybtn"><i class="ti ti-building"></i><span class="lbl">Ferreira Costa</span></button>
+    <button class="iconbtn" id="themeBtn" aria-label="Alternar tema"><i class="ti ti-moon"></i></button>
+    <button class="iconbtn" aria-label="Notificações"><i class="ti ti-bell"></i></button>
+    <div class="avatar">RC</div>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="scrim" id="scrim"></div>
+  <aside class="sidebar" id="sidebar">
+    <nav class="nav" id="nav">
+      <div class="nav-group">Operação</div>
+      <a data-screen="overview" class="active"><i class="ti ti-layout-dashboard"></i> Visão geral</a>
+
+      <button class="nav-parent" data-parent="dfe"><i class="ti ti-files"></i> DF-e's <i class="ti ti-chevron-right chev"></i></button>
+      <div class="submenu" id="sub-dfe">
+        <a data-screen="m-nfe">Nota Fiscal Eletrônica (NF-e)</a>
+        <a data-screen="m-nfce">Nota Fiscal Consumidor (NFC-e)</a>
+        <a data-screen="m-nfse">Nota Fiscal de Serviços (NFS-e)</a>
+        <a data-screen="m-cte">Conhecimento de Frete (CT-e)</a>
+        <button class="sub-parent">Nota de Crédito (NC-e) <i class="ti ti-chevron-right chev"></i></button>
+        <div class="subsubmenu">
+          <a data-screen="m-nce">Listagem</a>
+          <a data-screen="m-nce-wf">Ações por workflow</a>
+        </div>
+        <button class="sub-parent">Nota de Débito (ND-e) <i class="ti ti-chevron-right chev"></i></button>
+        <div class="subsubmenu">
+          <a data-screen="m-nde">Listagem</a>
+          <a data-screen="m-nde-wf">Ações por workflow</a>
+        </div>
+        <a data-screen="m-bpe">Bilhete de Passagem (BP-e)</a>
+        <a data-screen="m-energia">NF de Energia Elétrica (NF3e)</a>
+        <a data-screen="m-comunicacao">NF de Comunicação (NFCom)</a>
+        <a data-screen="m-agua">NF de Água e Esgoto</a>
+        <a data-screen="m-gas">NF de Gás encanado</a>
+        <button class="sub-parent">Eventos <i class="ti ti-chevron-right chev"></i></button>
+        <div class="subsubmenu">
+          <a data-screen="m-eventos">Listagem</a>
+          <a data-screen="m-eventos-wf">Ações por workflow</a>
+        </div>
+        <a data-screen="m-outros">Outros</a>
+      </div>
+
+      <a data-screen="split"><i class="ti ti-credit-card"></i> Split payment</a>
+
+      <div class="nav-group">Apuração</div>
+      <a data-screen="apuracao"><i class="ti ti-scale"></i> Apuração</a>
+      <a data-screen="creditos"><i class="ti ti-coins"></i> Créditos</a>
+
+      <div class="nav-group">Gestão</div>
+      <a data-screen="certificados"><i class="ti ti-certificate"></i> Certificados</a>
+      <a data-screen="integracoes"><i class="ti ti-plug"></i> Integrações</a>
+      <a data-screen="relatorios"><i class="ti ti-report"></i> Relatórios</a>
+      <a data-screen="config"><i class="ti ti-settings"></i> Configurações</a>
+
+      <div class="nav-group">Administração</div>
+      <a data-screen="ambiente"><i class="ti ti-cloud-cog"></i> Gestão de ambiente</a>
+      <a data-screen="grupo"><i class="ti ti-sitemap"></i> Grupo empresarial</a>
+      <a data-screen="empresa"><i class="ti ti-building-store"></i> Empresa</a>
+      <a data-screen="usuarios"><i class="ti ti-users"></i> Usuários</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+
+    <!-- VISÃO GERAL -->
+    <section class="screen active" id="s-overview">
+      <div class="page-head">
+        <div><div class="eyebrow">Ferreira Costa</div><h1>Visão geral</h1><div class="desc">Competência atual · apuração informativa (ano-teste)</div></div>
+        <div class="head-actions">
+          <select><option>Junho / 2026</option><option>Maio / 2026</option></select>
+          <span class="pill p-warning"><i class="ti ti-clock"></i> Fechamento em aberto</span>
+        </div>
+      </div>
+      <div class="grid kpis" style="margin-bottom:14px">
+        <div class="kpi"><div class="lbl">DF-e recebidas</div><div class="val">4.812</div></div>
+        <div class="kpi"><div class="lbl">DF-e emitidas</div><div class="val">3.196</div></div>
+        <div class="kpi"><div class="lbl">Saldo a recolher</div><div class="val">R$ 560 mil</div></div>
+        <div class="kpi"><div class="lbl">Segregado (split)</div><div class="val">R$ 410 mil</div></div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <p class="card-title"><i class="ti ti-scale" style="color:var(--accent)"></i> Apuração CBS / IBS</p>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div><div class="row-between" style="font-size:12.5px;color:var(--text-2);margin-bottom:5px"><span>Créditos apropriados</span><span style="color:var(--text)">R$ 1,24 mi</span></div><div class="bar-track"><div class="bar-fill" style="width:69%;background:var(--success)"></div></div></div>
+          <div><div class="row-between" style="font-size:12.5px;color:var(--text-2);margin-bottom:5px"><span>Débitos do período</span><span style="color:var(--text)">R$ 1,80 mi</span></div><div class="bar-track"><div class="bar-fill" style="width:100%;background:var(--danger)"></div></div></div>
+          <div class="row-between" style="border-top:1px solid var(--border);padding-top:12px"><span style="font-size:13px;color:var(--text-2)">Saldo a recolher · CBS R$ 218 mil + IBS R$ 342 mil</span><span style="font-size:17px;font-weight:600;color:var(--danger-text)">R$ 560.000</span></div>
+        </div>
+      </div>
+      <p class="section-label"><i class="ti ti-recycle" style="font-size:15px;vertical-align:-2px;color:var(--text-2)"></i> Ciclo do crédito</p>
+      <div class="cyc" style="margin-bottom:18px">
+        <div class="b" style="background:var(--warning-bg)"><div class="l" style="color:var(--warning-text)">A apropriar</div><div class="v" style="color:var(--warning-text)">R$ 186 mil</div></div>
+        <div class="b" style="background:var(--accent-bg)"><div class="l" style="color:var(--accent-text)">Apropriado</div><div class="v" style="color:var(--accent-text)">R$ 1,24 mi</div></div>
+        <div class="b" style="background:var(--success-bg)"><div class="l" style="color:var(--success-text)">Utilizado</div><div class="v" style="color:var(--success-text)">R$ 980 mil</div></div>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+        <div class="card">
+          <p class="card-title"><i class="ti ti-credit-card" style="color:var(--text-2)"></i> Split payment</p>
+          <div style="font-size:12.5px;color:var(--text-2);margin-bottom:6px">Liquidações segregadas no mês</div>
+          <div style="display:flex;align-items:baseline;gap:7px"><span style="font-size:25px;font-weight:600">62%</span><span style="font-size:12px;color:var(--text-muted)">via PSPs (Pix, cartão, boleto)</span></div>
+          <div class="bar-track" style="height:8px;margin-top:9px"><div class="bar-fill" style="width:62%;background:var(--accent)"></div></div>
+          <div style="font-size:11.5px;color:var(--text-muted);margin-top:8px">38% pendentes de vínculo no ROC</div>
+        </div>
+        <div class="card">
+          <p class="card-title"><i class="ti ti-alert-triangle" style="color:var(--warning)"></i> Malha fina · alertas</p>
+          <div style="display:flex;flex-direction:column;gap:9px;font-size:12.5px">
+            <div class="row-between"><span style="color:var(--text-2)">cClassTrib divergente</span><span class="pill p-danger">12 DF-e</span></div>
+            <div class="row-between"><span style="color:var(--text-2)">Crédito perdido (simplificado)</span><span class="pill p-warning">7 ops</span></div>
+            <div class="row-between"><span style="color:var(--text-2)">Certificado a vencer</span><span class="pill p-warning">3 dias</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- DOC SCREENS (geradas via JS, com filtro Entrada/Saída) -->
+    <section class="screen" id="s-m-nfe"></section>
+    <section class="screen" id="s-m-nfce"></section>
+    <section class="screen" id="s-m-nfse"></section>
+    <section class="screen" id="s-m-cte"></section>
+    <section class="screen" id="s-m-nce"></section>
+    <section class="screen" id="s-m-nde"></section>
+    <section class="screen" id="s-m-bpe"></section>
+    <section class="screen" id="s-m-energia"></section>
+    <section class="screen" id="s-m-comunicacao"></section>
+    <section class="screen" id="s-m-agua"></section>
+    <section class="screen" id="s-m-gas"></section>
+    <section class="screen" id="s-m-eventos"></section>
+    <section class="screen" id="s-m-nce-wf"></section>
+    <section class="screen" id="s-m-nde-wf"></section>
+    <section class="screen" id="s-m-eventos-wf"></section>
+    <section class="screen" id="s-m-outros"></section>
+
+    <!-- SPLIT PAYMENT -->
+    <section class="screen" id="s-split">
+      <div class="page-head">
+        <div><div class="eyebrow">Split payment</div><h1>Segregação no pagamento</h1><div class="desc">Retenção de CBS / IBS na liquidação financeira</div></div>
+      </div>
+      <div class="grid kpis" style="margin-bottom:14px">
+        <div class="kpi"><div class="lbl">Liquidações via split</div><div class="val">62%</div></div>
+        <div class="kpi"><div class="lbl">Segregado no mês</div><div class="val">R$ 410 mil</div></div>
+        <div class="kpi"><div class="lbl">Conciliado</div><div class="val" style="color:var(--success-text)">94%</div></div>
+        <div class="kpi"><div class="lbl">Crédito em risco</div><div class="val" style="color:var(--danger-text)">R$ 24 mil</div></div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <p class="card-title"><i class="ti ti-chart-bar" style="color:var(--text-2)"></i> Segregado por arranjo</p>
+        <div id="arr"></div>
+      </div>
+      <div class="card">
+        <p class="card-title"><i class="ti ti-arrows-left-right" style="color:var(--accent)"></i> Reconciliação de pagamentos <span class="pill p-warning badge">3 divergências</span></p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px">
+          <div style="background:var(--surface-1);border-radius:var(--radius);padding:10px 12px"><div style="font-size:11.5px;color:var(--text-2)">Liquidado</div><div style="font-size:16px;font-weight:600">R$ 663 mil</div></div>
+          <div style="background:var(--surface-1);border-radius:var(--radius);padding:10px 12px"><div style="font-size:11.5px;color:var(--text-2)">Segregado</div><div style="font-size:16px;font-weight:600">R$ 410 mil</div></div>
+          <div style="background:var(--surface-1);border-radius:var(--radius);padding:10px 12px"><div style="font-size:11.5px;color:var(--text-2)">Conciliado</div><div style="font-size:16px;font-weight:600;color:var(--success-text)">R$ 386 mil</div></div>
+          <div style="background:var(--surface-1);border-radius:var(--radius);padding:10px 12px"><div style="font-size:11.5px;color:var(--text-2)">Divergência</div><div style="font-size:16px;font-weight:600;color:var(--danger-text)">R$ 24 mil</div></div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>Liquidação</th><th>Arranjo</th><th>Recebido</th><th>Segregado</th><th>Documento</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>LIQ-7781</td><td>Pix</td><td>R$ 12.800</td><td>R$ 5.120</td><td>NF-e 48244</td><td><span class="pill p-success">conciliado</span></td></tr>
+            <tr><td>LIQ-7782</td><td>Cartão</td><td>R$ 4.700</td><td>R$ 1.880</td><td>NFC-e 9981</td><td><span class="pill p-success">conciliado</span></td></tr>
+            <tr><td>LIQ-7790</td><td>Boleto</td><td>R$ 24.100</td><td>R$ 9.640</td><td>NF-e 48251</td><td><span class="pill p-warning">aguardando ROC</span></td></tr>
+            <tr><td>LIQ-7795</td><td>Cartão</td><td>R$ 1.850</td><td>R$ 0</td><td>NFC-e 9990</td><td><span class="pill p-danger">divergente</span></td></tr>
+            <tr><td>LIQ-7801</td><td>TED</td><td>R$ 35.700</td><td>R$ 14.300</td><td>NF-e 48260</td><td><span class="pill p-success">conciliado</span></td></tr>
+          </tbody>
+        </table>
+        <div class="note" style="margin-top:12px"><i class="ti ti-alert-triangle" style="color:var(--danger)"></i> Divergente: valor liquidado sem segregação correspondente — adquirente pode perder o crédito.</div>
+      </div>
+    </section>
+
+    <!-- APURAÇÃO -->
+    <section class="screen" id="s-apuracao">
+      <div class="page-head">
+        <div><div class="eyebrow">Apuração · Junho / 2026</div><h1>Fechamento CBS / IBS</h1><div class="desc">Consolide, concilie e revise antes de fechar</div></div>
+        <span class="pill p-warning"><i class="ti ti-clock"></i> em aberto</span>
+      </div>
+      <div class="card" style="margin-bottom:14px;overflow-x:auto">
+        <div class="stepper" style="min-width:520px">
+          <div class="step"><div class="circle" style="background:var(--success-bg);color:var(--success-text)"><i class="ti ti-check"></i></div><div class="lbl">Consolidar documentos</div></div>
+          <div class="connector" style="background:var(--success)"></div>
+          <div class="step"><div class="circle" style="background:var(--success-bg);color:var(--success-text)"><i class="ti ti-check"></i></div><div class="lbl">Conciliar pagamentos</div></div>
+          <div class="connector" style="background:var(--accent)"></div>
+          <div class="step"><div class="circle" style="background:var(--accent-fill);color:#fff"><i class="ti ti-filter"></i></div><div class="lbl" style="color:var(--accent-text)">Malha fina</div></div>
+          <div class="connector" style="background:var(--border-strong)"></div>
+          <div class="step"><div class="circle" style="background:var(--surface-1);color:var(--text-muted)">4</div><div class="lbl">Apurar saldo</div></div>
+          <div class="connector" style="background:var(--border-strong)"></div>
+          <div class="step"><div class="circle" style="background:var(--surface-1);color:var(--text-muted)"><i class="ti ti-lock"></i></div><div class="lbl">Fechar</div></div>
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
+        <div class="card" style="padding:13px 16px"><div style="font-size:12px;color:var(--text-2)">Créditos apropriados</div><div style="font-size:21px;font-weight:600;color:var(--success-text)">R$ 1,24 mi</div></div>
+        <div class="card" style="padding:13px 16px"><div style="font-size:12px;color:var(--text-2)">Débitos do período</div><div style="font-size:21px;font-weight:600;color:var(--danger-text)">R$ 1,80 mi</div></div>
+        <div class="card" style="padding:13px 16px"><div style="font-size:12px;color:var(--text-2)">Saldo a recolher</div><div style="font-size:21px;font-weight:600">R$ 560 mil</div></div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <p class="card-title"><i class="ti ti-filter" style="color:var(--accent)"></i> Pendências da malha fina <span class="pill p-warning badge">3 bloqueios</span></p>
+        <div>
+          <div class="list-row"><span><i class="ti ti-alert-circle" style="color:var(--danger);vertical-align:-2px"></i> 12 DF-e com cClassTrib divergente</span><button class="btn sm" data-toast="Abrindo 12 DF-e para revisão de cClassTrib.">Revisar</button></div>
+          <div class="list-row"><span><i class="ti ti-alert-triangle" style="color:var(--warning);vertical-align:-2px"></i> 7 operações em split simplificado (crédito em risco)</span><button class="btn sm" data-toast="Abrindo 7 operações de split simplificado.">Revisar</button></div>
+          <div class="list-row"><span><i class="ti ti-alert-triangle" style="color:var(--warning);vertical-align:-2px"></i> R$ 186 mil em créditos ainda a apropriar</span><button class="btn sm" data-toast="Abrindo créditos a apropriar.">Revisar</button></div>
+        </div>
+      </div>
+      <div class="row-between" style="flex-wrap:wrap;gap:10px">
+        <span class="note"><i class="ti ti-info-circle"></i> Resolva os bloqueios para liberar o fechamento da competência.</span>
+        <button class="btn primary" data-toast="Fechamento bloqueado: resolva as 3 pendências da malha fina."><i class="ti ti-lock-check"></i> Fechar competência</button>
+      </div>
+    </section>
+
+    <!-- CRÉDITOS -->
+    <section class="screen" id="s-creditos">
+      <div class="page-head">
+        <div><div class="eyebrow">Créditos</div><h1>Ciclo do crédito</h1><div class="desc">Cada coluna é um estágio — o crédito avança quando o débito é extinto</div></div>
+        <div class="head-actions"><select><option>Tributo: todos</option><option>Apenas CBS</option><option>Apenas IBS</option></select></div>
+      </div>
+      <div class="kanban">
+        <div class="kcol" style="border-top:3px solid var(--warning)">
+          <div class="kcol-head"><div class="t"><span class="dot" style="background:var(--warning)"></span> A apropriar</div><span class="pill p-warning">14</span></div>
+          <div class="total">R$ 186 mil · débito não extinto</div>
+          <div class="kcard" data-toast="Detalhe da NF-e 48211."><div class="top"><span class="ref">NF-e 48211</span><span class="val">R$ 32.400</span></div><div class="forn">Distribuidora Norte</div><div class="tax">CBS R$ 13,0k · IBS R$ 19,4k</div><div class="st" style="color:var(--warning-text)"><i class="ti ti-clock"></i> débito não extinto</div></div>
+          <div class="kcard" data-toast="Detalhe do CT-e 9032."><div class="top"><span class="ref">CT-e 9032</span><span class="val">R$ 8.150</span></div><div class="forn">TransLog Cargas</div><div class="tax">CBS R$ 3,3k · IBS R$ 4,9k</div><div class="st" style="color:var(--warning-text)"><i class="ti ti-credit-card"></i> aguardando split</div></div>
+          <div class="more" data-toast="Carregando os 11 créditos a apropriar restantes.">+ 11 itens</div>
+        </div>
+        <div class="kcol" style="border-top:3px solid var(--accent)">
+          <div class="kcol-head"><div class="t"><span class="dot" style="background:var(--accent)"></span> Apropriado</div><span class="pill p-accent">96</span></div>
+          <div class="total">R$ 1,24 mi · disponível p/ uso</div>
+          <div class="kcard" data-toast="Detalhe da NF-e 47980."><div class="top"><span class="ref">NF-e 47980</span><span class="val">R$ 54.300</span></div><div class="forn">Metalcorp</div><div class="tax">CBS R$ 21,7k · IBS R$ 32,6k</div><div class="st" style="color:var(--accent-text)"><i class="ti ti-circle-check"></i> disponível</div></div>
+          <div class="kcard" data-toast="Detalhe da NFS-e 1182."><div class="top"><span class="ref">NFS-e 1182</span><span class="val">R$ 7.640</span></div><div class="forn">ServTech Serviços</div><div class="tax">CBS R$ 3,1k · IBS R$ 4,5k</div><div class="st" style="color:var(--accent-text)"><i class="ti ti-circle-check"></i> disponível</div></div>
+          <div class="more" data-toast="Carregando os 94 créditos apropriados restantes.">+ 94 itens</div>
+        </div>
+        <div class="kcol" style="border-top:3px solid var(--success)">
+          <div class="kcol-head"><div class="t"><span class="dot" style="background:var(--success)"></span> Utilizado</div><span class="pill p-success">71</span></div>
+          <div class="total">R$ 980 mil · compensado / ressarcido</div>
+          <div class="kcard" data-toast="Detalhe da NF-e 47811."><div class="top"><span class="ref">NF-e 47811</span><span class="val">R$ 88.200</span></div><div class="forn">Metalcorp</div><div class="tax">CBS R$ 35,3k · IBS R$ 52,9k</div><div class="st" style="color:var(--success-text)"><i class="ti ti-arrows-exchange"></i> compensado</div></div>
+          <div class="kcard" data-toast="Detalhe da NF-e 47820."><div class="top"><span class="ref">NF-e 47820</span><span class="val">R$ 15.300</span></div><div class="forn">Insumos BR</div><div class="tax">CBS R$ 6,1k · IBS R$ 9,2k</div><div class="st" style="color:var(--success-text)"><i class="ti ti-cash"></i> ressarcido (Selic)</div></div>
+          <div class="more" data-toast="Carregando os 69 créditos utilizados restantes.">+ 69 itens</div>
+        </div>
+      </div>
+      <div class="note" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px"><i class="ti ti-info-circle"></i> O crédito avança de coluna quando o débito é extinto (compensação, pagamento ou split payment).</div>
+    </section>
+
+    <!-- CERTIFICADOS -->
+    <section class="screen" id="s-certificados">
+      <div class="page-head">
+        <div><div class="eyebrow">Gestão</div><h1>Certificados</h1><div class="desc">Cadastro de empresas e tipos de certificado · atende Inbound e Outbound</div></div>
+        <button class="btn primary" data-toast="Novo certificado (A1 / A3)."><i class="ti ti-plus"></i> Novo certificado</button>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-bottom:14px">
+        <div class="card">
+          <p class="card-title"><i class="ti ti-id-badge-2" style="color:var(--text-2)"></i> Tipos de certificado <button class="btn sm badge" data-toast="Novo tipo de certificado.">Novo tipo</button></p>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <span class="chip">e-CNPJ A1</span><span class="chip">e-CNPJ A3</span><span class="chip">NF-e</span><span class="chip">NFS-e</span><span class="chip">CT-e</span>
+          </div>
+        </div>
+        <div class="card">
+          <p class="card-title"><i class="ti ti-building" style="color:var(--text-2)"></i> Empresas <button class="btn sm badge" data-toast="Cadastrar empresa.">Cadastrar</button></p>
+          <div style="display:flex;flex-direction:column;gap:8px;font-size:12.5px">
+            <div class="row-between"><span>Ferreira Costa LTDA (matriz)</span><span class="pill p-success">2 certificados</span></div>
+            <div class="row-between"><span>Filial Recife</span><span class="pill p-danger">1 vencido</span></div>
+            <div class="row-between"><span>Filial Fortaleza</span><span class="pill p-success">1 certificado</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <p class="card-title"><i class="ti ti-certificate" style="color:var(--text-2)"></i> Certificados cadastrados</p>
+        <table class="tbl">
+          <thead><tr><th>Certificado</th><th>Empresa</th><th>Tipo</th><th>Validade</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>e-CNPJ matriz</td><td>Ferreira Costa LTDA</td><td>A1</td><td>14/09/2026</td><td><span class="pill p-success">válido</span></td></tr>
+            <tr><td>NF-e produtos</td><td>Ferreira Costa LTDA</td><td>A1 · NF-e</td><td>29/06/2026</td><td><span class="pill p-warning">expira em 3 dias</span></td></tr>
+            <tr><td>NFS-e serviços</td><td>Filial Fortaleza</td><td>A1 · NFS-e</td><td>02/12/2026</td><td><span class="pill p-success">válido</span></td></tr>
+            <tr><td>Certificado A3</td><td>Filial Recife</td><td>A3</td><td>18/03/2026</td><td><span class="pill p-danger">vencido</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- INTEGRAÇÕES -->
+    <section class="screen" id="s-integracoes">
+      <div class="page-head">
+        <div><div class="eyebrow">Gestão</div><h1>Integrações com legados</h1><div class="desc">Conectores com os sistemas da empresa</div></div>
+        <button class="btn primary" data-toast="Nova integração."><i class="ti ti-plus"></i> Nova integração</button>
+      </div>
+      <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))">
+        <div class="conn-card"><div class="conn-ico"><i class="ti ti-database"></i></div><div style="flex:1"><div style="font-weight:600">SAP ERP</div><div class="muted" style="font-size:12px">Fiscal · Contábil · Estoque · Financeiro</div></div><span class="pill p-success">conectado</span></div>
+        <div class="conn-card"><div class="conn-ico"><i class="ti ti-server"></i></div><div style="flex:1"><div style="font-weight:600">SFC</div><div class="muted" style="font-size:12px">Sincronizado há 12 min</div></div><span class="pill p-success">conectado</span></div>
+        <div class="conn-card"><div class="conn-ico"><i class="ti ti-building-bank"></i></div><div style="flex:1"><div style="font-weight:600">PSP / Banco</div><div class="muted" style="font-size:12px">Split payment · ROC</div></div><span class="pill p-warning">parcial</span></div>
+      </div>
+    </section>
+
+    <!-- RELATÓRIOS -->
+    <section class="screen" id="s-relatorios">
+      <div class="page-head"><div><div class="eyebrow">Gestão</div><h1>Relatórios</h1><div class="desc">Gere e exporte os relatórios da competência</div></div></div>
+      <div class="card">
+        <div class="list-row"><span><i class="ti ti-file-text" style="vertical-align:-2px;color:var(--text-2)"></i> Apuração CBS / IBS — Junho/2026</span><button class="btn sm" data-toast="Gerando relatório de apuração."><i class="ti ti-download"></i> Gerar</button></div>
+        <div class="list-row"><span><i class="ti ti-file-text" style="vertical-align:-2px;color:var(--text-2)"></i> Livro de créditos (3 estágios)</span><button class="btn sm" data-toast="Gerando livro de créditos."><i class="ti ti-download"></i> Gerar</button></div>
+        <div class="list-row"><span><i class="ti ti-file-text" style="vertical-align:-2px;color:var(--text-2)"></i> Conciliação de split payment</span><button class="btn sm" data-toast="Gerando conciliação de split."><i class="ti ti-download"></i> Gerar</button></div>
+        <div class="list-row"><span><i class="ti ti-file-text" style="vertical-align:-2px;color:var(--text-2)"></i> Inventário de estoque 31/12/2026</span><button class="btn sm" data-toast="Gerando inventário de estoque."><i class="ti ti-download"></i> Gerar</button></div>
+      </div>
+    </section>
+
+    <!-- CONFIGURAÇÕES -->
+    <section class="screen" id="s-config">
+      <div class="page-head"><div><div class="eyebrow">Gestão</div><h1>Configurações</h1><div class="desc">Preferências da empresa e do portal</div></div></div>
+      <div class="card" style="max-width:520px">
+        <div class="list-row"><div><div style="font-weight:500">Empresa</div><div class="muted" style="font-size:12px">Ferreira Costa LTDA · matriz</div></div><button class="btn sm" data-toast="Trocar empresa.">Trocar</button></div>
+        <div class="list-row"><div><div style="font-weight:500">Certificado padrão</div><div class="muted" style="font-size:12px">e-CNPJ matriz (A1)</div></div><button class="btn sm" data-toast="Selecionar certificado padrão.">Alterar</button></div>
+        <div class="list-row"><div><div style="font-weight:500">Tema escuro</div><div class="muted" style="font-size:12px">Aparência do portal</div></div><div class="toggle" id="cfgTheme"></div></div>
+        <div class="list-row"><div><div style="font-weight:500">Alertas de malha fina</div><div class="muted" style="font-size:12px">Notificar divergências</div></div><div class="toggle on" data-toggle></div></div>
+        <div class="list-row"><div><div style="font-weight:500">Alertas de certificado</div><div class="muted" style="font-size:12px">Avisar 15 dias antes</div></div><div class="toggle on" data-toggle></div></div>
+      </div>
+    </section>
+
+    <!-- GESTÃO DE AMBIENTE -->
+    <section class="screen" id="s-ambiente">
+      <div class="page-head">
+        <div><div class="eyebrow">Administração</div><h1>Gestão de ambiente</h1><div class="desc">Estrutura multi-tenant: ambiente, grupos, empresas e usuários</div></div>
+        <button class="btn primary" data-toast="Novo ambiente."><i class="ti ti-plus"></i> Novo ambiente</button>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <p class="card-title"><i class="ti ti-hierarchy" style="color:var(--text-2)"></i> Hierarquia</p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div class="hnode"><div class="l">Ambiente</div><div class="v">Ferreira Costa Cloud</div></div>
+          <i class="ti ti-chevron-right hsep"></i>
+          <div class="hnode"><div class="l">Grupos empresariais</div><div class="v">2</div></div>
+          <i class="ti ti-chevron-right hsep"></i>
+          <div class="hnode"><div class="l">Empresas</div><div class="v">6</div></div>
+          <i class="ti ti-chevron-right hsep"></i>
+          <div class="hnode"><div class="l">Usuários</div><div class="v">14</div></div>
+        </div>
+      </div>
+      <div class="card" style="max-width:560px">
+        <p class="card-title"><i class="ti ti-cloud-cog" style="color:var(--text-2)"></i> Ambiente atual</p>
+        <div class="list-row"><span class="muted">Nome</span><span>Ferreira Costa Cloud</span></div>
+        <div class="list-row"><span class="muted">Plano</span><span>Enterprise</span></div>
+        <div class="list-row"><span class="muted">Região de dados</span><span>Brasil (São Paulo)</span></div>
+        <div class="list-row"><span class="muted">Status</span><span class="pill p-success">ativo</span></div>
+      </div>
+    </section>
+
+    <!-- GRUPO EMPRESARIAL -->
+    <section class="screen" id="s-grupo">
+      <div class="page-head">
+        <div><div class="eyebrow">Administração</div><h1>Grupo empresarial</h1><div class="desc">Grupos dentro do ambiente Ferreira Costa Cloud</div></div>
+        <button class="btn primary" data-toast="Novo grupo empresarial."><i class="ti ti-plus"></i> Novo grupo</button>
+      </div>
+      <div class="card">
+        <table class="tbl">
+          <thead><tr><th>Grupo</th><th>Ambiente</th><th>Empresas</th><th>Usuários</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Grupo Varejo</td><td>Ferreira Costa Cloud</td><td>4</td><td>9</td><td><span class="pill p-success">ativo</span></td></tr>
+            <tr><td>Grupo Logística</td><td>Ferreira Costa Cloud</td><td>2</td><td>5</td><td><span class="pill p-success">ativo</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- EMPRESA -->
+    <section class="screen" id="s-empresa">
+      <div class="page-head">
+        <div><div class="eyebrow">Administração</div><h1>Empresa</h1><div class="desc">Empresas vinculadas aos grupos</div></div>
+        <button class="btn primary" data-toast="Cadastrar empresa."><i class="ti ti-plus"></i> Nova empresa</button>
+      </div>
+      <div class="card">
+        <table class="tbl">
+          <thead><tr><th>Empresa</th><th>CNPJ</th><th>Grupo</th><th>Tipo</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Ferreira Costa LTDA</td><td>12.345.678/0001-90</td><td>Grupo Varejo</td><td>Matriz</td><td><span class="pill p-success">ativa</span></td></tr>
+            <tr><td>Filial Recife</td><td>12.345.678/0002-70</td><td>Grupo Varejo</td><td>Filial</td><td><span class="pill p-success">ativa</span></td></tr>
+            <tr><td>Filial Fortaleza</td><td>12.345.678/0003-51</td><td>Grupo Varejo</td><td>Filial</td><td><span class="pill p-success">ativa</span></td></tr>
+            <tr><td>FC Transportes</td><td>98.765.432/0001-10</td><td>Grupo Logística</td><td>Matriz</td><td><span class="pill p-success">ativa</span></td></tr>
+            <tr><td>FC Distribuição</td><td>98.765.432/0002-00</td><td>Grupo Logística</td><td>Filial</td><td><span class="pill p-warning">suspensa</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- USUÁRIOS -->
+    <section class="screen" id="s-usuarios">
+      <div class="page-head">
+        <div><div class="eyebrow">Administração</div><h1>Usuários</h1><div class="desc">Vínculo com ambiente, grupo empresarial e empresas</div></div>
+        <button class="btn primary" data-toast="Convidar usuário."><i class="ti ti-plus"></i> Convidar usuário</button>
+      </div>
+      <div class="card">
+        <table class="tbl">
+          <thead><tr><th>Usuário</th><th>Perfil</th><th>Vínculo</th><th>Empresas</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Rafael Costa<div class="muted" style="font-size:11px">rafael@ferreiracosta.com</div></td><td>Admin do ambiente</td><td>Ambiente</td><td>Todas (6)</td><td><span class="pill p-success">ativo</span></td></tr>
+            <tr><td>Marina Lima<div class="muted" style="font-size:11px">marina@ferreiracosta.com</div></td><td>Gestor fiscal</td><td>Grupo Varejo</td><td>4 empresas</td><td><span class="pill p-success">ativo</span></td></tr>
+            <tr><td>João Pereira<div class="muted" style="font-size:11px">joao@ferreiracosta.com</div></td><td>Analista</td><td>Empresa</td><td>Ferreira Costa LTDA</td><td><span class="pill p-success">ativo</span></td></tr>
+            <tr><td>Contábil Externa<div class="muted" style="font-size:11px">contato@contabiliza.com</div></td><td>Leitura</td><td>Grupo Logística</td><td>2 empresas</td><td><span class="pill p-warning">convite pendente</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  var root=document.documentElement;
+  var nav=document.getElementById('nav');
+  var sidebar=document.getElementById('sidebar');
+  var scrim=document.getElementById('scrim');
+
+  /* DF-e por modelo (filtro Entrada/Saída) */
+  var models={
+    'm-nfe':{label:'Nota Fiscal Eletrônica (NF-e)',
+      entrada:{kpis:[['Recebidas','3.140'],['Autorizadas','3.128'],['Eventos pendentes','5'],['Com CBS/IBS','99%']],
+        cols:['Documento','Emitente','Valor','CBS / IBS','Status'],
+        rows:[['NF-e 48211','Distribuidora Norte','R$ 32.400','13,0k / 19,4k',['autorizado','success']],
+              ['NF-e 48230','Aços União','R$ 21.700','8,7k / 13,0k',['autorizado','success']],
+              ['NF-e 48261','Insumos BR','R$ 12.900','5,2k / 7,7k',['ciência pendente','warning']]]},
+      saida:{kpis:[['Emitidas','2.090'],['Autorizadas','2.085'],['Rejeitadas','3'],['Com CBS/IBS','100%']],
+        cols:['Documento','Destinatário','Valor','CBS / IBS','Status'],
+        rows:[['NF-e 70112','Construfácil Varejo','R$ 18.900','7,6k / 11,3k',['autorizado','success']],
+              ['NF-e 70140','Mercantil Leste','R$ 44.300','—',['rejeitado · 217','danger']]]}},
+    'm-nfce':{label:'Nota Fiscal Consumidor (NFC-e)',entrada:null,
+      saida:{kpis:[['Emitidas','1.040'],['Autorizadas','1.038'],['Canceladas','2'],['Com CBS/IBS','100%']],
+        cols:['Documento','Destinatário','Valor','CBS / IBS','Status'],
+        rows:[['NFC-e 33120','Consumidor final','R$ 540','0,2k / 0,3k',['autorizado','success']],
+              ['NFC-e 33145','Consumidor final','R$ 1.280','0,5k / 0,8k',['autorizado','success']]]}},
+    'm-nfse':{label:'Nota Fiscal de Serviços (NFS-e)',
+      entrada:{kpis:[['Recebidas','612'],['Autorizadas','610'],['Eventos pendentes','2'],['Com CBS/IBS','97%']],
+        cols:['Documento','Emitente','Valor','CBS / IBS','Status'],
+        rows:[['NFS-e 1182','ServTech Serviços','R$ 7.640','3,1k / 4,5k',['autorizado','success']],
+              ['NFS-e 1190','Contabiliza Co','R$ 2.300','0,9k / 1,4k',['autorizado','success']]]},
+      saida:{kpis:[['Emitidas','146'],['Autorizadas','146'],['Rejeitadas','0'],['Com CBS/IBS','100%']],
+        cols:['Documento','Tomador','Valor','CBS / IBS','Status'],
+        rows:[['NFS-e 882','Prefeitura / serviço','R$ 3.100','1,2k / 1,9k',['autorizado','success']]]}},
+    'm-cte':{label:'Conhecimento de Frete (CT-e)',
+      entrada:{kpis:[['Recebidos','438'],['Autorizados','431'],['Manifesto pendente','7'],['Com CBS/IBS','96%']],
+        cols:['Documento','Transportador','Valor','CBS / IBS','Status'],
+        rows:[['CT-e 9032','TransLog Cargas','R$ 8.150','3,3k / 4,9k',['manifesto pendente','warning']],
+              ['CT-e 9055','Expresso Nordeste','R$ 6.780','2,7k / 4,1k',['autorizado','success']]]},
+      saida:{kpis:[['Emitidos','164'],['Autorizados','162'],['Rejeitados','2'],['Com CBS/IBS','100%']],
+        cols:['Documento','Destinatário','Valor','CBS / IBS','Status'],
+        rows:[['CT-e 4408','Rota Sul Log','R$ 6.220','2,5k / 3,7k',['autorizado','success']],
+              ['CT-e OS 51','FC Distribuição','R$ 880','0,4k / 0,5k',['autorizado','success']]]}},
+    'm-nce':{label:'Nota de Crédito (NC-e)',
+      entrada:{kpis:[['Recebidas','84'],['Vinculadas','80'],['Em análise','4'],['Crédito gerado','R$ 142 mil']],
+        cols:['Documento','Emitente','Valor','Motivo','Status'],
+        rows:[['NC-e 311','Distribuidora Norte','R$ 4.200','devolução parcial',['vinculada','success']],
+              ['NC-e 322','Aços União','R$ 2.640','bonificação',['em análise','warning']]]},
+      saida:{kpis:[['Emitidas','12'],['Autorizadas','12'],['Rejeitadas','0'],['Valor','R$ 18 mil']],
+        cols:['Documento','Destinatário','Valor','Motivo','Status'],
+        rows:[['NC-e 90','Construfácil Varejo','R$ 1.500','devolução',['autorizada','success']]]}},
+    'm-nde':{label:'Nota de Débito (ND-e)',
+      entrada:{kpis:[['Recebidas','9'],['Vinculadas','9'],['Em análise','0'],['Valor','R$ 7 mil']],
+        cols:['Documento','Emitente','Valor','Motivo','Status'],
+        rows:[['ND-e 51','TransLog Cargas','R$ 740','reajuste',['vinculada','success']]]},
+      saida:{kpis:[['ND-e emitidas','56'],['Autorizadas','55'],['Rejeitadas','1'],['Débito gerado','R$ 98 mil']],
+        cols:['Documento','Destinatário','Valor','Motivo','Status'],
+        rows:[['ND-e 210','Construfácil Varejo','R$ 3.400','juros / multa',['autorizado','success']],
+              ['ND-e 219','Mercantil Leste','R$ 2.900','complemento',['rejeitado','danger']]]}},
+    'm-bpe':{label:'Bilhete de Passagem (BP-e)',
+      entrada:{kpis:[['Recebidos','52'],['Autorizados','52'],['Pendentes','0'],['Com CBS/IBS','100%']],
+        cols:['Documento','Emitente','Valor','CBS / IBS','Status'],
+        rows:[['BP-e 77','ViaLeste','R$ 320','0,1k / 0,2k',['autorizado','success']],
+              ['BP-e 89','Expresso Litoral','R$ 145','0,1k / 0,1k',['autorizado','success']]]},saida:null},
+    'm-energia':{label:'NF de Energia Elétrica (NF3e)',
+      entrada:{kpis:[['Recebidas','36'],['Autorizadas','35'],['Evento pendente','1'],['Com CBS/IBS','98%']],
+        cols:['Documento','Distribuidora','Valor','CBS / IBS','Status'],
+        rows:[['NF3e 5521','Energisa','R$ 3.910','1,6k / 2,3k',['evento pendente','warning']],
+              ['NF3e 5530','Neoenergia','R$ 2.180','0,9k / 1,3k',['autorizada','success']]]},saida:null},
+    'm-comunicacao':{label:'NF de Comunicação (NFCom)',
+      entrada:{kpis:[['Recebidas','28'],['Autorizadas','28'],['Pendentes','0'],['Com CBS/IBS','100%']],
+        cols:['Documento','Operadora','Valor','CBS / IBS','Status'],
+        rows:[['NFCom 412','Telecom BR','R$ 1.260','0,5k / 0,8k',['autorizada','success']],
+              ['NFCom 418','Conecta Fibra','R$ 540','0,2k / 0,3k',['autorizada','success']]]},saida:null},
+    'm-agua':{label:'NF de Água e Esgoto',
+      entrada:{kpis:[['Recebidas','22'],['Autorizadas','22'],['Pendentes','0'],['Com CBS/IBS','100%']],
+        cols:['Documento','Concessionária','Valor','CBS / IBS','Status'],
+        rows:[['NF 8841','Cagepa','R$ 980','0,4k / 0,6k',['autorizada','success']]]},saida:null},
+    'm-gas':{label:'NF de Gás encanado',
+      entrada:{kpis:[['Recebidas','9'],['Autorizadas','9'],['Pendentes','0'],['Com CBS/IBS','100%']],
+        cols:['Documento','Distribuidora','Valor','CBS / IBS','Status'],
+        rows:[['NF 3320','PBGás','R$ 1.540','0,6k / 0,9k',['autorizada','success']]]},saida:null},
+    'm-eventos':{label:'Eventos',
+      entrada:{kpis:[['Eventos','1.204'],['Registrados','1.197'],['Pendentes','7'],['Hoje','38']],
+        cols:['Documento','Evento','Data','Status'],
+        rows:[['NF-e 48261','Ciência da operação','25/06',['pendente','warning']],
+              ['NC-e 322','Manifestação','24/06',['registrado','success']],
+              ['NF-e 48211','Confirmação da operação','23/06',['registrado','success']]]},
+      saida:{kpis:[['Eventos','980'],['Registrados','974'],['Cancelamentos','6'],['Hoje','22']],
+        cols:['Documento','Evento','Data','Status'],
+        rows:[['NF-e 70140','Carta de correção','25/06',['registrado','success']],
+              ['NF-e 70150','Cancelamento','24/06',['registrado','success']],
+              ['ND-e 219','Rejeição','24/06',['tratar','danger']]]}},
+    'm-nce-wf':{label:'Nota de Crédito (NC-e) — workflow',
+      entrada:{wf:[{name:'A vincular',variant:'warning',icon:'inbox',cards:[['NC-e 322','R$ 2.640','Aços União','vincular ao crédito']]},
+                   {name:'Em análise',variant:'accent',icon:'search',cards:[['NC-e 318','R$ 1.150','Metalcorp','conferência fiscal']]},
+                   {name:'Concluído',variant:'success',icon:'circle-check',cards:[['NC-e 311','R$ 4.200','Distribuidora Norte','crédito gerado']]}]},saida:null},
+    'm-nde-wf':{label:'Nota de Débito (ND-e) — workflow',entrada:null,
+      saida:{wf:[{name:'A emitir',variant:'warning',icon:'pencil',cards:[['ND-e 221','R$ 1.700','Construfácil Varejo','gerar complemento']]},
+                 {name:'Autorizada',variant:'success',icon:'circle-check',cards:[['ND-e 210','R$ 3.400','Construfácil Varejo','autorizada'],['ND-e 214','R$ 1.200','Rota Sul Log','autorizada']]},
+                 {name:'Tratar',variant:'danger',icon:'alert-triangle',cards:[['ND-e 219','R$ 2.900','Mercantil Leste','rejeitada · reenviar']]}]}},
+    'm-eventos-wf':{label:'Eventos — workflow',
+      entrada:{wf:[{name:'Pendente',variant:'warning',icon:'clock',cards:[['NF-e 48261','—','Insumos BR','dar ciência'],['NF-e 48270','—','Aços União','confirmar operação']]},
+                   {name:'Em processamento',variant:'accent',icon:'loader',cards:[['NC-e 322','—','Aços União','manifestação enviada']]},
+                   {name:'Registrado',variant:'success',icon:'circle-check',cards:[['NF-e 48211','—','Distribuidora Norte','confirmada']]}]},
+      saida:{wf:[{name:'A tratar',variant:'warning',icon:'clock',cards:[['NF-e 70150','—','Consumidor final','cancelar no prazo']]},
+                 {name:'Em processamento',variant:'accent',icon:'loader',cards:[['NF-e 70140','—','Mercantil Leste','CC-e enviada']]},
+                 {name:'Registrado',variant:'success',icon:'circle-check',cards:[['NF-e 70112','—','Construfácil Varejo','evento ok']]}]}},
+    'm-outros':{label:'Outros',
+      entrada:{kpis:[['Recebidos','14'],['Autorizados','14'],['Modelos','3'],['Pendentes','0']],
+        cols:['Documento','Modelo','Emitente','Valor','Status'],
+        rows:[['NF-ABI 14','Bens imóveis','Imob Costa','R$ 480.000',['autorizado','success']],
+              ['MDF-e 8810','Manifesto','FC Transportes','R$ 0',['encerrado','success']]]},
+      saida:{kpis:[['Emitidos','21'],['Autorizados','21'],['Rejeitados','0'],['Modelos','2']],
+        cols:['Documento','Modelo','Destinatário','Valor','Status'],
+        rows:[['MDF-e 2210','Manifesto','—','R$ 0',['encerrado','success']]]}}
+  };
+  function modelBody(d){
+    if(!d)return '<div class="card"><div class="note"><i class="ti ti-info-circle"></i> Sem documentos desta direção para este modelo.</div></div>';
+    if(d.wf){
+      var cols=d.wf.map(function(c){
+        var cards=c.cards.map(function(k){return '<div class="kcard"><div class="top"><span class="ref">'+k[0]+'</span><span class="val">'+k[1]+'</span></div><div class="forn">'+k[2]+'</div><div class="st" style="color:var(--'+c.variant+'-text)"><i class="ti ti-'+c.icon+'"></i> '+k[3]+'</div></div>';}).join('');
+        return '<div class="kcol" style="border-top:3px solid var(--'+c.variant+')"><div class="kcol-head"><div class="t"><span class="dot" style="background:var(--'+c.variant+')"></span> '+c.name+'</div><span class="pill p-'+c.variant+'">'+c.cards.length+'</span></div>'+cards+'</div>';
+      }).join('');
+      return '<div class="kanban">'+cols+'</div>';
+    }
+    var kpis=d.kpis.map(function(k){return '<div class="kpi"><div class="lbl">'+k[0]+'</div><div class="val">'+k[1]+'</div></div>';}).join('');
+    var th=d.cols.map(function(c){return '<th>'+c+'</th>';}).join('');
+    var tr=d.rows.map(function(r){return '<tr>'+r.map(function(c){return Array.isArray(c)?'<td><span class="pill p-'+c[1]+'">'+c[0]+'</span></td>':'<td>'+c+'</td>';}).join('')+'</tr>';}).join('');
+    return '<div class="grid kpis" style="margin-bottom:14px">'+kpis+'</div><div class="card"><table class="tbl"><thead><tr>'+th+'</tr></thead><tbody>'+tr+'</tbody></table></div>';
+  }
+  function renderModelView(id,dir){var m=models[id];var body=document.getElementById('mb-'+id);if(body)body.innerHTML=modelBody(m[dir]);}
+  function renderModel(id){
+    var m=models[id];var sec=document.getElementById('s-'+id);if(!m||!sec||sec.dataset.done)return;
+    var dirs=[];
+    if(m.entrada)dirs.push(['entrada','ti-arrow-down-left','Entrada']);
+    if(m.saida)dirs.push(['saida','ti-arrow-up-right','Saída']);
+    var def=dirs[0][0];
+    var control;
+    if(dirs.length>1){
+      control='<div class="seg" data-seg="'+id+'">'+dirs.map(function(x){return '<button data-dir="'+x[0]+'"'+(x[0]===def?' class="on"':'')+'><i class="ti '+x[1]+'"></i> '+x[2]+'</button>';}).join('')+'</div>';
+    }else{
+      control='<span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted)"><i class="ti '+dirs[0][1]+'"></i> Somente '+dirs[0][2].toLowerCase()+'</span>';
+    }
+    var filtersBar='<div class="filters">'+
+      '<label>Filial<select><option>Todas as filiais</option><option>Ferreira Costa LTDA (matriz)</option><option>Filial Recife</option><option>Filial Fortaleza</option><option>FC Transportes</option><option>FC Distribuição</option></select></label>'+
+      '<label>De<input type="date" value="2026-06-01"></label>'+
+      '<label>Até<input type="date" value="2026-06-30"></label>'+
+      '<button class="btn sm" data-toast="Outros filtros: status, CFOP, cClassTrib, NCM/NBS, parceiro e faixa de valor."><i class="ti ti-adjustments"></i> Outros</button>'+
+      '<button class="btn sm primary" data-toast="Filtros aplicados."><i class="ti ti-filter"></i> Aplicar</button>'+
+    '</div>';
+    sec.innerHTML='<div class="page-head"><div><div class="eyebrow">DF-e</div><h1>'+m.label+'</h1><div class="desc">Documentos do modelo · filtro por direção</div></div>'+
+      '<div class="head-actions">'+control+'</div></div>'+filtersBar+'<div class="model-body" id="mb-'+id+'"></div>';
+    renderModelView(id,def);sec.dataset.done='1';
+  }
+  Object.keys(models).forEach(renderModel);
+  document.addEventListener('click',function(e){
+    var b=e.target.closest&&e.target.closest('.seg[data-seg] button');if(!b)return;
+    var seg=b.parentElement;seg.querySelectorAll('button').forEach(function(x){x.classList.toggle('on',x===b);});
+    renderModelView(seg.getAttribute('data-seg'),b.getAttribute('data-dir'));
+  });
+
+  /* navigation (suporta menu aninhado) */
+  function show(id){
+    document.querySelectorAll('.screen').forEach(function(s){s.classList.toggle('active',s.id==='s-'+id);});
+    nav.querySelectorAll('a[data-screen]').forEach(function(a){a.classList.toggle('active',a.getAttribute('data-screen')===id);});
+    nav.querySelectorAll('.submenu,.subsubmenu').forEach(function(m){m.classList.remove('open');});
+    nav.querySelectorAll('.nav-parent,.sub-parent').forEach(function(b){b.classList.remove('open');});
+    var link=nav.querySelector('a[data-screen="'+id+'"]');
+    if(link){var el=link.parentElement;
+      while(el&&el!==nav){
+        if(el.classList&&(el.classList.contains('submenu')||el.classList.contains('subsubmenu'))){
+          el.classList.add('open');
+          var ctrl=el.previousElementSibling;
+          if(ctrl&&ctrl.classList&&(ctrl.classList.contains('nav-parent')||ctrl.classList.contains('sub-parent')))ctrl.classList.add('open');
+        }
+        el=el.parentElement;
+      }
+    }
+    sidebar.classList.remove('open');scrim.classList.remove('show');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  nav.querySelectorAll('a[data-screen]').forEach(function(a){a.addEventListener('click',function(){show(a.getAttribute('data-screen'));});});
+  nav.querySelectorAll('.nav-parent,.sub-parent').forEach(function(b){b.addEventListener('click',function(e){
+    e.stopPropagation();
+    var menu=b.nextElementSibling;
+    if(menu&&(menu.classList.contains('submenu')||menu.classList.contains('subsubmenu'))){
+      var open=menu.classList.toggle('open');b.classList.toggle('open',open);
+    }
+  });});
+
+  document.getElementById('hamb').addEventListener('click',function(){sidebar.classList.toggle('open');scrim.classList.toggle('show');});
+  scrim.addEventListener('click',function(){sidebar.classList.remove('open');scrim.classList.remove('show');});
+
+  /* theme */
+  var themeBtn=document.getElementById('themeBtn');var cfgTheme=document.getElementById('cfgTheme');
+  function applyTheme(t){root.setAttribute('data-theme',t);themeBtn.innerHTML='<i class="ti ti-'+(t==='dark'?'sun':'moon')+'"></i>';if(cfgTheme)cfgTheme.classList.toggle('on',t==='dark');try{localStorage.setItem('argus-theme',t);}catch(e){}}
+  function toggleTheme(){applyTheme(root.getAttribute('data-theme')==='dark'?'light':'dark');}
+  themeBtn.addEventListener('click',toggleTheme);if(cfgTheme)cfgTheme.addEventListener('click',toggleTheme);
+  var saved;try{saved=localStorage.getItem('argus-theme');}catch(e){}
+  applyTheme(saved||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));
+
+  /* split bars */
+  var arr=document.getElementById('arr');
+  if(arr){[['Pix',41],['Cartão',28],['Boleto',19],['TED',12]].forEach(function(a){
+    var row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:10px;margin-bottom:9px;font-size:12.5px';
+    row.innerHTML='<span style="width:64px;color:var(--text-2)">'+a[0]+'</span><span style="flex:1;height:8px;background:var(--surface-1);border-radius:20px;overflow:hidden"><span style="display:block;width:'+a[1]+'%;height:100%;background:var(--accent);border-radius:20px"></span></span><span style="width:36px;text-align:right;color:var(--text-2)">'+a[1]+'%</span>';
+    arr.appendChild(row);});}
+
+  document.querySelectorAll('[data-toggle]').forEach(function(t){t.addEventListener('click',function(){t.classList.toggle('on');});});
+
+  var toast=document.getElementById('toast');var tmr;
+  document.body.addEventListener('click',function(e){var el=e.target.closest('[data-toast]');if(el){toast.textContent=el.getAttribute('data-toast');toast.classList.add('show');clearTimeout(tmr);tmr=setTimeout(function(){toast.classList.remove('show');},2600);}});
+})();
+</script>
+</body>
+</html>

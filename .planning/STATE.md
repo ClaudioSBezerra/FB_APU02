@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-12)
 Phase: 3 of 4 (Debito Tecnico) — IN PROGRESS
 Plan: 1/5 complete
 Status: Phase 3 Plan 01 (DEBT-01) concluido; aguardando planos 02-05
-Last activity: 2026-05-14 - Completed quick task 260514-n0j: Refresh automático de mv_malha_fina_resumo + covering indexes + LEFT JOIN dashboard
+Last activity: 2026-06-30 - Completed quick task 260630-hjd: Módulo de demo "Portal Fiscal CBS/IBS (Argus)" para apresentação ao sponsor
 
 Progress: [██████████] 100%
 
@@ -88,6 +88,7 @@ None.
 | 260515-gh9 | implementação completa da feature Pagamentos a Fornecedores | 2026-05-15 | 720633b | [260515-gh9-implementa-o-completa-da-feature-pagamen](.planning/quick/260515-gh9-implementa-o-completa-da-feature-pagamen/) |
 | 260515-j7y | RFB Pgtos Fornecedores — Painel de Conciliação CBS | 2026-05-15 | 5ffb203 | [260515-j7y-rfb-pgtos-fornecedores-painel-de-concili](.planning/quick/260515-j7y-rfb-pgtos-fornecedores-painel-de-concili/) |
 | 260516-da8 | Abortar solicitações RFB travadas + auto-abort scheduler > 5h | 2026-05-16 | 7f6d82d | [260516-da8-abortar-rfb-travadas](.planning/quick/260516-da8-abortar-rfb-travadas/) |
+| 260630-hjd | Módulo de demo "Portal Fiscal CBS/IBS (Argus)" — HTML mock estático via iframe, para apresentação ao sponsor | 2026-06-30 | b61a0d3 | [260630-hjd-argus-portal-fiscal-demo](.planning/quick/260630-hjd-argus-portal-fiscal-demo/) |
 
 ### Blockers/Concerns
 
