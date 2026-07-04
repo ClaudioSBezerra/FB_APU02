@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"fb_apu02/services"
 )
 
 // ---------------------------------------------------------------------------
@@ -283,18 +285,14 @@ func NfeEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 			}
 			if inserted {
 				result.Importados++
-				upsertParceiro(db, companyID, nfe.EmitCNPJ, nfe.EmitNome)
+				upsertParceiroDB(db, companyID, nfe.EmitCNPJ, nfe.EmitNome)
 			} else {
 				result.Ignorados++
 			}
 		}
 
 		if result.Importados > 0 {
-			go func() {
-				if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo"); err != nil {
-					log.Printf("[NFeEntradasUpload] Aviso: refresh mv_malha_fina_resumo: %v", err)
-				}
-			}()
+			services.RequestMVRefresh(db, "mv_malha_fina_resumo")
 		}
 
 		json.NewEncoder(w).Encode(result)
@@ -359,18 +357,14 @@ func NfeSaidasUploadHandler(db *sql.DB) http.HandlerFunc {
 			}
 			if inserted {
 				result.Importados++
-				upsertParceiro(db, companyID, nfe.DestCNPJCPF, nfe.DestNome)
+				upsertParceiroDB(db, companyID, nfe.DestCNPJCPF, nfe.DestNome)
 			} else {
 				result.Ignorados++
 			}
 		}
 
 		if result.Importados > 0 {
-			go func() {
-				if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo"); err != nil {
-					log.Printf("[NFeSaidasUpload] Aviso: refresh mv_malha_fina_resumo: %v", err)
-				}
-			}()
+			services.RequestMVRefresh(db, "mv_malha_fina_resumo")
 		}
 
 		json.NewEncoder(w).Encode(result)
@@ -435,18 +429,14 @@ func CteEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 			}
 			if inserted {
 				result.Importados++
-				upsertParceiro(db, companyID, cte.EmitCNPJ, cte.EmitNome)
+				upsertParceiroDB(db, companyID, cte.EmitCNPJ, cte.EmitNome)
 			} else {
 				result.Ignorados++
 			}
 		}
 
 		if result.Importados > 0 {
-			go func() {
-				if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo"); err != nil {
-					log.Printf("[CTeEntradasUpload] Aviso: refresh mv_malha_fina_resumo: %v", err)
-				}
-			}()
+			services.RequestMVRefresh(db, "mv_malha_fina_resumo")
 		}
 
 		json.NewEncoder(w).Encode(result)
