@@ -89,6 +89,7 @@ None.
 | 260515-j7y | RFB Pgtos Fornecedores — Painel de Conciliação CBS | 2026-05-15 | 5ffb203 | [260515-j7y-rfb-pgtos-fornecedores-painel-de-concili](.planning/quick/260515-j7y-rfb-pgtos-fornecedores-painel-de-concili/) |
 | 260516-da8 | Abortar solicitações RFB travadas + auto-abort scheduler > 5h | 2026-05-16 | 7f6d82d | [260516-da8-abortar-rfb-travadas](.planning/quick/260516-da8-abortar-rfb-travadas/) |
 | 260630-hjd | Módulo de demo "Portal Fiscal CBS/IBS (Argus)" — HTML mock estático via iframe, para apresentação ao sponsor | 2026-06-30 | b61a0d3 | [260630-hjd-argus-portal-fiscal-demo](.planning/quick/260630-hjd-argus-portal-fiscal-demo/) |
+| 260704-p7x | Perf alto volume: batch ERP Bridge em transação + prepared stmts, debounce refresh MV, migração 113 (índices+autovacuum), retenção opt-in raw_json | 2026-07-04 | 22a98ff | [260704-p7x-perf-alto-volume](.planning/quick/260704-p7x-perf-alto-volume/) |
 
 ### Blockers/Concerns
 
