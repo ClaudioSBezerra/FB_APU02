@@ -91,6 +91,7 @@ None.
 | 260630-hjd | Módulo de demo "Portal Fiscal CBS/IBS (Argus)" — HTML mock estático via iframe, para apresentação ao sponsor | 2026-06-30 | b61a0d3 | [260630-hjd-argus-portal-fiscal-demo](.planning/quick/260630-hjd-argus-portal-fiscal-demo/) |
 | 260704-p7x | Perf alto volume: batch ERP Bridge em transação + prepared stmts, debounce refresh MV, migração 113 (índices+autovacuum), retenção opt-in raw_json | 2026-07-04 | 22a98ff | [260704-p7x-perf-alto-volume](.planning/quick/260704-p7x-perf-alto-volume/) |
 | 260704-q3f | Fix "Abortar" em requests RFB Travado: status 'pending' incluído no abort manual, auto-abort 5h e migração 114 one-shot | 2026-07-04 | fadcc26 | [260704-q3f-fix-abortar-rfb-pending](.planning/quick/260704-q3f-fix-abortar-rfb-pending/) |
+| 260704-s5k | Hardening de código (aditivo): política de senha no cadastro, rate limit reset/change-password, MaxBytesReader nos uploads, aviso JWT_SECRET curto | 2026-07-04 | 353d7ab | [260704-s5k-hardening-codigo](.planning/quick/260704-s5k-hardening-codigo/) |
 
 ### Blockers/Concerns
 
