@@ -287,7 +287,7 @@ func AbortStuckRFBRequests(db *sql.DB) {
 		    error_code    = 'TIMEOUT',
 		    error_message = 'Solicitação abortada automaticamente: sem resposta por mais de 5 horas',
 		    updated_at    = CURRENT_TIMESTAMP
-		WHERE status IN ('requested', 'webhook_received', 'downloading', 'reprocessing')
+		WHERE status IN ('pending', 'requested', 'webhook_received', 'downloading', 'reprocessing')
 		  AND updated_at < NOW() - INTERVAL '5 hours'
 	`)
 	if err != nil {

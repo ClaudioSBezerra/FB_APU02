@@ -319,7 +319,7 @@ func AbortRequestHandler(db *sql.DB) http.HandlerFunc {
 			    error_message = 'Solicitação abortada manualmente pelo usuário',
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE id = $1 AND company_id = $2
-			  AND status IN ('requested', 'webhook_received', 'downloading', 'reprocessing')
+			  AND status IN ('pending', 'requested', 'webhook_received', 'downloading', 'reprocessing')
 		`, req.RequestID, companyID)
 		if err != nil {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao abortar solicitação", err, "[AbortRequest]")
