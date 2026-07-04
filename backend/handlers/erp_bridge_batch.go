@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"fb_apu02/services"
 )
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,24 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 
 		result := batchResult{ErrorDetails: []string{}}
 
+		// Transação única para o lote inteiro: um fsync no commit em vez de
+		// 2 autocommits por documento. SAVEPOINT por documento preserva a
+		// semântica de erro individual (doc inválido conta erro, lote segue).
+		tx, err := db.Begin()
+		if err != nil {
+			log.Printf("[BatchImport] begin tx: %v", err)
+			http.Error(w, `{"error":"erro interno"}`, http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
+		stmts, err := prepareBatchStmts(tx)
+		if err != nil {
+			log.Printf("[BatchImport] prepare stmts: %v", err)
+			http.Error(w, `{"error":"erro interno"}`, http.StatusInternalServerError)
+			return
+		}
+
 		for i, doc := range req.Documents {
 			if len(doc.Chave) != 44 {
 				result.Errors++
@@ -139,20 +159,23 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 			var inserted bool
 			var insertErr error
 
+			tx.Exec("SAVEPOINT doc_sp")
+
 			switch {
 			case direct == "2":
 				// Saída → nfe_saidas (emit_cnpj = filial emitente)
-				inserted, insertErr = batchInsertNFeSaida(db, companyID, doc, modelo)
+				inserted, insertErr = batchInsertNFeSaida(stmts.saida, companyID, doc, modelo)
 
 			case direct == "1" && modelosNFeEntrada[modelo]:
 				// Entrada NF-e → nfe_entradas (forn_cnpj = emitente, dest = filial)
-				inserted, insertErr = batchInsertNFeEntrada(db, companyID, doc, modelo)
+				inserted, insertErr = batchInsertNFeEntrada(stmts.entrada, companyID, doc, modelo)
 
 			case direct == "1" && modelosCTeEntrada[modelo]:
 				// Entrada CT-e → cte_entradas (emit_cnpj = transportadora, dest = filial)
-				inserted, insertErr = batchInsertCTeEntrada(db, companyID, doc, modelo)
+				inserted, insertErr = batchInsertCTeEntrada(stmts.cte, companyID, doc, modelo)
 
 			default:
+				tx.Exec("RELEASE SAVEPOINT doc_sp")
 				result.Errors++
 				result.ErrorDetails = append(result.ErrorDetails,
 					"doc["+strconv.Itoa(i)+"]: combinação DIRECT="+direct+"/modelo="+modelo+" desconhecida")
@@ -160,45 +183,75 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 			}
 
 			if insertErr != nil {
+				// Desfaz só este documento; a transação segue válida para os próximos
+				tx.Exec("ROLLBACK TO SAVEPOINT doc_sp")
+				tx.Exec("RELEASE SAVEPOINT doc_sp")
 				log.Printf("[BatchImport] INSERT error [%s]: %v", doc.Chave, insertErr)
 				result.Errors++
 				result.ErrorDetails = append(result.ErrorDetails,
 					"doc["+strconv.Itoa(i)+"] "+doc.Chave+": "+insertErr.Error())
 			} else {
+				tx.Exec("RELEASE SAVEPOINT doc_sp")
 				if inserted {
 					result.Inserted++
 				} else {
 					result.Ignored++
 				}
-				// Grava parceiro na tabela de lookup independente de inserção nova
+				// Grava parceiro na tabela de lookup independente de inserção nova.
+				// Savepoint próprio: falha no parceiro não pode abortar a transação
+				// nem desfazer o insert do documento (erro era só logado antes).
 				if doc.NomeParceiro != "" {
-					if direct == "1" {
-						upsertParceiro(db, companyID, doc.EmitCNPJ, doc.NomeParceiro)
-					} else {
-						upsertParceiro(db, companyID, doc.DestCNPJ, doc.NomeParceiro)
+					cnpjParceiro := doc.EmitCNPJ
+					if direct != "1" {
+						cnpjParceiro = doc.DestCNPJ
 					}
+					tx.Exec("SAVEPOINT parc_sp")
+					if perr := upsertParceiro(stmts.parceiro, companyID, cnpjParceiro, doc.NomeParceiro); perr != nil {
+						tx.Exec("ROLLBACK TO SAVEPOINT parc_sp")
+					}
+					tx.Exec("RELEASE SAVEPOINT parc_sp")
 				}
 			}
 		}
 
+		if err := tx.Commit(); err != nil {
+			log.Printf("[BatchImport] commit: %v", err)
+			http.Error(w, `{"error":"falha ao gravar lote"}`, http.StatusInternalServerError)
+			return
+		}
+
 		log.Printf("[BatchImport] company=%s inserted=%d ignored=%d errors=%d",
 			companyID, result.Inserted, result.Ignored, result.Errors)
-		go func() {
-			if _, err := db.Exec("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_malha_fina_resumo"); err != nil {
-				log.Printf("[BatchImport] Aviso: refresh mv_malha_fina_resumo: %v", err)
-			}
-		}()
+		services.RequestMVRefresh(db, "mv_malha_fina_resumo")
 		json.NewEncoder(w).Encode(result)
 	}
 }
 
-func batchInsertNFeSaida(db *sql.DB, companyID string, doc batchDoc, modelo string) (bool, error) {
-	modInt, _ := strconv.Atoi(modelo)
-	cancelado := doc.Cancelado
-	if cancelado != "S" { cancelado = "N" }
-	tipoCFOP := strings.TrimSpace(doc.TipoCFOP)
-	cfopCode := strings.TrimSpace(doc.CFOP)
-	res, err := db.Exec(`
+// batchStmts agrupa os prepared statements do lote — preparados uma única vez
+// por transação, eliminando parse/plan por documento.
+type batchStmts struct {
+	saida, entrada, cte, parceiro *sql.Stmt
+}
+
+func prepareBatchStmts(tx *sql.Tx) (*batchStmts, error) {
+	var s batchStmts
+	var err error
+	if s.saida, err = tx.Prepare(sqlBatchNFeSaida); err != nil {
+		return nil, err
+	}
+	if s.entrada, err = tx.Prepare(sqlBatchNFeEntrada); err != nil {
+		return nil, err
+	}
+	if s.cte, err = tx.Prepare(sqlBatchCTeEntrada); err != nil {
+		return nil, err
+	}
+	if s.parceiro, err = tx.Prepare(sqlBatchParceiro); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+const sqlBatchNFeSaida = `
 		INSERT INTO nfe_saidas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
@@ -241,7 +294,15 @@ func batchInsertNFeSaida(db *sql.DB, companyID string, doc batchDoc, modelo stri
 				nfe_saidas.tipo_cfop,
 				'O'
 			),
-			cfop = COALESCE(NULLIF($29,''), nfe_saidas.cfop)`,
+			cfop = COALESCE(NULLIF($29,''), nfe_saidas.cfop)`
+
+func batchInsertNFeSaida(stmt *sql.Stmt, companyID string, doc batchDoc, modelo string) (bool, error) {
+	modInt, _ := strconv.Atoi(modelo)
+	cancelado := doc.Cancelado
+	if cancelado != "S" { cancelado = "N" }
+	tipoCFOP := strings.TrimSpace(doc.TipoCFOP)
+	cfopCode := strings.TrimSpace(doc.CFOP)
+	res, err := stmt.Exec(
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
 		doc.EmitCNPJ, doc.DestCNPJ,
@@ -259,14 +320,7 @@ func batchInsertNFeSaida(db *sql.DB, companyID string, doc batchDoc, modelo stri
 	return n > 0, nil
 }
 
-func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo string) (bool, error) {
-	modInt, _ := strconv.Atoi(modelo)
-	cancelado := doc.Cancelado
-	if cancelado != "S" { cancelado = "N" }
-	// tipo_cfop: usa valor explícito do payload; se vazio, faz lookup na tabela cfop via SQL
-	tipoCFOP := strings.TrimSpace(doc.TipoCFOP)
-	cfopCode := strings.TrimSpace(doc.CFOP)
-	res, err := db.Exec(`
+const sqlBatchNFeEntrada = `
 		INSERT INTO nfe_entradas (
 			company_id, chave_nfe, modelo, serie, numero_nfe,
 			data_emissao, data_autorizacao, mes_ano,
@@ -309,7 +363,16 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 				nfe_entradas.tipo_cfop,
 				'C'
 			),
-			cfop = COALESCE(NULLIF($29,''), nfe_entradas.cfop)`,
+			cfop = COALESCE(NULLIF($29,''), nfe_entradas.cfop)`
+
+func batchInsertNFeEntrada(stmt *sql.Stmt, companyID string, doc batchDoc, modelo string) (bool, error) {
+	modInt, _ := strconv.Atoi(modelo)
+	cancelado := doc.Cancelado
+	if cancelado != "S" { cancelado = "N" }
+	// tipo_cfop: usa valor explícito do payload; se vazio, faz lookup na tabela cfop via SQL
+	tipoCFOP := strings.TrimSpace(doc.TipoCFOP)
+	cfopCode := strings.TrimSpace(doc.CFOP)
+	res, err := stmt.Exec(
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
 		doc.EmitCNPJ, doc.DestCNPJ,
@@ -327,11 +390,7 @@ func batchInsertNFeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 	return n > 0, nil
 }
 
-func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo string) (bool, error) {
-	modInt, _ := strconv.Atoi(modelo)
-	cancelado := doc.Cancelado
-	if cancelado != "S" { cancelado = "N" }
-	res, err := db.Exec(`
+const sqlBatchCTeEntrada = `
 		INSERT INTO cte_entradas (
 			company_id, chave_cte, modelo, serie, numero_cte,
 			data_emissao, data_autorizacao, mes_ano,
@@ -348,7 +407,13 @@ func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 			$17
 		)
 		ON CONFLICT ON CONSTRAINT uq_cte_entradas_company_chave
-		DO UPDATE SET cancelado = EXCLUDED.cancelado`,
+		DO UPDATE SET cancelado = EXCLUDED.cancelado`
+
+func batchInsertCTeEntrada(stmt *sql.Stmt, companyID string, doc batchDoc, modelo string) (bool, error) {
+	modInt, _ := strconv.Atoi(modelo)
+	cancelado := doc.Cancelado
+	if cancelado != "S" { cancelado = "N" }
+	res, err := stmt.Exec(
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,
 		doc.EmitCNPJ, doc.DestCNPJ,
@@ -363,17 +428,31 @@ func batchInsertCTeEntrada(db *sql.DB, companyID string, doc batchDoc, modelo st
 	return n > 0, nil
 }
 
+const sqlBatchParceiro = `
+	INSERT INTO parceiros (company_id, cnpj, nome) VALUES ($1, $2, $3)
+	ON CONFLICT (company_id, cnpj)
+	DO UPDATE SET nome = EXCLUDED.nome
+	WHERE parceiros.nome = '' OR parceiros.nome IS NULL`
+
 // upsertParceiro grava/atualiza CNPJ→nome na tabela parceiros (lookup cross-document).
-func upsertParceiro(db *sql.DB, companyID, cnpj, nome string) {
+// Retorna o erro para o chamador decidir o rollback do savepoint.
+func upsertParceiro(stmt *sql.Stmt, companyID, cnpj, nome string) error {
+	if strings.TrimSpace(cnpj) == "" || strings.TrimSpace(nome) == "" {
+		return nil
+	}
+	if _, err := stmt.Exec(companyID, strings.TrimSpace(cnpj), strings.TrimSpace(nome)); err != nil {
+		log.Printf("[ERPBridgeBatch] Erro ao upsert parceiro (cnpj=%s): %v", strings.TrimSpace(cnpj), err)
+		return err
+	}
+	return nil
+}
+
+// upsertParceiroDB é a variante sem transação (fluxos de upload XML, um doc por vez).
+func upsertParceiroDB(db *sql.DB, companyID, cnpj, nome string) {
 	if strings.TrimSpace(cnpj) == "" || strings.TrimSpace(nome) == "" {
 		return
 	}
-	if _, err := db.Exec(`
-		INSERT INTO parceiros (company_id, cnpj, nome) VALUES ($1, $2, $3)
-		ON CONFLICT (company_id, cnpj)
-		DO UPDATE SET nome = EXCLUDED.nome
-		WHERE parceiros.nome = '' OR parceiros.nome IS NULL
-	`, companyID, strings.TrimSpace(cnpj), strings.TrimSpace(nome)); err != nil {
+	if _, err := db.Exec(sqlBatchParceiro, companyID, strings.TrimSpace(cnpj), strings.TrimSpace(nome)); err != nil {
 		log.Printf("[ERPBridgeBatch] Erro ao upsert parceiro (cnpj=%s): %v", strings.TrimSpace(cnpj), err)
 	}
 }
