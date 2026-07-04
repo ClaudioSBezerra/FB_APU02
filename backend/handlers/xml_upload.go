@@ -8,11 +8,24 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
 	"fb_apu02/services"
 )
+
+// maxUploadBytes limita o corpo total de uploads (multipart) para conter DoS de
+// disco/memória. Configurável via MAX_UPLOAD_BYTES (bytes); default 512 MiB —
+// generoso para importações de pastas de XML sem permitir corpos arbitrários.
+func maxUploadBytes() int64 {
+	if v := os.Getenv("MAX_UPLOAD_BYTES"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 512 << 20
+}
 
 // ---------------------------------------------------------------------------
 // XML structs — NF-e
@@ -251,6 +264,7 @@ func NfeEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes())
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			jsonErr(w, http.StatusBadRequest, "Erro ao ler multipart: "+err.Error())
 			return
@@ -323,6 +337,7 @@ func NfeSaidasUploadHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes())
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			jsonErr(w, http.StatusBadRequest, "Erro ao ler multipart: "+err.Error())
 			return
@@ -395,6 +410,7 @@ func CteEntradasUploadHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes())
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			jsonErr(w, http.StatusBadRequest, "Erro ao ler multipart: "+err.Error())
 			return

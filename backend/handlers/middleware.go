@@ -139,6 +139,8 @@ var (
 	LoginRL          = newRateLimiter(5, 15*time.Minute)
 	RegisterRL       = newRateLimiter(10, time.Hour)
 	ForgotPasswordRL = newRateLimiter(3, time.Hour)
+	ResetPasswordRL  = newRateLimiter(5, time.Hour)      // por IP
+	ChangePasswordRL = newRateLimiter(5, 15*time.Minute) // por userID
 )
 
 // Allow checks AND records one attempt. Returns false if limit is exceeded.

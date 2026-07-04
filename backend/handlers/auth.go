@@ -113,11 +113,18 @@ func getJWTSecret() []byte {
 
 // ValidateJWTSecret logs a warning (dev) or fatals (prod) if JWT_SECRET is not set.
 func ValidateJWTSecret() {
-	if os.Getenv("JWT_SECRET") == "" {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
 		if os.Getenv("DATABASE_URL") != "" {
 			log.Fatal("FATAL: JWT_SECRET not set — set it to a 32+ byte random value before deploying.")
 		}
 		log.Println("WARNING: JWT_SECRET not set — using insecure default (OK for local dev only).")
+		return
+	}
+	// Aviso (não-fatal) se o segredo for curto — não derruba prod caso o valor
+	// real já em uso seja curto, apenas sinaliza para rotação.
+	if len(secret) < 32 {
+		log.Printf("WARNING: JWT_SECRET tem apenas %d bytes — recomendado 32+ bytes aleatórios. Rotacione para um valor mais forte.", len(secret))
 	}
 }
 
@@ -463,6 +470,12 @@ func RegisterHandler(db *sql.DB) http.HandlerFunc {
 
 		if req.Email == "" || req.Password == "" || req.FullName == "" || req.CompanyName == "" {
 			http.Error(w, "Missing required fields", http.StatusBadRequest)
+			return
+		}
+
+		// Password policy — mínimo 8 caracteres, alinhado a reset/change password
+		if len(req.Password) < 8 {
+			http.Error(w, "A senha deve ter no mínimo 8 caracteres", http.StatusBadRequest)
 			return
 		}
 
@@ -877,6 +890,12 @@ type ResetPasswordRequest struct {
 // ResetPasswordHandler handles password reset with token
 func ResetPasswordHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if !ResetPasswordRL.Allow(GetClientIP(r)) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode("Muitas tentativas. Tente novamente mais tarde.")
+			return
+		}
 		var req ResetPasswordRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -1008,6 +1027,13 @@ func ChangePasswordHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		userID := claims["user_id"].(string)
+
+		// Rate limit por usuário — evita brute-force da senha atual numa sessão válida
+		if !ChangePasswordRL.Allow(userID) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]string{"error": "Muitas tentativas. Tente novamente mais tarde."})
+			return
+		}
 
 		var req struct {
 			CurrentPassword string `json:"current_password"`

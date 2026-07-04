@@ -51,6 +51,7 @@ func PagamentosFornecedoresImportHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes())
 		if err := r.ParseMultipartForm(10 << 20); err != nil {
 			jsonErr(w, http.StatusBadRequest, "Erro ao processar formulário: "+err.Error())
 			return
