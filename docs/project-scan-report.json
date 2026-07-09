@@ -1,0 +1,128 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {
+    "started": "2026-07-09T00:00:00Z",
+    "last_updated": "2026-07-09T01:00:00Z",
+    "completed": "2026-07-09T01:00:00Z"
+  },
+  "mode": "initial_scan",
+  "scan_level": "deep",
+  "project_root": "/home/claudiobezerra/projetos/FB_APU02",
+  "project_knowledge": "/home/claudiobezerra/projetos/FB_APU02/docs",
+  "completed_steps": [
+    {
+      "step": "step_0.5",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:00:00Z",
+      "summary": "Carregados requisitos de documentação para 12 tipos de projeto"
+    },
+    {
+      "step": "step_1",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:01:00Z",
+      "summary": "Classificado como monorepo multi-parte com 3 partes: backend (Go/backend), frontend (React/web), erp-bridge (Python/data)"
+    },
+    {
+      "step": "step_2",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:02:00Z",
+      "summary": "Documentação existente inventariada: 10 arquivos em docs/ (ARCHITECTURE.md, API_REFERENCE.md, COOLIFY_DEPLOY_GUIDE.md, etc.)"
+    },
+    {
+      "step": "step_3",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:03:00Z",
+      "summary": "Tech stack analisado: Go 1.22 + net/http + database/sql + lib/pq (backend); React 18.3 + TypeScript 5.2 + Vite 5.2 + Tailwind + Radix UI (frontend); Python 3 + oracledb + requests (erp-bridge)"
+    },
+    {
+      "step": "step_4",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:15:00Z",
+      "summary": "Deep scan: 88+ endpoints documentados, 30+ tabelas de DB, 44 páginas React, 46 componentes UI, 3 modos de integração (RFB, CGIBS, ERP Bridge)"
+    },
+    {
+      "step": "step_5",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:20:00Z",
+      "summary": "Árvore de fontes gerada: source-tree-analysis.md com estrutura completa anotada das 3 partes"
+    },
+    {
+      "step": "step_6",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:25:00Z",
+      "summary": "Guias de dev e deploy gerados: development-guide.md, deployment-guide.md"
+    },
+    {
+      "step": "step_7",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:30:00Z",
+      "summary": "Arquitetura de integração documentada: integration-architecture.md com 5 pontos de integração entre as 3 partes"
+    },
+    {
+      "step": "step_8",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:40:00Z",
+      "summary": "Docs de arquitetura gerados: architecture-backend.md, architecture-frontend.md, architecture-erp-bridge.md"
+    },
+    {
+      "step": "step_9",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:50:00Z",
+      "summary": "Docs de suporte gerados: project-overview.md, api-contracts-backend.md, data-models-backend.md, component-inventory-frontend.md"
+    },
+    {
+      "step": "step_10",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:55:00Z",
+      "summary": "Índice mestre gerado: index.md com navegação completa, quick reference para IA, fluxos críticos de negócio"
+    },
+    {
+      "step": "step_11",
+      "status": "completed",
+      "timestamp": "2026-07-09T00:58:00Z",
+      "summary": "Validação: todos os arquivos gerados e verificados. Nenhum item marcado como 'To be generated'."
+    },
+    {
+      "step": "step_12",
+      "status": "completed",
+      "timestamp": "2026-07-09T01:00:00Z",
+      "summary": "Workflow completo — 12 documentos gerados, state file finalizado"
+    }
+  ],
+  "current_step": "completed",
+  "project_types": [
+    {"part_id": "backend", "project_type_id": "backend", "display_name": "Backend Go API"},
+    {"part_id": "frontend", "project_type_id": "web", "display_name": "Frontend React SPA"},
+    {"part_id": "erp-bridge", "project_type_id": "data", "display_name": "ERP Bridge Python Daemon"}
+  ],
+  "repository_type": "monorepo",
+  "parts": [
+    {"part_id": "backend", "root_path": "backend/", "project_type_id": "backend"},
+    {"part_id": "frontend", "root_path": "frontend/", "project_type_id": "web"},
+    {"part_id": "erp-bridge", "root_path": "erp-bridge-aws/", "project_type_id": "data"}
+  ],
+  "findings": {
+    "project_classification": "monorepo, 3 partes, Go 1.22 + React 18.3 + Python 3",
+    "technology_stack": "Go net/http (sem framework), React SPA, PostgreSQL 15, oracledb thin mode",
+    "api_endpoints": "88+ endpoints documentados em api-contracts-backend.md",
+    "database_tables": "30+ tabelas documentadas em data-models-backend.md, 113 migrations",
+    "frontend_pages": "44 páginas React em component-inventory-frontend.md",
+    "integration_points": "5 pontos de integração em integration-architecture.md"
+  },
+  "outputs_generated": [
+    "project-scan-report.json",
+    "index.md",
+    "project-overview.md",
+    "architecture-backend.md",
+    "architecture-frontend.md",
+    "architecture-erp-bridge.md",
+    "api-contracts-backend.md",
+    "data-models-backend.md",
+    "component-inventory-frontend.md",
+    "integration-architecture.md",
+    "source-tree-analysis.md",
+    "development-guide.md",
+    "deployment-guide.md"
+  ],
+  "resume_instructions": "Workflow completo. Para atualizar: invocar /bmad-document-project e escolher 'Re-scan entire project'."
+}
