@@ -434,6 +434,25 @@ func main() {
 		handlers.AuthMiddleware(handlers.UpdateRFBScheduleHandler(database), "")(w, r)
 	})
 
+	// SAP Credentials (admin-only — ver Story 1.1)
+	http.HandleFunc("/api/sap/credentials", func(w http.ResponseWriter, r *http.Request) {
+		database := getDB()
+		if database == nil {
+			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			handlers.AuthMiddleware(handlers.GetSAPCredentialHandler(database), "admin")(w, r)
+		case http.MethodPost:
+			handlers.AuthMiddleware(handlers.SaveSAPCredentialHandler(database), "admin")(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	http.HandleFunc("/api/sap/credentials/test", withAuth(handlers.TestSAPConnectionHandler, "admin"))
+	http.HandleFunc("/api/sap/sync-runs", withAuth(handlers.SAPSyncRunsListHandler, "admin"))
+
 	// RFB Apuração
 	http.HandleFunc("/api/rfb/apuracao/solicitar", withAuth(handlers.SolicitarApuracaoHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/download", withAuth(handlers.DownloadManualHandler, ""))

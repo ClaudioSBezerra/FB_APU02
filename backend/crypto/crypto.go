@@ -1,4 +1,4 @@
-package handlers
+package crypto
 
 import (
 	"crypto/aes"

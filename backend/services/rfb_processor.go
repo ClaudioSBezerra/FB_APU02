@@ -335,6 +335,10 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	log.Printf("[RFB Processor] Request %s %s: %d debits (%d corrente, %d ajuste, %d extemporaneo, %d errors), CBS total: %.2f",
 		requestID, finalStatus, totalDebitos, totalCorrente, totalAjuste, totalExtemporaneo, insertErrors, valorTotal)
 
+	if finalStatus == "completed" {
+		go TriggerSAPSync(db, requestID)
+	}
+
 	return nil
 }
 
@@ -643,6 +647,7 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	}
 
 	updateRequestStatus(db, requestID, "completed")
+	go TriggerSAPSync(db, requestID)
 
 	log.Printf("[RFB Reprocess] ============================================================")
 	if insertErrors > 0 {

@@ -112,6 +112,8 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Credenciais RFB',    path: '/rfb/credenciais',    adminOnly: true },
       { label: 'Credenciais CGIBS', path: '/cgibs/credenciais',  adminOnly: true },
       { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',  adminOnly: true },
+      { label: 'Credenciais SAP',   path: '/config/sap-credenciais', adminOnly: true },
+      { label: 'Sincronizações SAP', path: '/config/sap-sincronizacoes', adminOnly: true },
       { label: 'Usuários',          path: '/config/usuarios',        adminOnly: true },
       { label: 'Atividade',         path: '/config/user-activity',   adminOnly: true },
       { label: 'Limpeza de Base',    path: '/config/limpar-dados', danger: true, adminOnly: true },

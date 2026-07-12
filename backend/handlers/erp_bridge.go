@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"fb_apu02/crypto"
+
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -130,11 +132,11 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 					cfg.OracleDsn = oracleDsn.String
 				}
 				if oracleUsuario.Valid {
-					cfg.OracleUsuario = DecryptFieldWithFallback(oracleUsuario.String)
+					cfg.OracleUsuario = crypto.DecryptFieldWithFallback(oracleUsuario.String)
 				}
 				cfg.OracleSenhaSet = oracleSenha.Valid && oracleSenha.String != ""
 				if apiKey.Valid && apiKey.String != "" {
-					cfg.APIKey = DecryptFieldWithFallback(apiKey.String)
+					cfg.APIKey = crypto.DecryptFieldWithFallback(apiKey.String)
 				}
 				// Daemon está online se fez heartbeat nos últimos 3 minutos
 				if cfg.DaemonLastSeen != nil {
@@ -181,21 +183,21 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				}
 			}
 			if req.FBTaxPassword != nil && *req.FBTaxPassword != "" {
-				if enc, encErr := EncryptField(*req.FBTaxPassword); encErr == nil {
+				if enc, encErr := crypto.EncryptField(*req.FBTaxPassword); encErr == nil {
 					if _, err := db.Exec(`UPDATE erp_bridge_config SET fbtax_password = $2 WHERE company_id = $1`, companyID, enc); err != nil {
 						log.Printf("[ERPBridge] Erro ao atualizar fbtax_password: %v", err)
 					}
 				}
 			}
 			if req.OracleUsuario != nil && *req.OracleUsuario != "" {
-				if enc, encErr := EncryptField(*req.OracleUsuario); encErr == nil {
+				if enc, encErr := crypto.EncryptField(*req.OracleUsuario); encErr == nil {
 					if _, err := db.Exec(`UPDATE erp_bridge_config SET oracle_usuario = $2 WHERE company_id = $1`, companyID, enc); err != nil {
 						log.Printf("[ERPBridge] Erro ao atualizar oracle_usuario: %v", err)
 					}
 				}
 			}
 			if req.OracleSenha != nil && *req.OracleSenha != "" {
-				if enc, encErr := EncryptField(*req.OracleSenha); encErr == nil {
+				if enc, encErr := crypto.EncryptField(*req.OracleSenha); encErr == nil {
 					if _, err := db.Exec(`UPDATE erp_bridge_config SET oracle_senha = $2 WHERE company_id = $1`, companyID, enc); err != nil {
 						log.Printf("[ERPBridge] Erro ao atualizar oracle_senha: %v", err)
 					}
@@ -576,7 +578,7 @@ func ERPBridgeGenerateAPIKeyHandler(db *sql.DB) http.HandlerFunc {
 		key := hex.EncodeToString(raw)
 		hash := sha256.Sum256([]byte(key))
 		hashHex := hex.EncodeToString(hash[:])
-		enc, encErr := EncryptField(key)
+		enc, encErr := crypto.EncryptField(key)
 		if encErr != nil {
 			http.Error(w, "erro ao criptografar chave", http.StatusInternalServerError)
 			return
@@ -637,19 +639,19 @@ func ERPBridgeCredentialsHandler(db *sql.DB) http.Handler {
 			result["fbtax_email"] = fbtaxEmail.String
 		}
 		if fbtaxPassword.Valid && fbtaxPassword.String != "" {
-			result["fbtax_password"] = DecryptFieldWithFallback(fbtaxPassword.String)
+			result["fbtax_password"] = crypto.DecryptFieldWithFallback(fbtaxPassword.String)
 		}
 		if oracleUsuario.Valid && oracleUsuario.String != "" {
-			result["oracle_usuario"] = DecryptFieldWithFallback(oracleUsuario.String)
+			result["oracle_usuario"] = crypto.DecryptFieldWithFallback(oracleUsuario.String)
 		}
 		if oracleSenha.Valid && oracleSenha.String != "" {
-			result["oracle_senha"] = DecryptFieldWithFallback(oracleSenha.String)
+			result["oracle_senha"] = crypto.DecryptFieldWithFallback(oracleSenha.String)
 		}
 		if erpType.Valid {
 			result["erp_type"] = erpType.String
 		}
 		if oracleDsn.Valid && oracleDsn.String != "" {
-			result["oracle_dsn"] = DecryptFieldWithFallback(oracleDsn.String)
+			result["oracle_dsn"] = crypto.DecryptFieldWithFallback(oracleDsn.String)
 		}
 		json.NewEncoder(w).Encode(result)
 	})

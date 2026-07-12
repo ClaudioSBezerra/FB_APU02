@@ -54,6 +54,7 @@ erp-bridge-aws/config.yaml
 # Compiled binaries
 backend/fb_apu02
 backend/fb_apu01
+sap-mock-server/sap-mock-server
 
 # Debug tools (local only — contain dev credentials)
 backend/tools/

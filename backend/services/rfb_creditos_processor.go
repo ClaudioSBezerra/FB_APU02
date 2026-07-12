@@ -324,6 +324,7 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 	}
 
 	updateRequestStatus(db, requestID, "completed")
+	go TriggerSAPSync(db, requestID)
 
 	log.Printf("[RFB Creditos] ============================================================")
 	if insertErrors > 0 {
@@ -470,6 +471,7 @@ func ReprocessarRawJSONCreditosRFB(db *sql.DB, requestID string) error {
 	}
 
 	updateRequestStatus(db, requestID, "completed")
+	go TriggerSAPSync(db, requestID)
 	log.Printf("[RFB Creditos Reprocess] CONCLUÍDO | %d créditos | status → completed", totalCreditos)
 	log.Printf("[RFB Creditos Reprocess] ============================================================")
 	return nil

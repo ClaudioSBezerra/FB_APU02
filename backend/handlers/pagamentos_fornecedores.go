@@ -240,13 +240,17 @@ func PagamentosFornecedoresImportHandler(db *sql.DB) http.HandlerFunc {
 				desc = row.descricao
 			}
 
+			// origem não é enviado aqui — a coluna assume o DEFAULT 'csv' (migration
+			// 118). O WHERE abaixo casa com esse default e isola a dedup do CSV da
+			// dedup de pagamentos de origem SAP (uq_pag_forn_sap_api), que usa uma
+			// chave diferente (num_doc_pagamento + bukrs) e não pode colidir com o CSV.
 			result, execErr := tx.Exec(`
 				INSERT INTO pagamentos_fornecedores
 					(company_id, chave_doc, tipo_doc, forn_cnpj, forn_nome,
 					 data_pagamento, valor_pagamento, num_doc_pagamento, descricao,
 					 mes_ano, import_id, importado_por)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12::uuid)
-				ON CONFLICT ON CONSTRAINT uq_pag_forn DO NOTHING`,
+				ON CONFLICT (company_id, chave_doc, data_pagamento, valor_pagamento) WHERE origem = 'csv' DO NOTHING`,
 				companyID, row.chaveDoc, row.tipoDoc, row.fornCNPJ, fornNome,
 				row.dataPagamento, row.valorPagamento, numDoc, desc,
 				row.mesAno, importID, userID,

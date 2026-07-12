@@ -9,6 +9,8 @@ import ApelidosFiliais from './pages/ApelidosFiliais'
 import GestaoAmbiente from './pages/GestaoAmbiente'
 import Managers from './pages/Managers'
 import RFBCredentials from './pages/RFBCredentials'
+import SAPCredentials from './pages/SAPCredentials'
+import SAPSyncHistory from './pages/SAPSyncHistory'
 import RFBApuracao from './pages/RFBApuracao'
 import RFBDebitos from './pages/RFBDebitos'
 import RFBCreditosCBS from './pages/RFBCreditosCBS'
@@ -221,6 +223,8 @@ function AppLayout() {
               <Route path="/config/user-activity"   element={<AdminRoute><UserActivity /></AdminRoute>} />
               <Route path="/config/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
               <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
+              <Route path="/config/sap-credenciais" element={<AdminRoute><SAPCredentials /></AdminRoute>} />
+              <Route path="/config/sap-sincronizacoes" element={<AdminRoute><SAPSyncHistory /></AdminRoute>} />
               <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
 
               {/* ERP Bridge */}

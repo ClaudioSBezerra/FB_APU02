@@ -211,6 +211,76 @@ func SendPasswordResetEmail(email, resetToken string) error {
 	return nil
 }
 
+// sendPlainAlertEmail é o helper compartilhado das duas funções de alerta de
+// sincronização SAP abaixo — corpo HTML simples (bem mais enxuto que os
+// templates elaborados de SendAIReportEmail, que não se aplicam aqui).
+func sendPlainAlertEmail(recipients []string, subject, bodyHTML string) error {
+	config := GetEmailConfig()
+	if config.Password == "" {
+		log.Printf("[Email Service] SMTP not configured. Skipping alert email to %v", recipients)
+		return fmt.Errorf("serviço de e-mail não configurado - configure SMTP_PASSWORD")
+	}
+
+	message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n%s",
+		config.From, strings.Join(recipients, ", "), subject, bodyHTML)
+
+	var err error
+	if config.Port == 465 {
+		err = sendMailSSL(config, recipients, []byte(message))
+	} else {
+		addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+		auth := smtp.PlainAuth("", config.Username, config.Password, config.Host)
+		err = smtp.SendMail(addr, auth, config.Username, recipients, []byte(message))
+	}
+	if err != nil {
+		log.Printf("[Email Service] Failed to send alert email to %v: %v", recipients, err)
+		return fmt.Errorf("falha ao enviar e-mail: %w", err)
+	}
+	log.Printf("[Email Service] Alert email sent successfully to %v", recipients)
+	return nil
+}
+
+// SendSAPSyncCredentialAlert alerta imediatamente (sem esperar N falhas) que a
+// credencial SAP de uma empresa foi rejeitada (401/403) — Story 2.4, AC #4.
+func SendSAPSyncCredentialAlert(recipients []string, companyName, bukrs, lastError string) error {
+	companyName = html.EscapeString(companyName)
+	bukrs = html.EscapeString(bukrs)
+	lastError = html.EscapeString(lastError)
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html><body style="font-family: Arial, sans-serif; color: #333;">
+<h2 style="color: #c0392b;">Falha de credencial na sincronização SAP</h2>
+<p>A sincronização de pagamentos SAP para a empresa <strong>%s</strong>, código de empresa (BUKRS) <strong>%s</strong>,
+foi rejeitada pelo SAP por um problema de credencial (401/403).</p>
+<p>As próximas apurações continuarão tentando sincronizar automaticamente — nenhum novo alerta será enviado até que
+uma tentativa seja concluída com sucesso e falhe novamente por credencial. Verifique e corrija a credencial em
+Configurações &gt; Credenciais SAP assim que possível.</p>
+<p style="color: #666; font-size: 13px;">Detalhe: %s</p>
+</body></html>`, companyName, bukrs, lastError)
+
+	return sendPlainAlertEmail(recipients, "FBTax Cloud - Falha de credencial SAP", body)
+}
+
+// SendSAPSyncFailureAlert alerta quando uma execução de sincronização SAP
+// atinge exatamente N falhas transitórias consecutivas (429/500 esgotados,
+// Story 2.2) para o mesmo BUKRS — Story 2.4, AC #3.
+func SendSAPSyncFailureAlert(recipients []string, companyName, bukrs string, consecutiveFailures int, lastError string) error {
+	companyName = html.EscapeString(companyName)
+	bukrs = html.EscapeString(bukrs)
+	lastError = html.EscapeString(lastError)
+
+	body := fmt.Sprintf(`<!DOCTYPE html>
+<html><body style="font-family: Arial, sans-serif; color: #333;">
+<h2 style="color: #d35400;">Falhas repetidas na sincronização SAP</h2>
+<p>A sincronização de pagamentos SAP para a empresa <strong>%s</strong>, código de empresa (BUKRS) <strong>%s</strong>,
+falhou <strong>%d vezes seguidas</strong> por erro transitório (rate limit/indisponibilidade do SAP).</p>
+<p>Verifique o histórico de execuções em Configurações &gt; Sincronizações SAP.</p>
+<p style="color: #666; font-size: 13px;">Última mensagem: %s</p>
+</body></html>`, companyName, bukrs, consecutiveFailures, lastError)
+
+	return sendPlainAlertEmail(recipients, "FBTax Cloud - Falhas repetidas na sincronização SAP", body)
+}
+
 // SendAIReportEmail sends AI-generated executive summary to company managers.
 // The email mirrors exactly what is displayed on screen: structured KPI data first,
 // AI narrative (commentary) at the bottom.
