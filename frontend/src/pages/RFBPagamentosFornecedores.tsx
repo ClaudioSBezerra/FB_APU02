@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight, Download, RefreshCw, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -33,6 +33,15 @@ interface ConciliacaoItem {
   situacao_credito: string | null;
   status_conciliacao: string;
   possivel_duplicidade: boolean;
+  // Story 3.2 — indicador de pagamento como evidência auxiliar (nunca altera
+  // status_conciliacao, que segue vindo só da RFB).
+  payment_status: string | null;
+  match_type: string | null;
+  fallback_ambiguous: boolean;
+  origem: string;
+  pagamento_cobre_valor_nota: boolean;
+  ultimo_status_busca: string | null;
+  ultima_tentativa_busca: string | null;
 }
 
 interface Parcela {
@@ -55,6 +64,65 @@ function formatDate(d: string | null | undefined): string {
   return new Date(d + 'T00:00:00').toLocaleDateString('pt-BR');
 }
 
+function formatDateTime(d: string | null | undefined): string {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function OrigemBadge({ origem }: { origem: string }) {
+  if (!origem) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium uppercase ${
+      origem === 'sap_api' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+    }`}>
+      {origem === 'sap_api' ? 'SAP' : 'CSV'}
+    </span>
+  );
+}
+
+// PaymentIndicator — Story 3.2: mensagem de evidência auxiliar, exibida junto
+// ao StatusBadge. NUNCA altera o status/cor do badge em si (FR-4) — é sempre
+// um texto complementar, nunca uma reclassificação visual do crédito.
+function PaymentIndicator({ item }: { item: ConciliacaoItem }) {
+  if (item.status_conciliacao === 'aguardando_pagamento') {
+    if (item.ultimo_status_busca === 'NAO_LOCALIZADO') {
+      return (
+        <div className="text-[10px] text-gray-500 mt-0.5">
+          Não localizamos o documento no SAP
+          {item.ultima_tentativa_busca && <> ({formatDateTime(item.ultima_tentativa_busca)})</>}
+        </div>
+      );
+    }
+    if (item.ultimo_status_busca === 'EM_ABERTO') {
+      return (
+        <div className="text-[10px] text-gray-500 mt-0.5">
+          Localizamos o documento, mas ainda não foi pago
+          {item.ultima_tentativa_busca && <> ({formatDateTime(item.ultima_tentativa_busca)})</>}
+        </div>
+      );
+    }
+    return null;
+  }
+
+  if (item.pagamento_cobre_valor_nota) {
+    return (
+      <div className="text-[10px] text-amber-700 mt-0.5">
+        Pagamento localizado, aguardando confirmação da RFB
+      </div>
+    );
+  }
+
+  if (item.payment_status === 'PAGO_TOTAL' || item.payment_status === 'PAGO_PARCIAL') {
+    return (
+      <div className="text-[10px] text-green-700 mt-0.5 flex items-center gap-1 justify-center">
+        <CheckCircle2 className="h-3 w-3" /> Pagamento localizado
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function formatNI(ni: string): string {
   if (!ni) return '—';
   const d = ni.replace(/\D/g, '');
@@ -75,15 +143,17 @@ function todayStr(): string {
 // ─── StatusBadge ─────────────────────────────────────────────────────────────
 
 const STATUS_CLASSES: Record<string, string> = {
-  pendente:  'bg-red-100 text-red-800 border-red-300',
-  extinto:   'bg-green-100 text-green-800 border-green-300',
-  sem_dados: 'bg-gray-100 text-gray-600 border-gray-300',
+  pendente:             'bg-red-100 text-red-800 border-red-300',
+  extinto:              'bg-green-100 text-green-800 border-green-300',
+  sem_dados:            'bg-gray-100 text-gray-600 border-gray-300',
+  aguardando_pagamento: 'bg-yellow-100 text-yellow-800 border-yellow-300',
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  pendente:  'Pendente',
-  extinto:   'Extinto',
-  sem_dados: 'Sem dados RFB',
+  pendente:             'Pendente',
+  extinto:              'Extinto',
+  sem_dados:            'Sem dados RFB',
+  aguardando_pagamento: 'Aguardando Pagamento',
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -211,6 +281,7 @@ export default function RFBPagamentosFornecedores() {
       const rows = exportItems.map(it => ({
         'Chave Doc':          it.chave_doc,
         'Tipo':               it.tipo_doc,
+        'Origem':             it.origem ? (it.origem === 'sap_api' ? 'SAP' : 'CSV') : '',
         'CNPJ Fornecedor':    formatNI(it.forn_cnpj),
         'Nome Fornecedor':    it.forn_nome ?? '',
         'Parcelas':           it.num_parcelas,
@@ -224,6 +295,9 @@ export default function RFBPagamentosFornecedores() {
         'Situação RFB':       it.situacao_credito ?? '',
         'Status Conciliação': STATUS_LABELS[it.status_conciliacao] ?? it.status_conciliacao,
         'Possível Duplicidade': it.possivel_duplicidade ? 'Sim' : 'Não',
+        'Indicador de Pagamento': it.payment_status ?? '',
+        'Aguardando Confirmação RFB': it.pagamento_cobre_valor_nota ? 'Sim' : 'Não',
+        'Último Status Busca SAP': it.ultimo_status_busca ?? '',
       }));
 
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -286,6 +360,7 @@ export default function RFBPagamentosFornecedores() {
             <option value="">Todos</option>
             <option value="pendente">Pendente</option>
             <option value="extinto">Extinto</option>
+            <option value="aguardando_pagamento">Aguardando Pagamento</option>
             <option value="sem_dados">Sem dados RFB</option>
           </select>
         </div>
@@ -394,6 +469,7 @@ export default function RFBPagamentosFornecedores() {
                     <th className="px-3 py-2 text-left font-medium w-6" />
                     <th className="px-3 py-2 text-left font-medium">Fornecedor</th>
                     <th className="px-3 py-2 text-left font-medium">Tipo</th>
+                    <th className="px-3 py-2 text-center font-medium">Origem</th>
                     <th className="px-3 py-2 text-left font-medium">Chave Doc</th>
                     <th className="px-3 py-2 text-right font-medium">Parcelas</th>
                     <th className="px-3 py-2 text-right font-medium">Total Pago</th>
@@ -442,6 +518,11 @@ export default function RFBPagamentosFornecedores() {
                             </span>
                           </td>
 
+                          {/* Origem — Story 3.2 (AC #4) */}
+                          <td className="px-3 py-2 text-center">
+                            <OrigemBadge origem={item.origem} />
+                          </td>
+
                           {/* Chave Doc */}
                           <td className="px-3 py-2">
                             <span
@@ -480,6 +561,7 @@ export default function RFBPagamentosFornecedores() {
                           {/* Status */}
                           <td className="px-3 py-2 text-center">
                             <StatusBadge status={item.status_conciliacao} />
+                            <PaymentIndicator item={item} />
                           </td>
 
                           {/* CBS Pendente */}
@@ -496,7 +578,7 @@ export default function RFBPagamentosFornecedores() {
                         {/* Expanded parcelas row */}
                         {isExpanded && (
                           <tr key={`${item.chave_doc}-parcelas`} className="bg-gray-50">
-                            <td colSpan={9} className="px-6 py-3">
+                            <td colSpan={10} className="px-6 py-3">
                               {isLoadingParcelas ? (
                                 <p className="text-xs text-muted-foreground">Carregando parcelas…</p>
                               ) : rowParcelas && rowParcelas.length > 0 ? (

@@ -418,7 +418,10 @@ func exponentialBackoff(attempt int) time.Duration {
 // linha em pagamentos_fornecedores (origem='sap_api'), com upsert idempotente
 // via o índice único parcial uq_pag_forn_sap_api (company_id, chave_doc,
 // num_doc_pagamento, bukrs) — ver migration 118. dfeResponse sem payments[]
-// (EM_ABERTO/NAO_LOCALIZADO) não gera nenhuma linha, propositalmente.
+// (EM_ABERTO/NAO_LOCALIZADO) não gera linha em pagamentos_fornecedores — em
+// vez disso, grava/atualiza uma linha em sap_resultados_busca (Story 3.2,
+// migration 121), a única forma de saber "qual foi a última tentativa" por
+// chave individual (sap_sync_runs só tem contagens agregadas por execução).
 //
 // company_id e bukrs usados na gravação são SEMPRE os parâmetros já resolvidos
 // pelo contexto da sincronização — nunca um valor vindo da resposta do SAP
@@ -433,6 +436,25 @@ func exponentialBackoff(attempt int) time.Duration {
 func persistPayments(db *sql.DB, companyID, bukrs string, items []dfeResponse) (failedCount int) {
 	for _, item := range items {
 		if len(item.Payments) == 0 {
+			// Story 3.2: EM_ABERTO/NAO_LOCALIZADO registram a última tentativa
+			// por chave — qualquer outro paymentStatus sem payments[] (não
+			// deveria acontecer, mas por segurança) não grava nada, mesmo
+			// comportamento silencioso de antes desta story.
+			if item.PaymentStatus == "EM_ABERTO" || item.PaymentStatus == "NAO_LOCALIZADO" {
+				if _, err := db.Exec(`
+					INSERT INTO sap_resultados_busca
+						(company_id, chave_dfe, bukrs, payment_status, match_type, fallback_note)
+					VALUES ($1, $2, $3, $4, $5, $6)
+					ON CONFLICT (company_id, chave_dfe) DO UPDATE SET
+						bukrs               = EXCLUDED.bukrs,
+						payment_status      = EXCLUDED.payment_status,
+						match_type          = EXCLUDED.match_type,
+						fallback_note       = EXCLUDED.fallback_note,
+						ultima_tentativa_em = NOW()
+				`, companyID, item.DFeKey, bukrs, item.PaymentStatus, item.MatchType, item.FallbackNote); err != nil {
+					log.Printf("[SAP Sync] Erro ao gravar sap_resultados_busca chave=%s company_id=%s: %v", item.DFeKey, companyID, err)
+				}
+			}
 			continue
 		}
 		fallbackAmbiguous := item.MatchType == "FALLBACK" && item.FallbackNote != ""
@@ -479,6 +501,15 @@ func persistPayments(db *sql.DB, companyID, bukrs string, items []dfeResponse) (
 				failedCount++
 				log.Printf("[SAP Sync] Erro ao persistir pagamento chave=%s num_doc_pagamento=%s company_id=%s bukrs=%s: %v",
 					item.DFeKey, p.ClearingDocument, companyID, bukrs, err)
+				continue
+			}
+			// Story 3.2: um pagamento real agora existe para esta chave — uma
+			// linha antiga de sap_resultados_busca (de uma tentativa anterior
+			// sem sucesso) ficaria desatualizada e enganosa, então é removida.
+			if _, err := db.Exec(`
+				DELETE FROM sap_resultados_busca WHERE company_id = $1 AND chave_dfe = $2
+			`, companyID, item.DFeKey); err != nil {
+				log.Printf("[SAP Sync] Erro ao limpar sap_resultados_busca chave=%s company_id=%s: %v", item.DFeKey, companyID, err)
 			}
 		}
 	}

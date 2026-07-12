@@ -83,6 +83,147 @@ func TestPersistPayments_SemPayments_NaoCriaLinha(t *testing.T) {
 	}
 }
 
+// countSapResultadosBusca/querySapResultadoBusca — helpers da Story 3.2 para
+// a nova tabela sap_resultados_busca.
+func querySapResultadoBusca(t *testing.T, db *sql.DB, companyID, chaveDfe string) (paymentStatus, matchType string, found bool) {
+	t.Helper()
+	err := db.QueryRow(`
+		SELECT payment_status, COALESCE(match_type, '') FROM sap_resultados_busca
+		WHERE company_id = $1 AND chave_dfe = $2
+	`, companyID, chaveDfe).Scan(&paymentStatus, &matchType)
+	if err == sql.ErrNoRows {
+		return "", "", false
+	}
+	if err != nil {
+		t.Fatalf("erro ao consultar sap_resultados_busca: %v", err)
+	}
+	return paymentStatus, matchType, true
+}
+
+func TestPersistPayments_NaoLocalizado_GravaSapResultadosBusca(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	defer db.Exec(`DELETE FROM sap_resultados_busca WHERE company_id = $1`, companyID)
+
+	chave := validKey(101)
+	items := []dfeResponse{{
+		DFeKey:        chave,
+		DFeType:       "NFE",
+		MatchType:     "NAO_LOCALIZADO",
+		PaymentStatus: "NAO_LOCALIZADO",
+		Payments:      nil,
+	}}
+
+	persistPayments(db, companyID, "1000", items)
+
+	status, matchType, found := querySapResultadoBusca(t, db, companyID, chave)
+	if !found {
+		t.Fatalf("esperava linha em sap_resultados_busca para chave NAO_LOCALIZADO, não encontrada")
+	}
+	if status != "NAO_LOCALIZADO" {
+		t.Errorf("esperava payment_status='NAO_LOCALIZADO', obteve %q", status)
+	}
+	if matchType != "NAO_LOCALIZADO" {
+		t.Errorf("esperava match_type='NAO_LOCALIZADO', obteve %q", matchType)
+	}
+}
+
+func TestPersistPayments_EmAberto_GravaSapResultadosBusca(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	defer db.Exec(`DELETE FROM sap_resultados_busca WHERE company_id = $1`, companyID)
+
+	chave := validKey(102)
+	items := []dfeResponse{{
+		DFeKey:        chave,
+		DFeType:       "NFE",
+		MatchType:     "CHAVE",
+		PaymentStatus: "EM_ABERTO",
+		Payments:      nil,
+	}}
+
+	persistPayments(db, companyID, "1000", items)
+
+	status, _, found := querySapResultadoBusca(t, db, companyID, chave)
+	if !found {
+		t.Fatalf("esperava linha em sap_resultados_busca para chave EM_ABERTO, não encontrada")
+	}
+	if status != "EM_ABERTO" {
+		t.Errorf("esperava payment_status='EM_ABERTO', obteve %q", status)
+	}
+}
+
+func TestPersistPayments_ReprocessamentoNaoLocalizado_AtualizaUltimaTentativa(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	defer db.Exec(`DELETE FROM sap_resultados_busca WHERE company_id = $1`, companyID)
+
+	chave := validKey(103)
+	// 1ª tentativa: NAO_LOCALIZADO.
+	persistPayments(db, companyID, "1000", []dfeResponse{{
+		DFeKey: chave, DFeType: "NFE", MatchType: "NAO_LOCALIZADO", PaymentStatus: "NAO_LOCALIZADO",
+	}})
+	// 2ª tentativa (reprocessamento): agora EM_ABERTO (documento localizado, ainda sem pagamento).
+	persistPayments(db, companyID, "1000", []dfeResponse{{
+		DFeKey: chave, DFeType: "NFE", MatchType: "CHAVE", PaymentStatus: "EM_ABERTO",
+	}})
+
+	status, _, found := querySapResultadoBusca(t, db, companyID, chave)
+	if !found {
+		t.Fatalf("esperava linha em sap_resultados_busca após reprocessamento")
+	}
+	if status != "EM_ABERTO" {
+		t.Errorf("esperava a linha atualizada para o status mais recente 'EM_ABERTO' (não duplicada), obteve %q", status)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sap_resultados_busca WHERE company_id=$1 AND chave_dfe=$2`, companyID, chave).Scan(&count); err != nil {
+		t.Fatalf("erro ao contar linhas: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("esperava exatamente 1 linha (upsert, não duplicar), obteve %d", count)
+	}
+}
+
+func TestPersistPayments_PagamentoRealAposNaoLocalizado_ApagaSapResultadosBusca(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	defer db.Exec(`DELETE FROM sap_resultados_busca WHERE company_id = $1`, companyID)
+
+	chave := validKey(104)
+	// 1ª tentativa: NAO_LOCALIZADO.
+	persistPayments(db, companyID, "1000", []dfeResponse{{
+		DFeKey: chave, DFeType: "NFE", MatchType: "NAO_LOCALIZADO", PaymentStatus: "NAO_LOCALIZADO",
+	}})
+	if _, _, found := querySapResultadoBusca(t, db, companyID, chave); !found {
+		t.Fatalf("pré-condição falhou: esperava linha em sap_resultados_busca após 1ª tentativa")
+	}
+
+	// 2ª tentativa: pagamento real localizado — a linha "não localizado" deve sumir.
+	persistPayments(db, companyID, "1000", []dfeResponse{{
+		DFeKey:        chave,
+		DFeType:       "NFE",
+		MatchType:     "CHAVE",
+		PaymentStatus: "PAGO_TOTAL",
+		Payments: []paymentItem{{
+			ClearingDocument: "1400000104",
+			ClearingDate:     "2026-06-10",
+			PaidAmount:       500.00,
+		}},
+	}})
+
+	if _, _, found := querySapResultadoBusca(t, db, companyID, chave); found {
+		t.Errorf("esperava sap_resultados_busca limpa após pagamento real ser localizado, mas a linha ainda existe")
+	}
+	if got := countPagamentosSAP(t, db, companyID, chave); got != 1 {
+		t.Errorf("esperava 1 linha real de pagamento persistida, obteve %d", got)
+	}
+}
+
 func TestPersistPayments_Reprocessamento_AtualizaEmVezDeDuplicar(t *testing.T) {
 	db := openTestDB(t)
 	companyID, cleanup := setupTestCompany(t, db)
