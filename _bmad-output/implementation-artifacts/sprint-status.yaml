@@ -1,5 +1,5 @@
 # generated: 2026-07-11
-# last_updated: 2026-07-11 (Story 2.4 revisada e concluída — Story 2.5 ainda em backlog)
+# last_updated: 2026-07-11 (Story 2.5 revisada e concluída — Epic 2 completa)
 # project: FB_APU02
 # project_key: NOKEY
 # tracking_system: file-system
@@ -49,12 +49,12 @@ development_status:
   epic-1-retrospective: optional
 
   # ── Epic 2: Sincronização Automática e Confiável de Pagamentos SAP ──────────
-  epic-2: in-progress
+  epic-2: done
   2-1-disparo-automatico-de-sincronizacao-pos-apuracao: done
   2-2-consulta-em-lote-com-rate-limit-e-tratamento-de-erros: done
   2-3-persistencia-de-pagamentos-com-deduplicacao-robusta: done
   2-4-historico-de-execucoes-e-alertas-de-falha: done
-  2-5-coexistencia-de-pagamentos-csv-e-sap-sem-duplicidade: backlog
+  2-5-coexistencia-de-pagamentos-csv-e-sap-sem-duplicidade: done
   epic-2-retrospective: optional
 
   # ── Epic 3: Conciliação Completa e Transparente ─────────────────────────────

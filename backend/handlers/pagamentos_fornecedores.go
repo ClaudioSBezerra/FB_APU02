@@ -379,12 +379,17 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// LIST
+		// import_id precisa de COALESCE::text porque ficou nullable desde a
+		// migration 118 (Story 2.3) — linhas origem='sap_api' nunca preenchem
+		// essa coluna. Sem o COALESCE, o Scan abaixo quebra com "converting
+		// NULL to string" para qualquer linha de origem SAP (bug pré-existente
+		// corrigido nesta story, Task 3).
 		offset := (page - 1) * pageSize
 		listArgs := append(args, pageSize, offset)
 		rows, err := db.Query(fmt.Sprintf(`
 			SELECT id, chave_doc, tipo_doc, forn_cnpj, COALESCE(forn_nome,''), data_pagamento,
 			       valor_pagamento, COALESCE(num_doc_pagamento,''), COALESCE(descricao,''),
-			       mes_ano, import_id, importado_em
+			       mes_ano, COALESCE(import_id::text, ''), importado_em, origem
 			FROM pagamentos_fornecedores %s
 			ORDER BY data_pagamento DESC, id DESC
 			LIMIT $%d OFFSET $%d`, whereClause, idx, idx+1),
@@ -398,18 +403,19 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 
 		type pagItem struct {
-			ID               int64   `json:"id"`
-			ChaveDoc         string  `json:"chave_doc"`
-			TipoDoc          string  `json:"tipo_doc"`
-			FornCNPJ         string  `json:"forn_cnpj"`
-			FornNome         string  `json:"forn_nome"`
-			DataPagamento    string  `json:"data_pagamento"`
-			ValorPagamento   float64 `json:"valor_pagamento"`
-			NumDocPagamento  string  `json:"num_doc_pagamento"`
-			Descricao        string  `json:"descricao"`
-			MesAno           string  `json:"mes_ano"`
-			ImportID         string  `json:"import_id"`
-			ImportadoEm      string  `json:"importado_em"`
+			ID              int64   `json:"id"`
+			ChaveDoc        string  `json:"chave_doc"`
+			TipoDoc         string  `json:"tipo_doc"`
+			FornCNPJ        string  `json:"forn_cnpj"`
+			FornNome        string  `json:"forn_nome"`
+			DataPagamento   string  `json:"data_pagamento"`
+			ValorPagamento  float64 `json:"valor_pagamento"`
+			NumDocPagamento string  `json:"num_doc_pagamento"`
+			Descricao       string  `json:"descricao"`
+			MesAno          string  `json:"mes_ano"`
+			ImportID        string  `json:"import_id"`
+			ImportadoEm     string  `json:"importado_em"`
+			Origem          string  `json:"origem"`
 		}
 
 		items := []pagItem{}
@@ -420,7 +426,7 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 			if err := rows.Scan(
 				&item.ID, &item.ChaveDoc, &item.TipoDoc, &item.FornCNPJ, &item.FornNome,
 				&dataPag, &item.ValorPagamento, &item.NumDocPagamento, &item.Descricao,
-				&item.MesAno, &item.ImportID, &importadoEm,
+				&item.MesAno, &item.ImportID, &importadoEm, &item.Origem,
 			); err != nil {
 				log.Printf("[PagamentosListHandler] scan: %v", err)
 				continue

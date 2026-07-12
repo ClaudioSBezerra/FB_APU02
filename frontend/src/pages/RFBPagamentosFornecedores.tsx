@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight, Download, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ interface ConciliacaoItem {
   valor_cbs_nao_extinto: number;
   situacao_credito: string | null;
   status_conciliacao: string;
+  possivel_duplicidade: boolean;
 }
 
 interface Parcela {
@@ -40,6 +41,7 @@ interface Parcela {
   valor_pagamento: number;
   num_doc_pagamento: string | null;
   descricao: string | null;
+  origem: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -221,6 +223,7 @@ export default function RFBPagamentosFornecedores() {
         'CBS Não Extinto':    it.valor_cbs_nao_extinto,
         'Situação RFB':       it.situacao_credito ?? '',
         'Status Conciliação': STATUS_LABELS[it.status_conciliacao] ?? it.status_conciliacao,
+        'Possível Duplicidade': it.possivel_duplicidade ? 'Sim' : 'Não',
       }));
 
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -456,7 +459,17 @@ export default function RFBPagamentosFornecedores() {
 
                           {/* Total Pago */}
                           <td className="px-3 py-2 text-right font-medium">
-                            {formatCurrency(item.total_pago)}
+                            <span className="inline-flex items-center gap-1 justify-end">
+                              {item.possivel_duplicidade && (
+                                <span title="Possível duplicidade: total pago excede o valor da nota">
+                                  <AlertTriangle
+                                    className="h-3.5 w-3.5 text-amber-600 shrink-0"
+                                    aria-label="Possível duplicidade: total pago excede o valor da nota"
+                                  />
+                                </span>
+                              )}
+                              {formatCurrency(item.total_pago)}
+                            </span>
                           </td>
 
                           {/* Valor CBS Nota */}
@@ -498,6 +511,7 @@ export default function RFBPagamentosFornecedores() {
                                         <th className="px-3 py-1.5 text-right font-medium">Valor</th>
                                         <th className="px-3 py-1.5 text-left font-medium">Nº Doc Pagamento</th>
                                         <th className="px-3 py-1.5 text-left font-medium">Descrição</th>
+                                        <th className="px-3 py-1.5 text-left font-medium">Origem</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y">
@@ -512,6 +526,15 @@ export default function RFBPagamentosFornecedores() {
                                           </td>
                                           <td className="px-3 py-1.5 text-muted-foreground">
                                             {p.descricao ?? '—'}
+                                          </td>
+                                          <td className="px-3 py-1.5">
+                                            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium uppercase ${
+                                              p.origem === 'sap_api'
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'bg-gray-100 text-gray-600'
+                                            }`}>
+                                              {p.origem === 'sap_api' ? 'SAP' : 'CSV'}
+                                            </span>
                                           </td>
                                         </tr>
                                       ))}

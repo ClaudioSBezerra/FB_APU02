@@ -23,20 +23,21 @@ type ConciliacaoSumario struct {
 }
 
 type ConciliacaoItem struct {
-	ChaveDoc           string  `json:"chave_doc"`
-	TipoDoc            string  `json:"tipo_doc"`
-	FornCNPJ           string  `json:"forn_cnpj"`
-	FornNome           *string `json:"forn_nome"`
-	NumParcelas        int     `json:"num_parcelas"`
-	TotalPago          float64 `json:"total_pago"`
-	PrimeiraParcela    string  `json:"primeira_parcela"`
-	UltimaParcela      string  `json:"ultima_parcela"`
-	ValorNota          float64 `json:"valor_nota"`
-	ValorCBSNota       float64 `json:"valor_cbs_nota"`
-	ValorIBSNota       float64 `json:"valor_ibs_nota"`
-	ValorCBSNaoExtinto float64 `json:"valor_cbs_nao_extinto"`
-	SituacaoCredito    *string `json:"situacao_credito"`
-	StatusConciliacao  string  `json:"status_conciliacao"`
+	ChaveDoc            string  `json:"chave_doc"`
+	TipoDoc             string  `json:"tipo_doc"`
+	FornCNPJ            string  `json:"forn_cnpj"`
+	FornNome            *string `json:"forn_nome"`
+	NumParcelas         int     `json:"num_parcelas"`
+	TotalPago           float64 `json:"total_pago"`
+	PrimeiraParcela     string  `json:"primeira_parcela"`
+	UltimaParcela       string  `json:"ultima_parcela"`
+	ValorNota           float64 `json:"valor_nota"`
+	ValorCBSNota        float64 `json:"valor_cbs_nota"`
+	ValorIBSNota        float64 `json:"valor_ibs_nota"`
+	ValorCBSNaoExtinto  float64 `json:"valor_cbs_nao_extinto"`
+	SituacaoCredito     *string `json:"situacao_credito"`
+	StatusConciliacao   string  `json:"status_conciliacao"`
+	PossivelDuplicidade bool    `json:"possivel_duplicidade"`
 }
 
 // ─── SQL base (CTE) ───────────────────────────────────────────────────────────
@@ -49,7 +50,43 @@ type ConciliacaoItem struct {
 //	$2 = mes_ano ('' para ignorar)
 //	$3 = forn_cnpj dígitos ('' para ignorar)
 const cteBase = `
-WITH pagamentos_agg AS (
+WITH pagamentos_dedup AS (
+    -- Story 2.5 (AC #1/#2): quando a MESMA liquidação (chave_doc + num_doc_pagamento)
+    -- tem uma linha 'csv' e uma linha 'sap_api', a linha 'csv' é excluída desta
+    -- agregação (o registro sap_api prevalece). A linha csv NUNCA é removida da
+    -- tabela — continua visível via PagamentosFornecedoresListHandler, para auditoria.
+    -- CSV legado sem num_doc_pagamento (NULL) nunca é afetado por esta regra.
+    SELECT pf.*
+    FROM pagamentos_fornecedores pf
+    WHERE pf.company_id = $1
+      AND ($2 = '' OR pf.mes_ano = $2)
+      AND ($3 = '' OR pf.forn_cnpj = $3)
+      AND NOT (
+          pf.origem = 'csv'
+          AND pf.num_doc_pagamento IS NOT NULL
+          AND EXISTS (
+              -- O EXISTS aplica os MESMOS filtros de mes_ano/forn_cnpj ($2/$3) da
+              -- CTE externa: sem isso, uma linha sap_api de outro mês/fornecedor
+              -- suprimiria a csv sem aparecer ela mesma no resultado filtrado,
+              -- fazendo a liquidação inteira sumir do relatório (bug encontrado
+              -- e confirmado em revisão — ver Review Findings).
+              -- tipo_doc/forn_cnpj também precisam bater: pagamentos_agg agrupa
+              -- por (chave_doc, tipo_doc, forn_cnpj), então só suprimir a linha
+              -- csv quando ela realmente cairia no mesmo grupo da sap_api evita
+              -- excluir uma linha sem nenhuma outra absorver seu valor.
+              SELECT 1 FROM pagamentos_fornecedores sap
+              WHERE sap.company_id = pf.company_id
+                AND sap.chave_doc = pf.chave_doc
+                AND sap.num_doc_pagamento = pf.num_doc_pagamento
+                AND sap.origem = 'sap_api'
+                AND sap.tipo_doc = pf.tipo_doc
+                AND sap.forn_cnpj = pf.forn_cnpj
+                AND ($2 = '' OR sap.mes_ano = $2)
+                AND ($3 = '' OR sap.forn_cnpj = $3)
+          )
+      )
+),
+pagamentos_agg AS (
     SELECT
         pf.chave_doc,
         pf.tipo_doc,
@@ -59,10 +96,7 @@ WITH pagamentos_agg AS (
         SUM(pf.valor_pagamento)     AS total_pago,
         MIN(pf.data_pagamento)      AS primeira_parcela,
         MAX(pf.data_pagamento)      AS ultima_parcela
-    FROM pagamentos_fornecedores pf
-    WHERE pf.company_id = $1
-      AND ($2 = '' OR pf.mes_ano = $2)
-      AND ($3 = '' OR pf.forn_cnpj = $3)
+    FROM pagamentos_dedup pf
     GROUP BY pf.chave_doc, pf.tipo_doc, pf.forn_cnpj
 ),
 conciliacao AS (
@@ -96,7 +130,22 @@ conciliacao AS (
             WHEN rc.id IS NULL                THEN 'sem_dados'
             WHEN rc.valor_cbs_nao_extinto > 0 THEN 'pendente'
             ELSE                                   'extinto'
-        END                                                 AS status_conciliacao
+        END                                                 AS status_conciliacao,
+        -- Story 2.5 (AC #3): total_pago (já deduplicado acima) excedendo o valor
+        -- da nota é indício de duplicidade residual ou match incorreto. Exige
+        -- um valor de nota REAL (NFE/CTE com cabeçalho casado) — sem essa
+        -- checagem, NFSE (sem nfe_entradas/cte_entradas) ou qualquer NFE/CTE
+        -- sem nota importada cairiam no fallback 0 e todo pagamento > 0 seria
+        -- falsamente marcado como duplicidade (bug encontrado em revisão).
+        COALESCE(
+            CASE WHEN pa.tipo_doc = 'NFE' THEN ne.v_nf    ELSE NULL END,
+            CASE WHEN pa.tipo_doc = 'CTE' THEN ct.v_prest ELSE NULL END
+        ) IS NOT NULL
+        AND pa.total_pago > COALESCE(
+            CASE WHEN pa.tipo_doc = 'NFE' THEN ne.v_nf    ELSE NULL END,
+            CASE WHEN pa.tipo_doc = 'CTE' THEN ct.v_prest ELSE NULL END,
+            0
+        )                                                   AS possivel_duplicidade
     FROM pagamentos_agg pa
     LEFT JOIN nfe_entradas ne
         ON ne.company_id = $1
@@ -220,7 +269,8 @@ SELECT
     valor_ibs_nota,
     valor_cbs_nao_extinto,
     situacao_credito,
-    status_conciliacao
+    status_conciliacao,
+    possivel_duplicidade
 FROM conciliacao
 WHERE ($4 = '' OR status_conciliacao = $4)
 ORDER BY
@@ -258,6 +308,7 @@ LIMIT $5 OFFSET $6
 				&it.ValorCBSNaoExtinto,
 				&situacaoCredito,
 				&it.StatusConciliacao,
+				&it.PossivelDuplicidade,
 			); err != nil {
 				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler item de conciliação", err, "[RFBPgtosFornecedores]")
 				return
