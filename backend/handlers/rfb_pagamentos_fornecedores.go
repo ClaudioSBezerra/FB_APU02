@@ -20,6 +20,11 @@ type ConciliacaoSumario struct {
 	CBSPendente   float64 `json:"cbs_pendente"`
 	NotasPendente int     `json:"notas_pendente"`
 	NotasSemDados int     `json:"notas_sem_dados"`
+	// Story 3.3 (FR-12): quantos créditos têm fallback_ambiguous=true no
+	// escopo atual de mes_ano/forn_cnpj — NUNCA filtrado por status_conciliacao
+	// ou pelo próprio filtro de ambíguos (mesma regra dos demais contadores
+	// deste sumário, ver comentário em sumSQL).
+	NotasRevisaoAmbigua int `json:"notas_revisao_ambigua"`
 }
 
 type ConciliacaoItem struct {
@@ -375,9 +380,15 @@ func RFBPagamentosFornecedoresHandler(db *sql.DB) http.HandlerFunc {
 		}
 		offset := (page - 1) * pageSize
 
+		// Story 3.3 (FR-12): "revisao_ambigua" é um segundo valor mágico de
+		// status (mesmo padrão de "all") — ativa o filtro dedicado de matches
+		// ambíguos, que IGNORA status_conciliacao (um crédito já extinto pode
+		// aparecer aqui) e filtra por fallback_ambiguous=true.
+		apenasAmbiguos := statusParam == "revisao_ambigua"
+
 		// statusFilter: '' significa sem filtro (todos os status)
 		statusFilter := ""
-		if statusParam != "all" {
+		if statusParam != "all" && !apenasAmbiguos {
 			statusFilter = statusParam
 		}
 
@@ -390,7 +401,8 @@ SELECT
     COUNT(*) FILTER (WHERE status_conciliacao = 'extinto'),
     COALESCE(SUM(CASE WHEN status_conciliacao = 'pendente' THEN valor_cbs_nao_extinto ELSE 0 END), 0),
     COUNT(*) FILTER (WHERE status_conciliacao = 'pendente'),
-    COUNT(*) FILTER (WHERE status_conciliacao = 'sem_dados')
+    COUNT(*) FILTER (WHERE status_conciliacao = 'sem_dados'),
+    COUNT(*) FILTER (WHERE fallback_ambiguous = true)
 FROM conciliacao
 `
 		var sumario ConciliacaoSumario
@@ -402,19 +414,21 @@ FROM conciliacao
 			&sumario.CBSPendente,
 			&sumario.NotasPendente,
 			&sumario.NotasSemDados,
+			&sumario.NotasRevisaoAmbigua,
 		)
 		if err != nil {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao calcular sumário", err, "[RFBPgtosFornecedores]")
 			return
 		}
 
-		// ── Count query — com filtro de status ───────────────────────────────
+		// ── Count query — com filtro de status/ambíguos ───────────────────────
 		const countSQL = cteBase + `
 SELECT COUNT(*) FROM conciliacao
 WHERE ($4 = '' OR status_conciliacao = $4)
+  AND ($5 = false OR fallback_ambiguous = true)
 `
 		var total int
-		err = db.QueryRow(countSQL, companyID, mesAno, fornCNPJ, statusFilter).Scan(&total)
+		err = db.QueryRow(countSQL, companyID, mesAno, fornCNPJ, statusFilter, apenasAmbiguos).Scan(&total)
 		if err != nil {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao contar registros", err, "[RFBPgtosFornecedores]")
 			return
@@ -447,12 +461,13 @@ SELECT
     ultima_tentativa_busca
 FROM conciliacao
 WHERE ($4 = '' OR status_conciliacao = $4)
+  AND ($7 = false OR fallback_ambiguous = true)
 ORDER BY
     CASE status_conciliacao WHEN 'pendente' THEN 0 WHEN 'sem_dados' THEN 1 ELSE 2 END,
     total_pago DESC
 LIMIT $5 OFFSET $6
 `
-		rows, err := db.Query(listSQL, companyID, mesAno, fornCNPJ, statusFilter, pageSize, offset)
+		rows, err := db.Query(listSQL, companyID, mesAno, fornCNPJ, statusFilter, pageSize, offset, apenasAmbiguos)
 		if err != nil {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao listar conciliação", err, "[RFBPgtosFornecedores]")
 			return

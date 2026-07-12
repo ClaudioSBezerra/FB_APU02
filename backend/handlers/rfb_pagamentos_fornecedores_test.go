@@ -719,6 +719,224 @@ func TestConciliacao_Origem_VisivelNoItemAgregado(t *testing.T) {
 	}
 }
 
+// ─── Story 3.3: Revisão Dedicada de Matches Ambíguos ──────────────────────────
+
+// insertRfbCreditoComEmitente é como insertRfbCredito, mas grava ni_emitente
+// explicitamente — necessário para testar o filtro forn_cnpj combinado com o
+// filtro de ambíguos (creditos_tipados filtra por rc.ni_emitente, não por
+// pa.forn_cnpj; insertRfbCredito não grava esse campo, suficiente para as
+// Stories 3.1/3.2 mas não para o teste de combinação de filtros desta story).
+func insertRfbCreditoComEmitente(t *testing.T, db *sql.DB, companyID, chaveDfe, modeloDfe, niEmitente string, valorCbsNaoExtinto float64) {
+	t.Helper()
+	var requestID string
+	if err := db.QueryRow(`
+		INSERT INTO rfb_requests (company_id, cnpj_base, status) VALUES ($1, '12345678', 'completed') RETURNING id
+	`, companyID).Scan(&requestID); err != nil {
+		t.Fatalf("falha ao criar rfb_requests de teste: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO rfb_creditos (request_id, company_id, modelo_dfe, chave_dfe, ni_emitente, valor_cbs_nao_extinto, situacao_credito)
+		VALUES ($1, $2, $3, $4, $5, $6, 'Em Análise')
+	`, requestID, companyID, modeloDfe, chaveDfe, niEmitente, valorCbsNaoExtinto); err != nil {
+		t.Fatalf("falha ao inserir rfb_creditos com ni_emitente de teste: %v", err)
+	}
+}
+
+// queryChavesFiltroAmbiguos replica exatamente o WHERE que RFBPagamentosFornecedoresHandler
+// (listSQL/countSQL) passará a usar: status_conciliacao filtrado só quando
+// apenasAmbiguos=false, E fallback_ambiguous=true quando apenasAmbiguos=true —
+// os dois filtros combinam com AND (mes_ano/forn_cnpj continuam sendo
+// aplicados dentro da própria cteBase via $2/$3).
+func queryChavesFiltroAmbiguos(t *testing.T, db *sql.DB, companyID, mesAno, fornCNPJ, statusFilter string, apenasAmbiguos bool) []string {
+	t.Helper()
+	const q = cteBase + `
+SELECT chave_doc FROM conciliacao
+WHERE ($4 = '' OR status_conciliacao = $4)
+  AND ($5 = false OR fallback_ambiguous = true)
+ORDER BY chave_doc
+`
+	rows, err := db.Query(q, companyID, mesAno, fornCNPJ, statusFilter, apenasAmbiguos)
+	if err != nil {
+		t.Fatalf("erro ao consultar filtro de ambíguos: %v", err)
+	}
+	defer rows.Close()
+	var chaves []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatalf("erro ao ler chave_doc: %v", err)
+		}
+		chaves = append(chaves, c)
+	}
+	return chaves
+}
+
+// querySumarioRevisaoAmbigua replica a contagem que sumSQL (handler) passará
+// a expor como ConciliacaoSumario.NotasRevisaoAmbigua — SEM nenhum filtro de
+// status/ambíguos (só mes_ano/forn_cnpj, igual aos demais contadores do
+// sumário — ver comentário "sem filtro de status" em sumSQL).
+func querySumarioRevisaoAmbigua(t *testing.T, db *sql.DB, companyID, mesAno, fornCNPJ string) int {
+	t.Helper()
+	const q = cteBase + `
+SELECT COUNT(*) FILTER (WHERE fallback_ambiguous = true) FROM conciliacao
+`
+	var count int
+	if err := db.QueryRow(q, companyID, mesAno, fornCNPJ).Scan(&count); err != nil {
+		t.Fatalf("erro ao contar notas em revisão de ambíguos: %v", err)
+	}
+	return count
+}
+
+func TestConciliacao_FiltroAmbiguos_IgnoraStatusConciliacao(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+
+	// AC #1: crédito com fallback_ambiguous=true deve aparecer no filtro
+	// dedicado independentemente do status_conciliacao — inclusive já extinto.
+	chavePendenteAmbiguo := "35240612345678000190550010000000033000000001"
+	insertRfbCredito(t, db, companyID, chavePendenteAmbiguo, "55", 50.00) // pendente
+	insertPagamentoSAPComStatus(t, db, companyID, chavePendenteAmbiguo, "NFE", "12345678000190", 50.00, "DOC-A1", "1000", "PAGO_PARCIAL", "FALLBACK", true)
+
+	chaveExtintoAmbiguo := "35240612345678000190550010000000033000000002"
+	insertRfbCredito(t, db, companyID, chaveExtintoAmbiguo, "55", 0) // extinto
+	insertPagamentoSAPComStatus(t, db, companyID, chaveExtintoAmbiguo, "NFE", "12345678000190", 80.00, "DOC-A2", "1000", "PAGO_TOTAL", "FALLBACK", true)
+
+	chavePendenteSemAmbiguidade := "35240612345678000190550010000000033000000003"
+	insertRfbCredito(t, db, companyID, chavePendenteSemAmbiguidade, "55", 50.00) // pendente
+	insertPagamentoSAPComStatus(t, db, companyID, chavePendenteSemAmbiguidade, "NFE", "12345678000190", 50.00, "DOC-A3", "1000", "PAGO_PARCIAL", "CHAVE", false)
+
+	chaves := queryChavesFiltroAmbiguos(t, db, companyID, "", "", "", true)
+
+	achou := map[string]bool{}
+	for _, c := range chaves {
+		achou[c] = true
+	}
+	if !achou[chavePendenteAmbiguo] {
+		t.Errorf("esperava %q (pendente + ambíguo) no filtro dedicado", chavePendenteAmbiguo)
+	}
+	if !achou[chaveExtintoAmbiguo] {
+		t.Errorf("BUG: esperava %q (extinto + ambíguo) no filtro dedicado — filtro não pode depender de status_conciliacao", chaveExtintoAmbiguo)
+	}
+	if achou[chavePendenteSemAmbiguidade] {
+		t.Errorf("esperava %q FORA do filtro (match_type=CHAVE, sem ambiguidade)", chavePendenteSemAmbiguidade)
+	}
+}
+
+func TestConciliacao_FiltroAmbiguos_CombinaComFornCNPJ(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+
+	// AC #3: o filtro dedicado combina (E lógico) com forn_cnpj — não substitui
+	// os demais filtros já existentes.
+	fornAlvo := "11111111000100"
+	fornOutro := "22222222000100"
+
+	chaveFornAlvo := "35240612345678000190550010000000033000000004"
+	insertRfbCreditoComEmitente(t, db, companyID, chaveFornAlvo, "55", fornAlvo, 40.00)
+	insertPagamentoSAPComStatus(t, db, companyID, chaveFornAlvo, "NFE", fornAlvo, 40.00, "DOC-B1", "1000", "PAGO_TOTAL", "FALLBACK", true)
+
+	chaveFornOutro := "35240612345678000190550010000000033000000005"
+	insertRfbCreditoComEmitente(t, db, companyID, chaveFornOutro, "55", fornOutro, 60.00)
+	insertPagamentoSAPComStatus(t, db, companyID, chaveFornOutro, "NFE", fornOutro, 60.00, "DOC-B2", "1000", "PAGO_TOTAL", "FALLBACK", true)
+
+	chaves := queryChavesFiltroAmbiguos(t, db, companyID, "", fornAlvo, "", true)
+
+	if len(chaves) != 1 || chaves[0] != chaveFornAlvo {
+		t.Errorf("esperava só %q com forn_cnpj=%s + filtro de ambíguos, obteve %v", chaveFornAlvo, fornAlvo, chaves)
+	}
+}
+
+func TestConciliacao_FiltroAmbiguos_CombinaComMesAno(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+
+	// AC #3 (complemento ao teste de forn_cnpj): mes_ano combina com o filtro
+	// de ambíguos por um caminho diferente de forn_cnpj — fallback_ambiguous é
+	// derivado via BOOL_OR em pagamentos_agg, que É filtrado por mes_ano (ao
+	// contrário de creditos_tipados, que nunca filtra créditos por mês). Um
+	// pagamento ambíguo fora do mes_ano selecionado não deve contar como
+	// ambíguo para aquele escopo.
+	chaveDfe := "35240612345678000190550010000000033000000010"
+	insertRfbCredito(t, db, companyID, chaveDfe, "55", 70.00)
+	if _, err := db.Exec(`
+		INSERT INTO pagamentos_fornecedores
+			(company_id, chave_doc, tipo_doc, forn_cnpj, data_pagamento, valor_pagamento,
+			 num_doc_pagamento, mes_ano, origem, bukrs, payment_status, match_type, fallback_ambiguous)
+		VALUES ($1, $2, 'NFE', '12345678000190', '2026-05-20', 70.00, 'DOC-E1', '2026-05', 'sap_api', '1000', 'PAGO_PARCIAL', 'FALLBACK', true)
+	`, companyID, chaveDfe); err != nil {
+		t.Fatalf("falha ao inserir pagamento ambíguo de teste: %v", err)
+	}
+
+	// Filtrando pelo mês do pagamento ambíguo: o crédito aparece no filtro.
+	chavesNoMes := queryChavesFiltroAmbiguos(t, db, companyID, "2026-05", "", "", true)
+	achouNoMes := false
+	for _, c := range chavesNoMes {
+		if c == chaveDfe {
+			achouNoMes = true
+		}
+	}
+	if !achouNoMes {
+		t.Errorf("esperava %q no filtro de ambíguos sob mes_ano=2026-05 (mesmo mês do pagamento ambíguo)", chaveDfe)
+	}
+
+	// Filtrando por um mês DIFERENTE do pagamento ambíguo: fallback_ambiguous
+	// para este crédito cai para false (pagamentos_agg não encontra a linha
+	// dentro do filtro), então o crédito NÃO deve aparecer no filtro dedicado.
+	chavesOutroMes := queryChavesFiltroAmbiguos(t, db, companyID, "2026-06", "", "", true)
+	for _, c := range chavesOutroMes {
+		if c == chaveDfe {
+			t.Errorf("esperava %q FORA do filtro de ambíguos sob mes_ano=2026-06 (pagamento ambíguo é de maio, fora do escopo filtrado)", chaveDfe)
+		}
+	}
+}
+
+func TestConciliacao_SumarioNotasRevisaoAmbigua_IgnoraStatus(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+
+	// AC #2: o contador do sumário conta fallback_ambiguous=true através de
+	// TODOS os status (pendente + extinto), nunca só um subconjunto — mesma
+	// classe de risco já documentada nas Stories 3.1 (contador refletindo
+	// filtro errado) e no comentário de sumSQL ("sem filtro de status").
+	chavePendente := "35240612345678000190550010000000033000000006"
+	insertRfbCredito(t, db, companyID, chavePendente, "55", 30.00)
+	insertPagamentoSAPComStatus(t, db, companyID, chavePendente, "NFE", "12345678000190", 30.00, "DOC-C1", "1000", "PAGO_PARCIAL", "FALLBACK", true)
+
+	chaveExtinto := "35240612345678000190550010000000033000000007"
+	insertRfbCredito(t, db, companyID, chaveExtinto, "55", 0)
+	insertPagamentoSAPComStatus(t, db, companyID, chaveExtinto, "NFE", "12345678000190", 90.00, "DOC-C2", "1000", "PAGO_TOTAL", "FALLBACK", true)
+
+	chaveSemAmbiguidade := "35240612345678000190550010000000033000000008"
+	insertRfbCredito(t, db, companyID, chaveSemAmbiguidade, "55", 30.00)
+	insertPagamentoSAPComStatus(t, db, companyID, chaveSemAmbiguidade, "NFE", "12345678000190", 30.00, "DOC-C3", "1000", "PAGO_PARCIAL", "CHAVE", false)
+
+	count := querySumarioRevisaoAmbigua(t, db, companyID, "", "")
+	if count != 2 {
+		t.Errorf("esperava notas_revisao_ambigua=2 (pendente + extinto, ambos ambíguos), obteve %d", count)
+	}
+}
+
+func TestConciliacao_FiltroAmbiguos_SemResultado_NaoQuebra(t *testing.T) {
+	db := openTestDB(t)
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+
+	// AC #4: nenhum crédito ambíguo no escopo — filtro retorna lista vazia,
+	// sem erro.
+	chaveSemAmbiguidade := "35240612345678000190550010000000033000000009"
+	insertRfbCredito(t, db, companyID, chaveSemAmbiguidade, "55", 30.00)
+	insertPagamentoSAPComStatus(t, db, companyID, chaveSemAmbiguidade, "NFE", "12345678000190", 30.00, "DOC-D1", "1000", "PAGO_PARCIAL", "CHAVE", false)
+
+	chaves := queryChavesFiltroAmbiguos(t, db, companyID, "", "", "", true)
+	if len(chaves) != 0 {
+		t.Errorf("esperava 0 chaves no filtro de ambíguos (nenhum crédito ambíguo no escopo), obteve %v", chaves)
+	}
+}
+
 func TestConciliacao_ValorCbsNaoExtintoNull_NaoQuebraScanDeCobreValorNota(t *testing.T) {
 	db := openTestDB(t)
 	companyID, cleanup := setupTestCompany(t, db)

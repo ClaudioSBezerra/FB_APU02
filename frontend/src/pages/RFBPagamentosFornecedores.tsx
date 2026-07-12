@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, ChevronRight, Download, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, RefreshCw, AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -15,6 +15,9 @@ interface ConciliacaoSumario {
   cbs_pendente: number;
   notas_pendente: number;
   notas_sem_dados: number;
+  // Story 3.3 (FR-12) — conta fallback_ambiguous=true independentemente do
+  // status_conciliacao ou do filtro ativo (ver backend).
+  notas_revisao_ambigua: number;
 }
 
 interface ConciliacaoItem {
@@ -298,6 +301,7 @@ export default function RFBPagamentosFornecedores() {
         'Indicador de Pagamento': it.payment_status ?? '',
         'Aguardando Confirmação RFB': it.pagamento_cobre_valor_nota ? 'Sim' : 'Não',
         'Último Status Busca SAP': it.ultimo_status_busca ?? '',
+        'Match Ambíguo': it.fallback_ambiguous ? 'Sim' : 'Não',
       }));
 
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -362,6 +366,7 @@ export default function RFBPagamentosFornecedores() {
             <option value="extinto">Extinto</option>
             <option value="aguardando_pagamento">Aguardando Pagamento</option>
             <option value="sem_dados">Sem dados RFB</option>
+            <option value="revisao_ambigua">Revisão de Matches Ambíguos</option>
           </select>
         </div>
         <div className="flex flex-col gap-1">
@@ -385,6 +390,24 @@ export default function RFBPagamentosFornecedores() {
             Limpar filtros
           </button>
         )}
+
+        {/* Story 3.3 (FR-12): badge/contador dedicado, visível fora do dropdown —
+            faz parte do fluxo normal de revisão, não uma auditoria escondida. */}
+        {!!sumario?.notas_revisao_ambigua && (
+          <button
+            onClick={() => { setFilterStatus('revisao_ambigua'); setPage(1); }}
+            aria-pressed={filterStatus === 'revisao_ambigua'}
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-medium transition-colors ${
+              filterStatus === 'revisao_ambigua'
+                ? 'bg-amber-600 text-white border-amber-600'
+                : 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+            }`}
+          >
+            <HelpCircle className="h-3.5 w-3.5" />
+            {sumario.notas_revisao_ambigua} match{sumario.notas_revisao_ambigua !== 1 ? 'es' : ''} ambíguo{sumario.notas_revisao_ambigua !== 1 ? 's' : ''} para revisar
+          </button>
+        )}
+
         <span className="ml-auto text-sm text-muted-foreground">
           {total} registro{total !== 1 ? 's' : ''}
         </span>
