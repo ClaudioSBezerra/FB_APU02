@@ -628,11 +628,12 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 		// Get User
 		var user User
 		var hash string
+		var isBlocked bool
 		// Use COALESCE for role and trial_ends_at to handle NULLs safely
 		err := db.QueryRow(`
-			SELECT id, email, full_name, password_hash, is_verified, COALESCE(trial_ends_at, NOW()), COALESCE(role, 'user'), created_at
+			SELECT id, email, full_name, password_hash, is_verified, COALESCE(trial_ends_at, NOW()), COALESCE(role, 'user'), created_at, is_blocked
 			FROM users WHERE email = $1
-		`, req.Email).Scan(&user.ID, &user.Email, &user.FullName, &hash, &user.IsVerified, &user.TrialEndsAt, &user.Role, &user.CreatedAt)
+		`, req.Email).Scan(&user.ID, &user.Email, &user.FullName, &hash, &user.IsVerified, &user.TrialEndsAt, &user.Role, &user.CreatedAt, &isBlocked)
 
 		if err == sql.ErrNoRows {
 			log.Printf("[Login] User not found: %s", req.Email)
@@ -654,6 +655,14 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode("E-mail não encontrado ou senha inválida")
+			return
+		}
+
+		if isBlocked {
+			log.Printf("[Login] Blocked user attempted login: %s", req.Email)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode("Usuário bloqueado. Entre em contato com o administrador.")
 			return
 		}
 

@@ -471,6 +471,7 @@ type AdminUser struct {
 	Email           string    `json:"email"`
 	FullName        string    `json:"full_name"`
 	IsVerified      bool      `json:"is_verified"`
+	IsBlocked       bool      `json:"is_blocked"`
 	TrialEndsAt     time.Time `json:"trial_ends_at"`
 	Role            string    `json:"role"`
 	CreatedAt       string    `json:"created_at"`
@@ -487,7 +488,7 @@ func ListUsersHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.Query(`
 			SELECT DISTINCT ON (u.id)
-			       u.id, u.email, u.full_name, u.is_verified, u.trial_ends_at, u.role, u.created_at,
+			       u.id, u.email, u.full_name, u.is_verified, u.is_blocked, u.trial_ends_at, u.role, u.created_at,
 			       e.id, e.name,
 			       eg.id, eg.name,
 			       c.id, c.name
@@ -508,7 +509,7 @@ func ListUsersHandler(db *sql.DB) http.HandlerFunc {
 		var users []AdminUser
 		for rows.Next() {
 			var u AdminUser
-			if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.IsVerified, &u.TrialEndsAt, &u.Role, &u.CreatedAt,
+			if err := rows.Scan(&u.ID, &u.Email, &u.FullName, &u.IsVerified, &u.IsBlocked, &u.TrialEndsAt, &u.Role, &u.CreatedAt,
 				&u.EnvironmentID, &u.EnvironmentName,
 				&u.GroupID, &u.GroupName,
 				&u.CompanyID, &u.CompanyName); err != nil {
@@ -688,5 +689,43 @@ func DeleteUserHandler(db *sql.DB) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"message": "User deleted successfully"})
+	}
+}
+
+// BlockUserRequest struct
+type BlockUserRequest struct {
+	Blocked bool `json:"blocked"`
+}
+
+// BlockUserHandler sets or clears a user's blocked status (Admin only).
+// Blocked users are rejected at login but keep their data and hierarchy links,
+// unlike DeleteUserHandler which removes the user entirely.
+func BlockUserHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := r.URL.Query().Get("id")
+		if userID == "" {
+			http.Error(w, "User ID required", http.StatusBadRequest)
+			return
+		}
+
+		var req BlockUserRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+
+		if req.Blocked && userID == GetUserIDFromContext(r) {
+			http.Error(w, "Você não pode bloquear a si mesmo", http.StatusBadRequest)
+			return
+		}
+
+		_, err := db.Exec("UPDATE users SET is_blocked = $1 WHERE id = $2", req.Blocked, userID)
+		if err != nil {
+			http.Error(w, "Failed to update user", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "User updated successfully"})
 	}
 }

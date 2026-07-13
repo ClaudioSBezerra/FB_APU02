@@ -24,7 +24,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Check, Trash2, UserCheck, Building2, ArrowRightLeft } from "lucide-react";
+import { Check, Trash2, UserCheck, Building2, ArrowRightLeft, Lock, Unlock } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 
 interface User {
@@ -32,6 +32,7 @@ interface User {
   email: string;
   full_name: string;
   is_verified: boolean;
+  is_blocked: boolean;
   trial_ends_at: string;
   role: string;
   created_at: string;
@@ -283,6 +284,29 @@ export default function AdminUsers() {
     onError: () => toast.error("Erro ao remover usuário")
   });
 
+  const blockMutation = useMutation({
+    mutationFn: async ({ userId, blocked }: { userId: string, blocked: boolean }) => {
+      const response = await fetch(`/api/admin/users/block?id=${userId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ blocked })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Failed to update user');
+      }
+      return response.json();
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+      toast.success(variables.blocked ? "Usuário bloqueado" : "Usuário desbloqueado");
+    },
+    onError: (error: Error) => toast.error(error.message || "Erro ao atualizar usuário")
+  });
+
   const handleCreate = () => {
     if (!newUser.fullName || !newUser.email || !newUser.password) {
       toast.error("Preencha todos os campos obrigatórios");
@@ -332,6 +356,14 @@ export default function AdminUsers() {
     }
   };
 
+  const handleToggleBlock = (user: User) => {
+    const blocking = !user.is_blocked;
+    if (blocking && !confirm(`Bloquear ${user.full_name}? Ele não conseguirá mais fazer login até ser desbloqueado.`)) {
+      return;
+    }
+    blockMutation.mutate({ userId: user.id, blocked: blocking });
+  };
+
   if (isLoading) return <div>Carregando usuários...</div>;
 
   return (
@@ -365,11 +397,16 @@ export default function AdminUsers() {
                 <TableCell className="text-xs font-medium py-1 px-2 whitespace-nowrap">{user.full_name}</TableCell>
                 <TableCell className="text-xs py-1 px-2 whitespace-nowrap">{user.email}</TableCell>
                 <TableCell className="py-1 px-2">
-                  {user.is_verified ? (
-                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200">Verificado</Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-yellow-50 text-yellow-700 border-yellow-200">Pendente</Badge>
-                  )}
+                  <div className="flex flex-wrap gap-1">
+                    {user.is_verified ? (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-green-50 text-green-700 border-green-200">Verificado</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-yellow-50 text-yellow-700 border-yellow-200">Pendente</Badge>
+                    )}
+                    {user.is_blocked && (
+                      <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 bg-red-50 text-red-700 border-red-200">Bloqueado</Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="py-1 px-2">
                   <Badge variant={user.role === 'admin' ? "default" : "secondary"} className="text-[9px] px-1.5 py-0 h-4">
@@ -397,6 +434,16 @@ export default function AdminUsers() {
                 <TableCell className="py-1 px-2 text-right">
                   <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => handleOpenPromote(user)} title="Editar usuário">
                     <UserCheck className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={user.is_blocked ? "h-6 w-6 text-green-600 hover:text-green-700" : "h-6 w-6 text-amber-600 hover:text-amber-700"}
+                    onClick={() => handleToggleBlock(user)}
+                    disabled={blockMutation.isPending}
+                    title={user.is_blocked ? "Desbloquear usuário" : "Bloquear usuário"}
+                  >
+                    {user.is_blocked ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
                   </Button>
                   <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500 hover:text-red-600" onClick={() => handleDelete(user.id)} title="Excluir usuário">
                     <Trash2 className="h-3.5 w-3.5" />
