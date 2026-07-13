@@ -101,7 +101,11 @@ func PagamentosFornecedoresImportHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		var rows []csvRow
-		var erros []pagImportError
+		// erros inicializado como slice vazio (não nil): um slice nil marshala
+		// para JSON `null`, e o frontend faz lastResult.erros.length sem checar
+		// null — um import 100% limpo (0 erros) derrubava a tela com "Cannot
+		// read properties of null" (bug encontrado em teste manual em produção).
+		erros := []pagImportError{}
 		lineNum := 1 // header já foi linha 1
 
 		records, _ := reader.ReadAll()

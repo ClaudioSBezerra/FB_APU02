@@ -196,11 +196,16 @@ export default function ImportarPagamentosFornecedores() {
       const formData = new FormData();
       formData.append('csv', csvFile);
       const res = await fetch('/api/pagamentos-fornecedores/import', { method: 'POST', body: formData });
-      const data = await res.json() as ImportResult & { error?: string };
+      const raw = await res.json() as ImportResult & { error?: string };
       if (!res.ok) {
-        toast.error('Erro no import: ' + (data.error ?? res.statusText));
+        toast.error('Erro no import: ' + (raw.error ?? res.statusText));
         return;
       }
+      // Normaliza erros para array: backend pode responder `null` quando não
+      // há nenhum erro (slice nil do Go serializado como JSON null) — sem essa
+      // normalização, .length abaixo (e no render) quebra com "Cannot read
+      // properties of null".
+      const data: ImportResult = { ...raw, erros: raw.erros ?? [] };
       setLastResult(data);
       if (data.importados > 0 && data.duplicados === 0 && data.erros.length === 0) {
         toast.success(`${data.importados} pagamento(s) importado(s) com sucesso.`);
