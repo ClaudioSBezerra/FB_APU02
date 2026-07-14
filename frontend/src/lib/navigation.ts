@@ -95,7 +95,7 @@ export const modules: Record<string, ModuleConfig> = {
     ],
   },
   dfes: {
-    label: "DF-e's",
+    label: "Importação DFe-s",
     tabs: [],
   },
   argus: {

@@ -33,7 +33,7 @@ import { toast } from 'sonner'
 const mainItems = [
   { id: 'painel',       icon: LayoutDashboard,  label: 'Painel',           path: '/painel/resumo-fiscal' },
   { id: 'importacoes',  icon: Upload,           label: 'Importações',      path: '/importacoes/nfe-entrada' },
-  { id: 'dfes',         icon: Files,            label: "DF-e's",           path: '/dfes' },
+  { id: 'dfes',         icon: Files,            label: "Importação DFe-s", path: '/dfes' },
   { id: 'notas',        icon: FileText,         label: 'Notas Importadas', path: '/apuracao/saida/notas' },
   { id: 'cgibs',        icon: Scale,            label: 'CGIBS — IBS',      path: '/cgibs/apuracao-ibs' },
   { id: 'rfb',          icon: Landmark,         label: 'Receita Federal',  path: '/rfb/gestao-creditos' },
