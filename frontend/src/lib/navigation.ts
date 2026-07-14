@@ -21,21 +21,7 @@ export const modules: Record<string, ModuleConfig> = {
   },
   notas: {
     label: 'Notas Importadas',
-    tabs: [
-      { label: 'NF-e Entradas',    path: '/apuracao/entrada/notas' },
-      { label: 'NF-e Saídas',      path: '/apuracao/saida/notas' },
-      { label: 'CT-e Entradas',    path: '/apuracao/cte-entrada/notas' },
-      { label: 'CT-e Saídas',      path: '#', disabled: true },
-      { label: 'NFS-e Entradas',   path: '#', disabled: true },
-      { label: 'NFS-e Saídas',     path: '#', disabled: true },
-      { label: 'BP-e',             path: '#', disabled: true },
-      { label: 'NF3-e',            path: '#', disabled: true },
-      { label: 'NFCom-e',          path: '#', disabled: true },
-      { label: 'NFag-e',           path: '#', disabled: true },
-      { label: 'NF-e ABI',         path: '#', disabled: true },
-      { label: 'ND-e',             path: '#', disabled: true },
-      { label: 'NC-e',             path: '#', disabled: true },
-    ],
+    tabs: [],
   },
   importacoes: {
     label: 'Importações',

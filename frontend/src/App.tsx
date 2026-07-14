@@ -18,9 +18,7 @@ import RFBPagamentosFornecedores from './pages/RFBPagamentosFornecedores'
 import GestaoCredIBSCBS from './pages/GestaoCredIBSCBS'
 import PainelApuracaoIBS from './pages/PainelApuracaoIBS'
 import PainelApuracaoCBS from './pages/PainelApuracaoCBS'
-import ConsultaNFeSaidas from './pages/ConsultaNFeSaidas'
-import ConsultaNFesEntradas from './pages/ConsultaNFesEntradas'
-import ConsultaCTesEntradas from './pages/ConsultaCTesEntradas'
+import NotasImportadasModulo from './pages/NotasImportadasModulo'
 import ERPBridgeConfig from './pages/ERPBridgeConfig'
 import ERPBridgeLogs from './pages/ERPBridgeLogs'
 import ERPBridgeCredenciais from './pages/ERPBridgeCredenciais'
@@ -240,9 +238,9 @@ function AppLayout() {
               <Route path="/dfes" element={<DFesModulo />} />
 
               {/* Apuração */}
-              <Route path="/apuracao/saida/notas"       element={<ConsultaNFeSaidas />} />
-              <Route path="/apuracao/entrada/notas"     element={<ConsultaNFesEntradas />} />
-              <Route path="/apuracao/cte-entrada/notas" element={<ConsultaCTesEntradas />} />
+              <Route path="/apuracao/saida/notas"       element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="saida" />} />
+              <Route path="/apuracao/entrada/notas"     element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="entrada" />} />
+              <Route path="/apuracao/cte-entrada/notas" element={<NotasImportadasModulo tipoInicial="cte" direcaoInicial="entrada" />} />
               <Route path="/apuracao/creditos-perdidos" element={<ApuracaoCredPerdidos />} />
               <Route path="/apuracao/limpar-dados"     element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
               <Route path="/rfb/apuracao-ibs"           element={<PainelApuracaoIBS />} />
