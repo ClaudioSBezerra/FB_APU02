@@ -1,4 +1,4 @@
-import { Landmark, LayoutDashboard, Scale, Settings, LogOut, KeyRound, Telescope, FileText, Upload, Globe } from 'lucide-react'
+import { Landmark, LayoutDashboard, Scale, Settings, LogOut, KeyRound, Telescope, FileText, Upload, Globe, Files } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import {
@@ -33,6 +33,7 @@ import { toast } from 'sonner'
 const mainItems = [
   { id: 'painel',       icon: LayoutDashboard,  label: 'Painel',           path: '/painel/resumo-fiscal' },
   { id: 'importacoes',  icon: Upload,           label: 'Importações',      path: '/importacoes/nfe-entrada' },
+  { id: 'dfes',         icon: Files,            label: "DF-e's",           path: '/dfes' },
   { id: 'notas',        icon: FileText,         label: 'Notas Importadas', path: '/apuracao/saida/notas' },
   { id: 'cgibs',        icon: Scale,            label: 'CGIBS — IBS',      path: '/cgibs/apuracao-ibs' },
   { id: 'rfb',          icon: Landmark,         label: 'Receita Federal',  path: '/rfb/gestao-creditos' },

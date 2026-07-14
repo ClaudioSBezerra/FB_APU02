@@ -94,6 +94,10 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'NC-e',             path: '#', disabled: true },
     ],
   },
+  dfes: {
+    label: "DF-e's",
+    tabs: [],
+  },
   argus: {
     label: 'Portal Fiscal CBS/IBS (Demo)',
     tabs: [
@@ -127,6 +131,8 @@ export function getActiveModule(pathname: string): string {
   if (pathname.includes('/notas')) return 'notas'
 
   if (pathname.startsWith('/importacoes/')) return 'importacoes'
+
+  if (pathname.startsWith('/dfes')) return 'dfes'
 
   const cgibsPaths = ['/cgibs/apuracao-ibs', '/cgibs/apuracao', '/cgibs/debitos']
   if (cgibsPaths.some(p => pathname.startsWith(p))) return 'cgibs'

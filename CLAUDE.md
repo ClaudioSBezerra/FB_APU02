@@ -12,7 +12,6 @@ Plataforma web de apuração fiscal tributária para o grupo Ferreira Costa. Pro
 - **Stack:** Go + React/TypeScript + PostgreSQL — sem mudança de tecnologia
 - **Backward compatibility:** Migrations existentes não podem ser alteradas, apenas adicionadas
 - **Deploy:** Alterações de segurança urgentes (SEC-01, SEC-02) devem ser deployadas assim que prontas
-- **Sem novas features:** Este milestone é exclusivamente de estabilização
 <!-- GSD:project-end -->
 
 <!-- GSD:stack-start source:codebase/STACK.md -->
