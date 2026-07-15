@@ -19,9 +19,9 @@ interface TipoDocumento {
 
 const TIPOS: TipoDocumento[] = [
   { key: 'nfe',     label: 'Nota Fiscal Eletrônica (NF-e)',     enabled: true },
+  { key: 'cte',     label: 'Conhecimento de Frete (CT-e)',     enabled: true },
   { key: 'nfce',    label: 'Nota Fiscal Consumidor (NFC-e)',    enabled: false },
   { key: 'nfse',    label: 'Nota Fiscal de Serviços (NFS-e)',   enabled: false },
-  { key: 'cte',     label: 'Conhecimento de Frete (CT-e)',     enabled: true },
   { key: 'nce',     label: 'Nota de Crédito (NC-e)',            enabled: false },
   { key: 'nde',     label: 'Nota de Débito (ND-e)',             enabled: false },
   { key: 'bpe',     label: 'Bilhete de Passagem (BP-e)',        enabled: false },
@@ -138,7 +138,6 @@ export default function DFesModulo() {
             )}
           >
             <span>{tipo.label}</span>
-            {!tipo.enabled && <Badge variant="secondary" className="text-[10px] shrink-0">Em breve</Badge>}
           </button>
         ))}
       </aside>
@@ -164,7 +163,6 @@ export default function DFesModulo() {
                 >
                   <Icon className="h-4 w-4 mr-2" />
                   {d === 'entrada' ? 'Entrada' : 'Saída'}
-                  {!disponivel && <Badge variant="secondary" className="ml-2 text-[10px]">Em breve</Badge>}
                 </Button>
               );
             })}
