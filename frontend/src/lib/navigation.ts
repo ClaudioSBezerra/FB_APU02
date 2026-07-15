@@ -64,21 +64,7 @@ export const modules: Record<string, ModuleConfig> = {
   },
   malha: {
     label: 'Malha Fina',
-    tabs: [
-      { label: 'NF-e Entradas',    path: '/malha-fina/nfe-entradas' },
-      { label: 'NF-e Saídas',      path: '/malha-fina/nfe-saidas' },
-      { label: 'CT-e Entradas',    path: '/malha-fina/cte' },
-      { label: 'CT-e Saídas',      path: '#', disabled: true },
-      { label: 'NFS-e Entradas',   path: '#', disabled: true },
-      { label: 'NFS-e Saídas',     path: '#', disabled: true },
-      { label: 'BP-e',             path: '#', disabled: true },
-      { label: 'NF3-e',            path: '#', disabled: true },
-      { label: 'NFCom-e',          path: '#', disabled: true },
-      { label: 'NFag-e',           path: '#', disabled: true },
-      { label: 'NF-e ABI',         path: '#', disabled: true },
-      { label: 'ND-e',             path: '#', disabled: true },
-      { label: 'NC-e',             path: '#', disabled: true },
-    ],
+    tabs: [],
   },
   dfes: {
     label: "Importação DFe-s",

@@ -1,5 +1,41 @@
 # Deferred Work
 
+## Deferred from: code review of spec-malha-fina-modulo (2026-07-15)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`
+  summary: Nenhuma sincronização de `tipoAtivo`/`direcao` com a URL nos 3 módulos de submenu vertical (`DFesModulo.tsx`, `NotasImportadasModulo.tsx`, `MalhaFinaModulo.tsx`) — back/forward/refresh/deep-link não preservam a seleção feita dentro do módulo.
+  evidence: Trade-off já aceito explicitamente nas specs de DFe-s e Notas Importadas (Design Notes); este diff propaga o mesmo padrão para uma 3ª instância. Corrigir isoladamente aqui divergiria do padrão irmão — se resolvido, deve ser feito de forma consistente nos 3 módulos ao mesmo tempo.
+- source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`
+  summary: As 3 listas `TIPOS` (DFesModulo.tsx, NotasImportadasModulo.tsx, MalhaFinaModulo.tsx) já divergem entre si em composição (12 vs 12 vs 10 tipos, com itens diferentes) — não existe fonte única de verdade para "tipos de documento fiscal do negócio".
+  evidence: Confirmado por comparação direta dos 3 arrays. Extrair uma fonte compartilhada não estava no escopo de nenhuma das 3 specs (decisão consciente de manter os shells como implementações irmãs, registrada como "Ask First" em cada spec). Revisitar se um 4º módulo replicar o padrão — nesse ponto o custo de manter 4 cópias divergentes provavelmente supera o de uma abstração compartilhada.
+- source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`
+  summary: `DIRECOES_DISPONIVEIS` em `MalhaFinaModulo.tsx` só define chaves para `nfe`/`cte`; se um tipo hoje desabilitado (ex. NFS-e, que conceitualmente tem entrada e saída) for habilitado no futuro sem que a entrada correspondente seja adicionada, o seletor Entrada/Saída desaparece silenciosamente (sem erro de tipo, sem aviso).
+  evidence: Risco real mas não acionável hoje — só 2 tipos estão habilitados atualmente. Revisitar no momento em que um novo tipo ganhar backend/tela real.
+- source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`
+  summary: Itens desabilitados no submenu vertical (nos 3 módulos) não têm tooltip/`title`/`aria-label` explicando por que estão bloqueados — só aparecem acinzentados.
+  evidence: Omissão já existente em `DFesModulo.tsx`/`NotasImportadasModulo.tsx`, propagada por consistência. Baixa prioridade para uma tela interna de operação fiscal; revisitar se acessibilidade virar requisito formal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`
+  summary: `MalhaFinaNFeEntradas.tsx`, `MalhaFinaNFeSaidas.tsx` e `MalhaFinaCTe.tsx` ficaram sem nenhuma referência em `frontend/src` após a troca de rotas em `App.tsx`, mas não foram deletados (decisão da spec: "permanecem como estão, não removidos").
+  evidence: Decisão explícita do Code Map da spec, para reduzir blast radius desta mudança. `tsc --noEmit` não acusa arquivos com export default não referenciado, então não há sinal automático de que isso é lixo — revisitar numa limpeza futura, confirmando antes que nenhuma rota externa/histórico aponte para eles.
+- source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`
+  summary: Nenhuma abstração compartilhada entre os 3 shells de submenu vertical (`DFesModulo.tsx`, `NotasImportadasModulo.tsx`, `MalhaFinaModulo.tsx`) — cada um reimplementa a mesma estrutura de estado e JSX do `<aside>` com pequenas variações de dados.
+  evidence: Já registrado como "Ask First" explícito nas 3 specs — decisão consciente de manter como implementações irmãs por ora. Revisitar se um 4º módulo replicar o padrão (CGIBS/RFB já estão na fila, ver entradas de planning abaixo).
+- source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`
+  summary: Descrição do painel de CT-e ("...que não foram importados nos registros da empresa") usa um padrão de texto diferente das descrições de NF-e ("...que não foram importadas como entradas/saídas").
+  evidence: Herdado do antigo `MalhaFinaCTe.tsx` (texto copiado literalmente, conforme instrução da spec), não introduzido por este diff. Baixa prioridade, cosmético.
+
+## Deferred from: planning of spec-malha-fina-modulo (2026-07-15)
+
+- source_spec: none
+  summary: Replicar submenu vertical para o módulo "CGIBS - Apuração Assistida IBS" (mesmas abas atuais — Apuração IBS, Importar Movimento, Débitos, Créditos, Pagamentos, Concluir Apuração —, só trocando de horizontal para vertical, sem reagrupar).
+  evidence: Usuário pediu para remodelar CGIBS, RFB e Malha Fina juntos nesta mesma mensagem; split para reduzir blast radius e permitir revisão/reversão independente por módulo. Começando por Malha Fina primeiro (estrutura mais próxima do padrão já usado em DFe-s/Notas Importadas).
+- source_spec: none
+  summary: Replicar submenu vertical para o módulo "Receita Federal - Apuração Assistida" (mesmas abas atuais — Gestão CBS RFB, Importar Movimento, Débitos mês, Créditos CBS, Pagamentos CBS, Pgtos Fornecedores, Gestão Eventos Cred/Deb., Concluir apuração —, só trocando de horizontal para vertical, sem reagrupar).
+  evidence: Mesmo motivo do item CGIBS acima — split de escopo para reduzir risco de acoplamento entre os 4 entregáveis pedidos na mesma mensagem.
+- source_spec: none
+  summary: Remover módulo "Importações" do menu (AppRail + navigation.ts) e renomear "Importação DFe-s" para "Importação DFe-s e Outros", absorvendo as 3 funcionalidades sem equivalente hoje em outro menu (Pag. Fornecedores CSV, Importar via ERP, Logs ERP) para dentro do módulo DFe-s.
+  evidence: Decisão explícita do usuário sobre o destino das abas de "Importações" sem equivalente. Tratado como último item da sequência por ser o mais delicado (mexe em rotas administrativas de ERP Bridge e no módulo DFesModulo.tsx já existente).
+
 ## Deferred from: code review of story 1-1-cadastro-de-credenciais-e-mapeamento-de-bukrs-por-empresa (2026-07-11)
 
 - Usuário sem empresa associada recebe 500 genérico em vez de 403/404 ao acessar `/api/sap/credentials` — pré-existente, mesmo padrão usado em RFB/CGIBS/ERP Bridge via `GetEffectiveCompanyID` + `sanitizeDBErr`; não introduzido por esta story. Se for corrigido, deve ser feito de forma consistente em todos os handlers que usam esse padrão, não isoladamente aqui.

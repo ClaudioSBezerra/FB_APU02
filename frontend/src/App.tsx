@@ -28,9 +28,7 @@ import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import DFesModulo from './pages/DFesModulo'
 import ImportarPagamentosFornecedores from './pages/ImportarPagamentosFornecedores'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
-import MalhaFinaNFeEntradas from './pages/MalhaFinaNFeEntradas'
-import MalhaFinaNFeSaidas from './pages/MalhaFinaNFeSaidas'
-import MalhaFinaCTe from './pages/MalhaFinaCTe'
+import MalhaFinaModulo from './pages/MalhaFinaModulo'
 import ArgusPortal from './pages/ArgusPortal'
 import AdminUsers from './pages/AdminUsers'
 import UserActivity from './pages/UserActivity'
@@ -247,9 +245,9 @@ function AppLayout() {
               <Route path="/rfb/apuracao-cbs"           element={<PainelApuracaoCBS />} />
 
               {/* Malha Fina */}
-              <Route path="/malha-fina/nfe-entradas"  element={<MalhaFinaNFeEntradas />} />
-              <Route path="/malha-fina/nfe-saidas"    element={<MalhaFinaNFeSaidas />} />
-              <Route path="/malha-fina/cte"           element={<MalhaFinaCTe />} />
+              <Route path="/malha-fina/nfe-entradas"  element={<MalhaFinaModulo tipoInicial="nfe" direcaoInicial="entrada" />} />
+              <Route path="/malha-fina/nfe-saidas"    element={<MalhaFinaModulo tipoInicial="nfe" direcaoInicial="saida" />} />
+              <Route path="/malha-fina/cte"           element={<MalhaFinaModulo tipoInicial="cte" direcaoInicial="entrada" />} />
 
               {/* Portal Argus (Demo) */}
               <Route path="/argus" element={<ArgusPortal />} />
