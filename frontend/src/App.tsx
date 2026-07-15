@@ -338,7 +338,7 @@ function AppLayout() {
 
 // ── App root ─────────────────────────────────────────────────────────────────
 function App() {
-  console.log('App Version: 2.0.4 — FB_APU02 Apuração Assistida SAP S/4HANA')
+  console.log('App Version: 2.0.5 — FB_APU02 Apuração Assistida SAP S/4HANA')
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
