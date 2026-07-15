@@ -173,6 +173,55 @@ function ModuleTabs() {
   )
 }
 
+// ── Submenu vertical por módulo ──────────────────────────────────────────────
+function ModuleSideNav() {
+  const location   = useLocation()
+  const { user }   = useAuth()
+  const isAdmin    = user?.role === 'admin'
+  const moduleId   = getActiveModule(location.pathname)
+  const moduleCfg  = modules[moduleId]
+
+  if (!moduleCfg || moduleCfg.tabs.length === 0) return null
+
+  const visibleTabs = moduleCfg.tabs.filter(t => !t.adminOnly || isAdmin)
+
+  return (
+    <aside key={moduleId} className="w-56 shrink-0 border-r bg-white overflow-y-auto">
+      <div className="flex flex-col gap-0.5 p-2">
+        {visibleTabs.map(tab => {
+          const isActive   = location.pathname === tab.path
+          const isDisabled = tab.disabled
+          return isDisabled ? (
+            <span
+              key={tab.path}
+              className="px-3 py-1.5 text-xs rounded-md text-muted-foreground/50 cursor-not-allowed whitespace-nowrap"
+            >
+              {tab.label}
+            </span>
+          ) : (
+            <Link
+              key={tab.path}
+              to={tab.path}
+              className={cn(
+                'px-3 py-1.5 text-xs rounded-md whitespace-nowrap transition-colors',
+                isActive
+                  ? tab.danger
+                    ? 'bg-red-50 text-red-700 font-semibold'
+                    : 'bg-primary/10 text-primary font-semibold'
+                  : tab.danger
+                    ? 'text-red-500 hover:bg-red-50 hover:text-red-700'
+                    : 'text-muted-foreground hover:bg-gray-100 hover:text-foreground'
+              )}
+            >
+              {tab.label}
+            </Link>
+          )
+        })}
+      </div>
+    </aside>
+  )
+}
+
 // ── Cabeçalho (módulo + controles globais) ───────────────────────────────────
 function AppHeader() {
   const location  = useLocation()
@@ -195,80 +244,92 @@ function AppHeader() {
 // ── Layout principal ─────────────────────────────────────────────────────────
 function AppLayout() {
   useRouteActivityLogger()
+  const location  = useLocation()
+  const moduleId  = getActiveModule(location.pathname)
+  const moduleCfg = modules[moduleId]
+  const isVertical = moduleCfg?.orientation === 'vertical' && moduleCfg.tabs.length > 0
+
+  const routes = (
+    <Routes>
+      <Route path="/" element={<Navigate to="/rfb/gestao-creditos" replace />} />
+
+      {/* Painel */}
+      <Route path="/painel/resumo-fiscal" element={<DashboardResumo />} />
+
+      {/* Configurações */}
+      <Route path="/config/aliquotas"       element={<TabelaAliquotas />} />
+      <Route path="/config/cfop"            element={<TabelaCFOP />} />
+      <Route path="/config/forn-simples"    element={<TabelaFornSimples />} />
+      <Route path="/config/apelidos-filiais" element={<ApelidosFiliais />} />
+      <Route path="/config/gestores"        element={<Managers />} />
+      <Route path="/config/ambiente"        element={<ProtectedRoute><GestaoAmbiente /></ProtectedRoute>} />
+      <Route path="/config/usuarios"        element={<AdminRoute><AdminUsers /></AdminRoute>} />
+      <Route path="/config/user-activity"   element={<AdminRoute><UserActivity /></AdminRoute>} />
+      <Route path="/config/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
+      <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
+      <Route path="/config/sap-credenciais" element={<AdminRoute><SAPCredentials /></AdminRoute>} />
+      <Route path="/config/sap-sincronizacoes" element={<AdminRoute><SAPSyncHistory /></AdminRoute>} />
+      <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
+
+      {/* ERP Bridge */}
+      <Route path="/importacoes/nfe-entrada"      element={<ImportarXMLsEntrada />} />
+      <Route path="/importacoes/nfe-saida"       element={<ImportarXMLsSaida />} />
+      <Route path="/importacoes/cte-entrada"     element={<ImportarXMLsCTe />} />
+      <Route path="/importacoes/pagamentos-fornecedores" element={<ImportarPagamentosFornecedores />} />
+      <Route path="/importacoes/erp-bridge"      element={<AdminRoute><ERPBridgeConfig /></AdminRoute>} />
+      <Route path="/importacoes/erp-bridge/logs" element={<AdminRoute><ERPBridgeLogs /></AdminRoute>} />
+
+      {/* DF-e's */}
+      <Route path="/dfes" element={<DFesModulo />} />
+
+      {/* Apuração */}
+      <Route path="/apuracao/saida/notas"       element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="saida" />} />
+      <Route path="/apuracao/entrada/notas"     element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="entrada" />} />
+      <Route path="/apuracao/cte-entrada/notas" element={<NotasImportadasModulo tipoInicial="cte" direcaoInicial="entrada" />} />
+      <Route path="/apuracao/creditos-perdidos" element={<ApuracaoCredPerdidos />} />
+      <Route path="/apuracao/limpar-dados"     element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
+      <Route path="/rfb/apuracao-ibs"           element={<PainelApuracaoIBS />} />
+      <Route path="/rfb/apuracao-cbs"           element={<PainelApuracaoCBS />} />
+
+      {/* Malha Fina */}
+      <Route path="/malha-fina/nfe-entradas"  element={<MalhaFinaModulo tipoInicial="nfe" direcaoInicial="entrada" />} />
+      <Route path="/malha-fina/nfe-saidas"    element={<MalhaFinaModulo tipoInicial="nfe" direcaoInicial="saida" />} />
+      <Route path="/malha-fina/cte"           element={<MalhaFinaModulo tipoInicial="cte" direcaoInicial="entrada" />} />
+
+      {/* Portal Argus (Demo) */}
+      <Route path="/argus" element={<ArgusPortal />} />
+
+      {/* CGIBS */}
+      <Route path="/cgibs/apuracao-ibs"   element={<CGIBSPainel />} />
+      <Route path="/cgibs/apuracao"        element={<CGIBSApuracao />} />
+      <Route path="/cgibs/debitos"         element={<CGIBSDebitos />} />
+      <Route path="/cgibs/credenciais"     element={<AdminRoute><CGIBSCredentials /></AdminRoute>} />
+
+      {/* Receita Federal */}
+      <Route path="/rfb/gestao-creditos"        element={<GestaoCredIBSCBS />} />
+      <Route path="/rfb/apuracao"               element={<RFBApuracao />} />
+      <Route path="/rfb/debitos"                element={<RFBDebitos />} />
+      <Route path="/rfb/creditos-cbs"           element={<RFBCreditosCBS />} />
+      <Route path="/rfb/pagamentos-cbs"         element={<ComingSoon title="Pagamentos CBS mês corrente" />} />
+      <Route path="/rfb/pagamentos-fornecedores" element={<RFBPagamentosFornecedores />} />
+      <Route path="/rfb/concluir-apuracao"      element={<ComingSoon title="Concluir apuração mês anterior" />} />
+    </Routes>
+  )
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <AppRail />
       <div className="flex flex-col flex-1 min-w-0">
         <AppHeader />
-        <ModuleTabs />
-        <main className="flex-1 overflow-auto">
-          <div className="p-4">
-            <Routes>
-              <Route path="/" element={<Navigate to="/rfb/gestao-creditos" replace />} />
-
-              {/* Painel */}
-              <Route path="/painel/resumo-fiscal" element={<DashboardResumo />} />
-
-              {/* Configurações */}
-              <Route path="/config/aliquotas"       element={<TabelaAliquotas />} />
-              <Route path="/config/cfop"            element={<TabelaCFOP />} />
-              <Route path="/config/forn-simples"    element={<TabelaFornSimples />} />
-              <Route path="/config/apelidos-filiais" element={<ApelidosFiliais />} />
-              <Route path="/config/gestores"        element={<Managers />} />
-              <Route path="/config/ambiente"        element={<ProtectedRoute><GestaoAmbiente /></ProtectedRoute>} />
-              <Route path="/config/usuarios"        element={<AdminRoute><AdminUsers /></AdminRoute>} />
-              <Route path="/config/user-activity"   element={<AdminRoute><UserActivity /></AdminRoute>} />
-              <Route path="/config/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
-              <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
-              <Route path="/config/sap-credenciais" element={<AdminRoute><SAPCredentials /></AdminRoute>} />
-              <Route path="/config/sap-sincronizacoes" element={<AdminRoute><SAPSyncHistory /></AdminRoute>} />
-              <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
-
-              {/* ERP Bridge */}
-              <Route path="/importacoes/nfe-entrada"      element={<ImportarXMLsEntrada />} />
-              <Route path="/importacoes/nfe-saida"       element={<ImportarXMLsSaida />} />
-              <Route path="/importacoes/cte-entrada"     element={<ImportarXMLsCTe />} />
-              <Route path="/importacoes/pagamentos-fornecedores" element={<ImportarPagamentosFornecedores />} />
-              <Route path="/importacoes/erp-bridge"      element={<AdminRoute><ERPBridgeConfig /></AdminRoute>} />
-              <Route path="/importacoes/erp-bridge/logs" element={<AdminRoute><ERPBridgeLogs /></AdminRoute>} />
-
-              {/* DF-e's */}
-              <Route path="/dfes" element={<DFesModulo />} />
-
-              {/* Apuração */}
-              <Route path="/apuracao/saida/notas"       element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="saida" />} />
-              <Route path="/apuracao/entrada/notas"     element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="entrada" />} />
-              <Route path="/apuracao/cte-entrada/notas" element={<NotasImportadasModulo tipoInicial="cte" direcaoInicial="entrada" />} />
-              <Route path="/apuracao/creditos-perdidos" element={<ApuracaoCredPerdidos />} />
-              <Route path="/apuracao/limpar-dados"     element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
-              <Route path="/rfb/apuracao-ibs"           element={<PainelApuracaoIBS />} />
-              <Route path="/rfb/apuracao-cbs"           element={<PainelApuracaoCBS />} />
-
-              {/* Malha Fina */}
-              <Route path="/malha-fina/nfe-entradas"  element={<MalhaFinaModulo tipoInicial="nfe" direcaoInicial="entrada" />} />
-              <Route path="/malha-fina/nfe-saidas"    element={<MalhaFinaModulo tipoInicial="nfe" direcaoInicial="saida" />} />
-              <Route path="/malha-fina/cte"           element={<MalhaFinaModulo tipoInicial="cte" direcaoInicial="entrada" />} />
-
-              {/* Portal Argus (Demo) */}
-              <Route path="/argus" element={<ArgusPortal />} />
-
-              {/* CGIBS */}
-              <Route path="/cgibs/apuracao-ibs"   element={<CGIBSPainel />} />
-              <Route path="/cgibs/apuracao"        element={<CGIBSApuracao />} />
-              <Route path="/cgibs/debitos"         element={<CGIBSDebitos />} />
-              <Route path="/cgibs/credenciais"     element={<AdminRoute><CGIBSCredentials /></AdminRoute>} />
-
-              {/* Receita Federal */}
-              <Route path="/rfb/gestao-creditos"        element={<GestaoCredIBSCBS />} />
-              <Route path="/rfb/apuracao"               element={<RFBApuracao />} />
-              <Route path="/rfb/debitos"                element={<RFBDebitos />} />
-              <Route path="/rfb/creditos-cbs"           element={<RFBCreditosCBS />} />
-              <Route path="/rfb/pagamentos-cbs"         element={<ComingSoon title="Pagamentos CBS mês corrente" />} />
-              <Route path="/rfb/pagamentos-fornecedores" element={<RFBPagamentosFornecedores />} />
-              <Route path="/rfb/concluir-apuracao"      element={<ComingSoon title="Concluir apuração mês anterior" />} />
-            </Routes>
-          </div>
-        </main>
+        {!isVertical && <ModuleTabs />}
+        <div className="flex flex-1 min-h-0">
+          {isVertical && <ModuleSideNav />}
+          <main className="flex-1 overflow-auto">
+            <div className="p-4">
+              {routes}
+            </div>
+          </main>
+        </div>
       </div>
       <Toaster />
     </div>

@@ -1,5 +1,23 @@
 # Deferred Work
 
+## Deferred from: code review of spec-rfb-cgibs-submenu-vertical (2026-07-15)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cgibs-submenu-vertical.md`
+  summary: Nenhuma abstração compartilhada entre `ModuleTabs` (horizontal) e `ModuleSideNav` (vertical) — a nova função é uma cópia quase literal da lógica de `visibleTabs`/isActive/isDisabled/danger de `ModuleTabs`, só muda o container e o layout flex.
+  evidence: Já registrado como gatilho explícito em `spec-malha-fina-modulo.md` ("revisitar se um 4º módulo replicar o padrão — CGIBS/RFB já estão na fila"). Esse gatilho chegou agora. Revisitar: extrair um `useModuleTabs()` (ou renderer único parametrizado por orientação) compartilhado por `ModuleTabs`/`ModuleSideNav`, reduzindo o custo de manter os dois em sincronia.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cgibs-submenu-vertical.md`
+  summary: Keys duplicadas (`path: '#'`) nas abas desabilitadas do módulo `cgibs` (4 abas compartilham a mesma key) — propagado de `ModuleTabs` para o novo `ModuleSideNav`.
+  evidence: Bug pré-existente já documentado em `deferred-work.md` (seção "code review of spec-dfes-modulo"), não introduzido por esta mudança — apenas herdado pelo novo componente por reaproveitar a mesma lógica. Revisitar junto com a correção já registrada (usar índice ou label+path como key).
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cgibs-submenu-vertical.md`
+  summary: `ModuleSideNav` não tem semântica de acessibilidade (`<nav>`/`<ul>`, `aria-current`, `aria-disabled`) — mesma lacuna já aceita nos submenus verticais de DFe-s/Notas/Malha Fina.
+  evidence: Omissão consistente com os 3 módulos irmãos (já deferida em `deferred-work.md`). Baixa prioridade para uma tela interna de operação fiscal; revisitar se acessibilidade virar requisito formal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cgibs-submenu-vertical.md`
+  summary: Sidebar de largura fixa (`w-56 shrink-0`) sem fallback responsivo/colapso para viewports estreitos — mesmo padrão de largura fixa já aceito nos submenus verticais anteriores (`w-64` em DFe-s/Malha Fina).
+  evidence: Consistente com decisão de Design Notes já tomada nos 3 módulos irmãos (largura fixa, ajustável se algum label quebrar linha). Revisitar se suporte a viewport estreito/mobile virar requisito do projeto.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cgibs-submenu-vertical.md`
+  summary: Itens desabilitados no submenu vertical de `rfb`/`cgibs` não têm tooltip/indicador explicando por que estão bloqueados — mesma lacuna já aceita nos 3 módulos irmãos.
+  evidence: Omissão já existente em `DFesModulo.tsx`/`NotasImportadasModulo.tsx`/`MalhaFinaModulo.tsx`, propagada por consistência ao reaproveitar a mesma lógica de estilo. Revisitar se acessibilidade/UX de "em breve" virar requisito formal.
+
 ## Deferred from: code review of spec-malha-fina-modulo (2026-07-15)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-modulo.md`

@@ -9,6 +9,7 @@ export interface ModuleTab {
 export interface ModuleConfig {
   label: string
   tabs: ModuleTab[]
+  orientation?: 'horizontal' | 'vertical'
 }
 
 export const modules: Record<string, ModuleConfig> = {
@@ -39,6 +40,7 @@ export const modules: Record<string, ModuleConfig> = {
   },
   cgibs: {
     label: 'CGIBS - Apuração Assistida IBS',
+    orientation: 'vertical',
     tabs: [
       { label: 'Apuração IBS',        path: '/cgibs/apuracao-ibs' },
       { label: 'Importar Movimento',  path: '/cgibs/apuracao' },
@@ -51,6 +53,7 @@ export const modules: Record<string, ModuleConfig> = {
   },
   rfb: {
     label: 'Receita Federal - Apuração Assistida',
+    orientation: 'vertical',
     tabs: [
       { label: 'Gestão CBS RFB',       path: '/rfb/gestao-creditos' },
       { label: 'Importar Movimento',  path: '/rfb/apuracao' },
