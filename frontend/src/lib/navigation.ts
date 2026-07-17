@@ -27,11 +27,8 @@ export const modules: Record<string, ModuleConfig> = {
   importacoes: {
     label: 'Importações VIA ERP',
     tabs: [
-      { label: 'NFS-e Entradas (XML)', path: '#', disabled: true },
-      { label: 'NFS-e Saídas (XML)',   path: '#', disabled: true },
-      { label: 'CT-e Saídas (XML)',    path: '#', disabled: true },
-      { label: 'Importar via ERP',     path: '/importacoes/erp-bridge',      adminOnly: true },
-      { label: 'Logs ERP',             path: '/importacoes/erp-bridge/logs', adminOnly: true },
+      { label: 'Importar via ERP', path: '/importacoes/erp-bridge' },
+      { label: 'Logs ERP',         path: '/importacoes/erp-bridge/logs' },
     ],
   },
   cgibs: {

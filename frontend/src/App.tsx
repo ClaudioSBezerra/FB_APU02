@@ -276,8 +276,8 @@ function AppLayout() {
       <Route path="/importacoes/nfe-saida"       element={<ImportarXMLsSaida />} />
       <Route path="/importacoes/cte-entrada"     element={<ImportarXMLsCTe />} />
       <Route path="/importacoes/pagamentos-fornecedores" element={<ImportarPagamentosFornecedores />} />
-      <Route path="/importacoes/erp-bridge"      element={<AdminRoute><ERPBridgeConfig /></AdminRoute>} />
-      <Route path="/importacoes/erp-bridge/logs" element={<AdminRoute><ERPBridgeLogs /></AdminRoute>} />
+      <Route path="/importacoes/erp-bridge"      element={<ERPBridgeConfig />} />
+      <Route path="/importacoes/erp-bridge/logs" element={<ERPBridgeLogs />} />
 
       {/* DF-e's */}
       <Route path="/dfes" element={<DFesModulo />} />
