@@ -1,5 +1,20 @@
 # Deferred Work
 
+## Deferred from: code review of spec-importacoes-dfes-reorg-menu (2026-07-16)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-importacoes-dfes-reorg-menu.md`
+  summary: Módulo "Importações VIA ERP" fica sem nenhuma aba clicável para usuário não-admin — os 3 itens restantes (NFS-e Entradas/Saídas, CT-e Saídas) são `disabled: true`, e os 2 únicos itens habilitados (Importar via ERP, Logs ERP) são `adminOnly`.
+  evidence: Consequência direta e esperada da decisão já aprovada com o usuário de remover os 4 itens migrados/duplicados. Não é bug, mas vale revisitar se o módulo ficar "morto" para a maioria dos usuários — considerar habilitar algum dos itens disabled ou reavaliar se o módulo ainda faz sentido como destino de navegação para não-admins.
+- source_spec: `_bmad-output/implementation-artifacts/spec-importacoes-dfes-reorg-menu.md`
+  summary: Rota órfã `/importacoes/pagamentos-fornecedores` (mantida intacta por decisão do usuário) destaca o módulo "Importações VIA ERP" no rail ao ser acessada diretamente, mas nenhuma aba do módulo corresponde a essa URL (a aba foi removida de `navigation.ts`) — resultado é módulo ativo sem aba ativa.
+  evidence: Mesmo trade-off já aceito para as páginas XML órfãs dos módulos DFe-s/Notas/Malha Fina (rota mantida, tab removida). Revisitar apenas se usuários reportarem confusão navegando por link direto/histórico para essa URL específica.
+- source_spec: `_bmad-output/implementation-artifacts/spec-importacoes-dfes-reorg-menu.md`
+  summary: `ImportarPagamentosFornecedores.tsx` agora é montado em dois pontos independentes (rota antiga `/importacoes/pagamentos-fornecedores` e inline dentro de `/dfes`), cada instância com seu próprio fetch de histórico/lista sem cache compartilhado — um import feito em uma tela não aparece automaticamente na outra até essa instância específica remontar.
+  evidence: Já era uma limitação inerente ao componente (fetch só no mount, sem invalidação cross-instância) antes desta mudança; esta spec apenas criou um segundo ponto de montagem. Revisitar se isso causar confusão real no dia a dia (provavelmente baixo risco, já que a rota antiga tende a cair em desuso).
+- source_spec: `_bmad-output/implementation-artifacts/spec-importacoes-dfes-reorg-menu.md`
+  summary: `ImportarPagamentosFornecedores.tsx` não depende de `companyId`/empresa ativa no fetch (nem na rota antiga nem na nova localização) — trocar de empresa sem remontar o componente pode deixar a tela com dados da empresa anterior.
+  evidence: Limitação pré-existente do componente, não introduzida por esta spec (verificado: o `useEffect` de fetch já não tinha `companyId` nas dependências antes desta mudança). Revisitar se reportado como bug de vazamento de dado entre empresas — mas não é uma regressão desta spec.
+
 ## Deferred from: code review of spec-rfb-cgibs-submenu-vertical (2026-07-15)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cgibs-submenu-vertical.md`

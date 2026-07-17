@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { Upload, FolderOpen, FileText, CheckCircle, AlertCircle, SkipForward, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
+import ImportarPagamentosFornecedores from './ImportarPagamentosFornecedores';
 
 interface UploadError { arquivo: string; erro: string; }
 interface UploadResult { importados: number; ignorados: number; erros: UploadError[]; }
@@ -20,6 +21,7 @@ interface TipoDocumento {
 const TIPOS: TipoDocumento[] = [
   { key: 'nfe',     label: 'Nota Fiscal Eletrônica (NF-e)',     enabled: true },
   { key: 'cte',     label: 'Conhecimento de Frete (CT-e)',     enabled: true },
+  { key: 'pagamentos-fornecedores', label: 'Pagamentos Fornecedores', enabled: true },
   { key: 'nfce',    label: 'Nota Fiscal Consumidor (NFC-e)',    enabled: false },
   { key: 'nfse',    label: 'Nota Fiscal de Serviços (NFS-e)',   enabled: false },
   { key: 'nce',     label: 'Nota de Crédito (NC-e)',            enabled: false },
@@ -143,10 +145,12 @@ export default function DFesModulo() {
       </aside>
 
       <div className="flex-1 min-w-0 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">{tipoAtivoInfo?.label}</h1>
-          {configAtual && <p className="text-sm text-muted-foreground mt-1">{configAtual.descricao}</p>}
-        </div>
+        {tipoAtivo !== 'pagamentos-fornecedores' && (
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{tipoAtivoInfo?.label}</h1>
+            {configAtual && <p className="text-sm text-muted-foreground mt-1">{configAtual.descricao}</p>}
+          </div>
+        )}
 
         {direcoesDoTipo.length > 0 && (
           <div className="flex items-center gap-2">
@@ -169,7 +173,9 @@ export default function DFesModulo() {
           </div>
         )}
 
-        {configAtual ? (
+        {tipoAtivo === 'pagamentos-fornecedores' ? (
+          <ImportarPagamentosFornecedores key="pagamentos-fornecedores" />
+        ) : configAtual ? (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">

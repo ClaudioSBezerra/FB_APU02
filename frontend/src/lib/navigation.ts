@@ -25,12 +25,8 @@ export const modules: Record<string, ModuleConfig> = {
     tabs: [],
   },
   importacoes: {
-    label: 'Importações',
+    label: 'Importações VIA ERP',
     tabs: [
-      { label: 'NF-e Entradas (XML)',  path: '/importacoes/nfe-entrada' },
-      { label: 'NF-e Saídas (XML)',    path: '/importacoes/nfe-saida' },
-      { label: 'CT-e Entradas (XML)',  path: '/importacoes/cte-entrada' },
-      { label: 'Pag. Fornecedores (CSV)', path: '/importacoes/pagamentos-fornecedores' },
       { label: 'NFS-e Entradas (XML)', path: '#', disabled: true },
       { label: 'NFS-e Saídas (XML)',   path: '#', disabled: true },
       { label: 'CT-e Saídas (XML)',    path: '#', disabled: true },
@@ -70,7 +66,7 @@ export const modules: Record<string, ModuleConfig> = {
     tabs: [],
   },
   dfes: {
-    label: "Importação DFe-s",
+    label: "Importação DFe-s e Outros Docs",
     tabs: [],
   },
   argus: {
