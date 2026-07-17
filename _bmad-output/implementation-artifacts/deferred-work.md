@@ -1,5 +1,38 @@
 # Deferred Work
 
+## Deferred from: code review of spec-split-payment-cadastro-fornecedor (2026-07-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: Alterar `aderiu_split_payment` de um parceiro não registra quem fez a mudança nem quando (só um `log.Printf` genérico com o CNPJ) — sem coluna `updated_by`/`updated_at` nem tabela de auditoria.
+  evidence: Achado real pela revisão adversarial — flag legalmente relevante (LC 214/2025) sem rastro de autoria. Consistente com a ausência geral de auditoria em outras tabelas de configuração do projeto (ex: `forn_simples`), mas essa flag tem peso fiscal maior. Revisitar se disputa fiscal ou trilha de auditoria virar requisito formal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: `ParceirosUpdateSplitPaymentHandler` é acessível a qualquer usuário autenticado da empresa (`withAuth(..., "")`, sem role restrita) — não há tier de permissão específico para editar uma flag fiscalmente sensível.
+  evidence: Mesmo padrão de auth já usado em `/api/pagamentos-fornecedores` (list) e outros endpoints não-admin do projeto — não é uma regressão, mas vale revisitar se o controle de acesso a dados fiscais sensíveis virar requisito mais rígido.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: `ParceirosListHandler` não tem filtro por `aderiu_split_payment` (só `cnpj`/`nome`) — não dá para listar diretamente "quem aderiu" vs "quem não aderiu" sem paginar tudo e filtrar no cliente. Também falta índice na nova coluna `aderiu_split_payment` e os filtros `ILIKE` em `cnpj`/`nome` já fazem full scan (sem `pg_trgm`), consistente com o restante do projeto mas sem otimização dedicada.
+  evidence: Achado real, mas de baixo risco na fase inicial (poucos fornecedores marcados). Revisitar se o volume de parceiros crescer ou se filtrar por adesão virar operação frequente (ex: relatório de fornecedores não aderentes).
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: Sem validação de formato para `data_adesao_split_payment` recebida do cliente — uma string inválida cai no `$2::date` do Postgres e gera erro 500 genérico em vez de 400 com mensagem clara.
+  evidence: Caminho de erro raro (a UI só envia `undefined` ou a data de hoje formatada corretamente), mas exposto via API. Revisitar se um cliente externo (não a UI) começar a consumir esse endpoint diretamente.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: `CadastroFornecedores.tsx` tem races de concorrência não tratadas: paginação/busca sem `AbortController` (resposta antiga pode sobrescrever uma mais recente), e um único lock global `updatingCnpj` que não impede toggles simultâneos em linhas diferentes.
+  evidence: Mesmo nível de robustez (ou lacuna) já presente em outras telas do projeto (`ImportarPagamentosFornecedores.tsx` também não usa `AbortController`). Revisitar se races de paginação se mostrarem um problema real em uso normal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: Nenhum teste automatizado (Go) cobre os 2 novos handlers (`ParceirosListHandler`/`ParceirosUpdateSplitPaymentHandler`) — o projeto já tem um teste comparável (`rfb_pagamentos_fornecedores_test.go`) para um handler semelhante, então esta é uma lacuna notável em relação ao próprio padrão do projeto.
+  evidence: Revisitar ao adicionar cobertura de teste ao restante do domínio de pagamentos/parceiros, se isso virar prioridade.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: Migration 123 marca todos os parceiros existentes como `aderiu_split_payment=false` por default, sem mecanismo de backfill para adesões já conhecidas fora do sistema (ex: planilha de controle manual anterior).
+  evidence: Nenhuma fonte de dados de adesão pré-existente foi mencionada pelo usuário. Revisitar se houver uma lista de fornecedores já sabidamente aderentes antes desta tela existir.
+
+## Deferred from: planning of spec-split-payment-cadastro-fornecedor (2026-07-17)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: Adicionar `aderiu_split_payment`/`data_adesao_split_payment` na tabela `companies` e a respectiva edição na tela `GestaoAmbiente.tsx` (via novo `UpdateCompanyHandler`).
+  evidence: Spec original cobria fornecedor (`parceiros`) + empresa (`companies`) + indicador em Pagamentos numa única entrega de ~2400 tokens, acima do limite recomendado de 1600. Usuário optou por dividir em 3 specs sequenciais — esta é a 2ª, depende do cadastro de fornecedor (1ª) já estar pronto para reaproveitar o mesmo padrão de migration/endpoint.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`
+  summary: Badge "Split Payment" na coluna Nome Fornecedor da tela de Pagamentos a Fornecedores (`ImportarPagamentosFornecedores.tsx`), usando `aderiu_split_payment` de `parceiros` via subquery no `PagamentosFornecedoresListHandler`.
+  evidence: 3ª spec da divisão acima — depende do cadastro de fornecedor (1ª) existir e ter dados reais para ser útil/testável. Requisito de negócio já confirmado com o usuário: nesta fase só indicador visual, sem lógica de cálculo/bloqueio de crédito de IBS/CBS (isso fica para uma spec futura, quando a regra de apuração for detalhada).
+
 ## Deferred from: code review of spec-importacoes-dfes-reorg-menu (2026-07-16)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-importacoes-dfes-reorg-menu.md`

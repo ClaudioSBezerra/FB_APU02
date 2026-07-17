@@ -540,6 +540,10 @@ func main() {
 	http.HandleFunc("/api/pagamentos-fornecedores/template", withAuth(handlers.PagamentosTemplateHandler, ""))
 	http.HandleFunc("/api/pagamentos-fornecedores",          withAuth(handlers.PagamentosFornecedoresListHandler, ""))
 
+	// Parceiros (cadastro fornecedor/cliente) — edição manual de adesão ao Split Payment
+	http.HandleFunc("/api/parceiros/split-payment", withAuth(handlers.ParceirosUpdateSplitPaymentHandler, ""))
+	http.HandleFunc("/api/parceiros",               withAuth(handlers.ParceirosListHandler, ""))
+
 	// Créditos em Risco
 	http.HandleFunc("/api/apuracao/creditos-perdidos/notas", withAuth(handlers.CreditosPerdidosNotasHandler, ""))
 	http.HandleFunc("/api/apuracao/creditos-perdidos",       withAuth(handlers.CreditosPerdidosHandler, ""))

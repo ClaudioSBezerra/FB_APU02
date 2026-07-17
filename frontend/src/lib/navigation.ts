@@ -29,6 +29,7 @@ export const modules: Record<string, ModuleConfig> = {
     tabs: [
       { label: 'Importar via ERP', path: '/importacoes/erp-bridge' },
       { label: 'Logs ERP',         path: '/importacoes/erp-bridge/logs' },
+      { label: 'Cadastro de Fornecedores', path: '/importacoes/fornecedores' },
     ],
   },
   cgibs: {

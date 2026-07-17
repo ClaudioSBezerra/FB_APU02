@@ -27,6 +27,7 @@ import ImportarXMLsSaida from './pages/ImportarXMLsSaida'
 import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
 import DFesModulo from './pages/DFesModulo'
 import ImportarPagamentosFornecedores from './pages/ImportarPagamentosFornecedores'
+import CadastroFornecedores from './pages/CadastroFornecedores'
 import ApuracaoCredPerdidos from './pages/ApuracaoCredPerdidos'
 import MalhaFinaModulo from './pages/MalhaFinaModulo'
 import ArgusPortal from './pages/ArgusPortal'
@@ -278,6 +279,7 @@ function AppLayout() {
       <Route path="/importacoes/pagamentos-fornecedores" element={<ImportarPagamentosFornecedores />} />
       <Route path="/importacoes/erp-bridge"      element={<ERPBridgeConfig />} />
       <Route path="/importacoes/erp-bridge/logs" element={<ERPBridgeLogs />} />
+      <Route path="/importacoes/fornecedores"    element={<CadastroFornecedores />} />
 
       {/* DF-e's */}
       <Route path="/dfes" element={<DFesModulo />} />
