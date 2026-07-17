@@ -348,25 +348,25 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 
 		// Construir query dinamicamente
 		args := []interface{}{companyID}
-		where := []string{"company_id = $1"}
+		where := []string{"pf.company_id = $1"}
 		idx := 2
 
 		if mesAno != "" {
-			where = append(where, fmt.Sprintf("mes_ano = $%d", idx))
+			where = append(where, fmt.Sprintf("pf.mes_ano = $%d", idx))
 			args = append(args, mesAno)
 			idx++
 		}
 		if len(fornCNPJ) == 14 {
-			where = append(where, fmt.Sprintf("forn_cnpj = $%d", idx))
+			where = append(where, fmt.Sprintf("pf.forn_cnpj = $%d", idx))
 			args = append(args, fornCNPJ)
 			idx++
 		} else if fornCNPJ != "" {
-			where = append(where, fmt.Sprintf("forn_cnpj ILIKE $%d", idx))
+			where = append(where, fmt.Sprintf("pf.forn_cnpj ILIKE $%d", idx))
 			args = append(args, "%"+fornCNPJ+"%")
 			idx++
 		}
 		if chaveDoc != "" {
-			where = append(where, fmt.Sprintf("chave_doc ILIKE $%d", idx))
+			where = append(where, fmt.Sprintf("pf.chave_doc ILIKE $%d", idx))
 			args = append(args, "%"+chaveDoc+"%")
 			idx++
 		}
@@ -374,8 +374,10 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 		whereClause := "WHERE " + strings.Join(where, " AND ")
 
 		// COUNT
+		// Alias "pf" mantido apenas para casar com o whereClause (compartilhado
+		// com a query LIST abaixo) — sem JOIN aqui, conta somente a tabela base.
 		var total int
-		countQuery := "SELECT COUNT(*) FROM pagamentos_fornecedores " + whereClause
+		countQuery := "SELECT COUNT(*) FROM pagamentos_fornecedores pf " + whereClause
 		if err := db.QueryRow(countQuery, args...).Scan(&total); err != nil {
 			log.Printf("[PagamentosListHandler] count: %v", err)
 			jsonErr(w, http.StatusInternalServerError, "Erro ao contar registros")
@@ -388,14 +390,30 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 		// essa coluna. Sem o COALESCE, o Scan abaixo quebra com "converting
 		// NULL to string" para qualquer linha de origem SAP (bug pré-existente
 		// corrigido nesta story, Task 3).
+		//
+		// forn_nome/num_doc_pagamento/data_emissao_doc: prioriza os documentos de
+		// entrada já importados (nfe_entradas/cte_entradas, via LEFT JOIN condicional
+		// por tipo_doc) e o cadastro de parceiros por CNPJ. O JOIN só cobre tipo_doc
+		// NFE/CTE — para NFSE (tipo válido, ver validTipos em PagamentosFornecedoresImportHandler)
+		// e para pagamentos de origem SAP sem documento casado, cai de volta (COALESCE)
+		// para os valores já gravados em pagamentos_fornecedores (CSV ou SAP), em vez
+		// de exibir vazio. data_emissao_doc não tem fallback: só existe via JOIN.
 		offset := (page - 1) * pageSize
 		listArgs := append(args, pageSize, offset)
 		rows, err := db.Query(fmt.Sprintf(`
-			SELECT id, chave_doc, tipo_doc, forn_cnpj, COALESCE(forn_nome,''), data_pagamento,
-			       valor_pagamento, COALESCE(num_doc_pagamento,''), COALESCE(descricao,''),
-			       mes_ano, COALESCE(import_id::text, ''), importado_em, origem
-			FROM pagamentos_fornecedores %s
-			ORDER BY data_pagamento DESC, id DESC
+			SELECT pf.id, pf.chave_doc, pf.tipo_doc, pf.forn_cnpj,
+			       COALESCE(NULLIF((SELECT nome FROM parceiros WHERE company_id = pf.company_id AND cnpj = pf.forn_cnpj LIMIT 1), ''), pf.forn_nome, '') AS forn_nome,
+			       pf.data_pagamento,
+			       pf.valor_pagamento,
+			       COALESCE(ne.numero_nfe, ce.numero_cte, pf.num_doc_pagamento, '') AS num_doc_pagamento,
+			       COALESCE(pf.descricao,''),
+			       pf.mes_ano, COALESCE(pf.import_id::text, ''), pf.importado_em, pf.origem,
+			       COALESCE(ne.data_emissao, ce.data_emissao) AS data_emissao_doc
+			FROM pagamentos_fornecedores pf
+			LEFT JOIN nfe_entradas ne ON ne.company_id = pf.company_id AND ne.chave_nfe = pf.chave_doc AND pf.tipo_doc = 'NFE'
+			LEFT JOIN cte_entradas ce ON ce.company_id = pf.company_id AND ce.chave_cte = pf.chave_doc AND pf.tipo_doc = 'CTE'
+			%s
+			ORDER BY pf.data_pagamento DESC, pf.id DESC
 			LIMIT $%d OFFSET $%d`, whereClause, idx, idx+1),
 			listArgs...,
 		)
@@ -420,6 +438,7 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 			ImportID        string  `json:"import_id"`
 			ImportadoEm     string  `json:"importado_em"`
 			Origem          string  `json:"origem"`
+			DataEmissaoDoc  *string `json:"data_emissao_doc"`
 		}
 
 		items := []pagItem{}
@@ -427,13 +446,19 @@ func PagamentosFornecedoresListHandler(db *sql.DB) http.HandlerFunc {
 			var item pagItem
 			var dataPag time.Time
 			var importadoEm time.Time
+			var dataEmissaoDoc sql.NullTime
 			if err := rows.Scan(
 				&item.ID, &item.ChaveDoc, &item.TipoDoc, &item.FornCNPJ, &item.FornNome,
 				&dataPag, &item.ValorPagamento, &item.NumDocPagamento, &item.Descricao,
 				&item.MesAno, &item.ImportID, &importadoEm, &item.Origem,
+				&dataEmissaoDoc,
 			); err != nil {
 				log.Printf("[PagamentosListHandler] scan: %v", err)
 				continue
+			}
+			if dataEmissaoDoc.Valid {
+				formatted := dataEmissaoDoc.Time.Format("2006-01-02")
+				item.DataEmissaoDoc = &formatted
 			}
 			item.DataPagamento = dataPag.Format("2006-01-02")
 			item.ImportadoEm = importadoEm.Format(time.RFC3339)

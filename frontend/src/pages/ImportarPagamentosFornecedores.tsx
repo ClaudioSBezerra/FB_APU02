@@ -21,6 +21,7 @@ interface Pagamento {
   mes_ano: string;
   import_id: string;
   importado_em: string;
+  data_emissao_doc: string | null;
 }
 
 interface ImportBatch {
@@ -435,6 +436,7 @@ export default function ImportarPagamentosFornecedores() {
                       <th className="text-left px-2 py-2 font-medium">Data Pagto</th>
                       <th className="text-left px-2 py-2 font-medium">Tipo</th>
                       <th className="text-left px-2 py-2 font-medium">Chave Doc</th>
+                      <th className="text-left px-2 py-2 font-medium">Data Emissão</th>
                       <th className="text-left px-2 py-2 font-medium">CNPJ Fornecedor</th>
                       <th className="text-left px-2 py-2 font-medium">Nome Fornecedor</th>
                       <th className="text-right px-2 py-2 font-medium">Valor</th>
@@ -450,6 +452,9 @@ export default function ImportarPagamentosFornecedores() {
                         </td>
                         <td className="px-2 py-1.5 font-mono" title={pag.chave_doc}>
                           {truncate(pag.chave_doc, 20)}
+                        </td>
+                        <td className="px-2 py-1.5 whitespace-nowrap">
+                          {pag.data_emissao_doc ? formatDate(pag.data_emissao_doc) : <span className="text-muted-foreground italic">—</span>}
                         </td>
                         <td className="px-2 py-1.5 whitespace-nowrap">{formatCNPJ(pag.forn_cnpj)}</td>
                         <td className="px-2 py-1.5">{pag.forn_nome || <span className="text-muted-foreground italic">—</span>}</td>
