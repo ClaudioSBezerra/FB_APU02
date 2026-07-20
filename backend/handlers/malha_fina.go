@@ -14,7 +14,10 @@ import (
 
 const malhaFinaPageSize = 100
 
-// MalhaFinaRow — documento presente na RFB (rfb_debitos) mas ausente ou cancelado na empresa.
+// MalhaFinaRow — documento presente na RFB (rfb_debitos ou rfb_creditos, conforme o
+// tipo/aba) mas ausente ou cancelado na empresa. SituacaoDebito carrega o valor de
+// situacao_credito para os tipos de crédito (achado de revisão: nome de campo herdado
+// do caso débito, mas já tratado genericamente como "situação" pelo frontend).
 type MalhaFinaRow struct {
 	ID                 string  `json:"id"`
 	ChaveDFe           string  `json:"chave_dfe"`
@@ -61,6 +64,17 @@ type MalhaFinaResponse struct {
 // situacaoCol:     "situacao_credito" | "situacao_debito" — nome de coluna que difere
 //                  entre as duas tabelas.
 func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDFe []string, excludeTable, excludeChaveCol, sourceTable, situacaoCol string) {
+	// filialCol: qual coluna representa "a própria empresa" — papel fixo do documento
+	// fiscal (não redefinido por tabela): em rfb_debitos (vendas) a empresa é a
+	// emitente; em rfb_creditos (compras) a empresa é a adquirente. Derivado de
+	// sourceTable (não recebido como parâmetro à parte) para eliminar a possibilidade
+	// de um call site futuro passar os dois desalinhados — achado de revisão do fix
+	// anterior, que usava ni_adquirente hardcoded, quebrado para NF-e Saídas.
+	filialCol := "ni_adquirente"
+	if sourceTable == "rfb_debitos" {
+		filialCol = "ni_emitente"
+	}
+
 	claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
 	if !ok {
 		jsonErr(w, http.StatusUnauthorized, "Unauthorized")
@@ -84,7 +98,8 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	statusFilt := q.Get("status")     // "ausente" | "cancelada" | "" = todas
 	filterCNPJ := strings.NewReplacer(".", "", "/", "", "-", "").Replace(q.Get("emit_cnpj"))
 
-	// filial_cnpj: CNPJs da empresa (ni_adquirente) separados por vírgula — vazio = todas
+	// filial_cnpj: CNPJs da empresa separados por vírgula — vazio = todas.
+	// Coluna que representa "a própria empresa" varia por tabela (ver filialCol acima).
 	cleanCNPJ := strings.NewReplacer(".", "", "/", "", "-", "")
 	var filialCNPJs []string
 	for _, raw := range strings.Split(q.Get("filial_cnpj"), ",") {
@@ -149,7 +164,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 			args = append(args, cnpj)
 			placeholders[i] = fmt.Sprintf("$%d", len(args))
 		}
-		where += fmt.Sprintf(" AND rd.ni_adquirente IN (%s)", strings.Join(placeholders, ","))
+		where += fmt.Sprintf(" AND rd.%s IN (%s)", filialCol, strings.Join(placeholders, ","))
 	}
 
 	// ── COUNT + TOTAIS em 1 query (LEFT JOIN — sem CTE, sem subconsultas) ─────
