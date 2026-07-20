@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -29,9 +31,11 @@ type Company struct {
 	ID      string `json:"id"`
 	GroupID string `json:"group_id"`
 	// CNPJ      string `json:"cnpj"` // Deprecated
-	Name      string `json:"name"`
-	TradeName string `json:"trade_name"` // Fantasia
-	CreatedAt string `json:"created_at"`
+	Name                   string  `json:"name"`
+	TradeName              string  `json:"trade_name"` // Fantasia
+	CreatedAt              string  `json:"created_at"`
+	AderiuSplitPayment     bool    `json:"aderiu_split_payment"`
+	DataAdesaoSplitPayment *string `json:"data_adesao_split_payment"`
 }
 
 // --- Environment Handlers ---
@@ -233,7 +237,7 @@ func DeleteGroupHandler(db *sql.DB) http.HandlerFunc {
 func GetCompaniesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		groupID := r.URL.Query().Get("group_id")
-		query := "SELECT id, group_id, name, COALESCE(trade_name, ''), created_at FROM companies"
+		query := "SELECT id, group_id, name, COALESCE(trade_name, ''), created_at, aderiu_split_payment, data_adesao_split_payment FROM companies"
 		args := []interface{}{}
 
 		if groupID != "" {
@@ -252,9 +256,14 @@ func GetCompaniesHandler(db *sql.DB) http.HandlerFunc {
 		var companies []Company
 		for rows.Next() {
 			var c Company
-			if err := rows.Scan(&c.ID, &c.GroupID, &c.Name, &c.TradeName, &c.CreatedAt); err != nil {
+			var dataAdesao sql.NullTime
+			if err := rows.Scan(&c.ID, &c.GroupID, &c.Name, &c.TradeName, &c.CreatedAt, &c.AderiuSplitPayment, &dataAdesao); err != nil {
 				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler empresa", err, "[Environment]")
 				return
+			}
+			if dataAdesao.Valid {
+				formatted := dataAdesao.Time.Format("2006-01-02")
+				c.DataAdesaoSplitPayment = &formatted
 			}
 			companies = append(companies, c)
 		}
@@ -304,6 +313,79 @@ func CreateCompanyHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		json.NewEncoder(w).Encode(c)
+	}
+}
+
+// UpdateCompanyHandler — PUT /api/config/companies
+//
+// Atualiza name, trade_name e adesão ao Split Payment de uma empresa já
+// existente (por id) — não altera group_id nem recria a linha. Mesma regra
+// de "não limpar data ao desmarcar" já usada em ParceirosUpdateSplitPaymentHandler.
+func UpdateCompanyHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID                     string  `json:"id"`
+			Name                   string  `json:"name"`
+			TradeName              string  `json:"trade_name"`
+			AderiuSplitPayment     bool    `json:"aderiu_split_payment"`
+			DataAdesaoSplitPayment *string `json:"data_adesao_split_payment"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Dados inválidos na requisição", http.StatusBadRequest)
+			return
+		}
+
+		if req.ID == "" || req.Name == "" {
+			http.Error(w, "Missing required fields (id, name)", http.StatusBadRequest)
+			return
+		}
+
+		// Regra de negócio: ao marcar adesão sem data informada, usa a data de
+		// hoje; ao desmarcar, deixa dataAdesao nil para que o COALESCE não
+		// toque na coluna, preservando o valor histórico já gravado.
+		// Mesma checagem de string vazia já usada em ParceirosUpdateSplitPaymentHandler
+		// (achado de revisão: sem isso, {"data_adesao_split_payment": ""} quebra o
+		// COALESCE(''::date, ...) no Postgres com erro 500 em vez de usar o default).
+		var dataAdesao *string
+		if req.AderiuSplitPayment {
+			if req.DataAdesaoSplitPayment != nil && strings.TrimSpace(*req.DataAdesaoSplitPayment) != "" {
+				dataAdesao = req.DataAdesaoSplitPayment
+			} else {
+				hoje := time.Now().Format("2006-01-02")
+				dataAdesao = &hoje
+			}
+		}
+
+		var c Company
+		var dataAdesaoPersisted sql.NullTime
+		err := db.QueryRow(`
+			UPDATE companies
+			SET name = $1,
+			    trade_name = $2,
+			    aderiu_split_payment = $3,
+			    data_adesao_split_payment = COALESCE($4::date, data_adesao_split_payment),
+			    updated_at = NOW()
+			WHERE id = $5
+			RETURNING id, group_id, name, trade_name, created_at, aderiu_split_payment, data_adesao_split_payment`,
+			req.Name, req.TradeName, req.AderiuSplitPayment, dataAdesao, req.ID,
+		).Scan(&c.ID, &c.GroupID, &c.Name, &c.TradeName, &c.CreatedAt, &c.AderiuSplitPayment, &dataAdesaoPersisted)
+
+		if err == sql.ErrNoRows {
+			jsonErr(w, http.StatusNotFound, "Empresa não encontrada")
+			return
+		}
+		if err != nil {
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao atualizar empresa", err, "[Environment]")
+			return
+		}
+
+		if dataAdesaoPersisted.Valid {
+			formatted := dataAdesaoPersisted.Time.Format("2006-01-02")
+			c.DataAdesaoSplitPayment = &formatted
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(c)
 	}
 }

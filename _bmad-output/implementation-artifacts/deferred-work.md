@@ -1,5 +1,23 @@
 # Deferred Work
 
+## Deferred from: code review of spec-split-payment-cadastro-empresa (2026-07-20)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-empresa.md`
+  summary: **Nenhuma das 3 operações de mutação em `companies` (Create/Update/Delete) verifica se o usuário autenticado tem relação real com o grupo/ambiente daquela empresa** — `UpdateCompanyHandler` (novo nesta spec) faz `UPDATE companies SET ... WHERE id = $5` sem nenhum escopo por tenant, exatamente como `DeleteCompanyHandler`/`CreateCompanyHandler` já faziam antes. A rota `/config/ambiente` no frontend é só `ProtectedRoute` (não `AdminRoute`), com o "admin-only" sendo apenas um `if (user?.role !== 'admin')` de UI — mesmo padrão de "adminOnly é só gate de tela, API aceita qualquer autenticado" já documentado para RFB/CGIBS/ERP Bridge (ver Dev Notes da Story 1.1, Epic 1).
+  evidence: **Confirmado por 2 revisores adversariais independentes.** Não é introduzido por esta spec (Create/Delete já tinham exatamente essa característica antes) — mas ao adicionar Update, a superfície de escrita sem escopo de tenant cresce, e agora inclui um campo com peso de compliance (adesão a Split Payment, LC 214/2025). Diferente do caso de `parceiros` (escopado por `company_id` via `GetEffectiveCompanyID`, só faltava a restrição de role), aqui não há NENHUM escopo — qualquer usuário autenticado de qualquer tenant pode, por chamada direta à API, renomear ou alterar a adesão de uma empresa de outro grupo/ambiente. Isso colide diretamente com o valor central do projeto ("apuração fiscal correta e confiável por empresa, sem vazamento de dados entre tenants"). **Revisitar com prioridade** — idealmente resolvendo de uma vez para as 3 operações (Create/Update/Delete) de `companies`, não isoladamente aqui, já que é o mesmo gap replicado 3x.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-empresa.md`
+  summary: `AderiuSplitPayment bool` (não ponteiro) na struct de requisição do `UpdateCompanyHandler` não distingue "false explícito" de "campo ausente" — qualquer chamada futura que reutilize este endpoint para uma edição simples de nome (sem incluir o campo de Split Payment) apagaria silenciosamente a adesão já registrada.
+  evidence: Hoje inofensivo porque o único caller (o toggle em `GestaoAmbiente.tsx`) sempre envia o campo explicitamente. Risco é só para reuso futuro do endpoint. Revisitar se uma tela de edição geral de empresa (nome/razão social) for construída reaproveitando este PUT.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-empresa.md`
+  summary: Alterar `aderiu_split_payment` de uma empresa não registra quem fez a mudança (sem `updated_by`/tabela de auditoria) — mesmo padrão já deferido para `parceiros` na spec anterior.
+  evidence: Consistente com a ausência geral de auditoria em `environment.go`. Revisitar junto com o item equivalente de `parceiros` se trilha de auditoria virar requisito formal.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-empresa.md`
+  summary: Toggle de Split Payment em `GestaoAmbiente.tsx` reenvia `company.name`/`company.trade_name` do estado local em cache — se outra sessão renomeou a empresa entre o fetch e o toggle, o PUT sobrescreve silenciosamente o nome novo pelo valor antigo em cache (full-replace, não partial update). Mesma classe de ausência geral de concorrência otimista já aceita em outras partes do projeto (ex: `pagamentos_fornecedores`).
+  evidence: Janela de corrida estreita (exige 2 sessões editando a mesma empresa quase simultaneamente), ferramenta de uso interno por poucos admins. Revisitar se relatado como problema real.
+- source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-empresa.md`
+  summary: Sem validação de UUID em `req.ID`, sem trim/tamanho em `req.Name`/`req.TradeName` (nome só-espaço passa no check de vazio), erro de toast genérico no frontend sem distinguir 403/404/500, `savingCompanyId` é escalar único (não protege contra toggles concorrentes em linhas diferentes), zero teste automatizado.
+  evidence: Achados de baixa severidade, consistentes com padrões (ou lacunas) já aceitos em outras partes do projeto nesta sessão (`CadastroFornecedores.tsx`, `ParceirosUpdateSplitPaymentHandler`). Agrupados aqui para não poluir com 5 entradas quase idênticas às já registradas.
+
 ## Deferred from: code review of spec-split-payment-cadastro-fornecedor (2026-07-17)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-split-payment-cadastro-fornecedor.md`

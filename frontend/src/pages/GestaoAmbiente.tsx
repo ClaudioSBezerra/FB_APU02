@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,8 @@ interface Company {
   name: string;
   trade_name: string;
   created_at: string;
+  aderiu_split_payment: boolean;
+  data_adesao_split_payment: string | null;
 }
 
 interface Branch {
@@ -64,6 +67,13 @@ interface UserHierarchy {
   group: EnterpriseGroup;
   company: Company;
   branches: Branch[];
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return '—';
+  const parts = dateStr.split('-');
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return dateStr;
 }
 
 export default function GestaoAmbiente() {
@@ -88,6 +98,7 @@ export default function GestaoAmbiente() {
   const [newCompanyTradeName, setNewCompanyTradeName] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [savingCompanyId, setSavingCompanyId] = useState<string | null>(null);
   const { user } = useAuth();
   const [userHierarchy, setUserHierarchy] = useState<UserHierarchy | null>(null);
 
@@ -293,6 +304,42 @@ export default function GestaoAmbiente() {
       if (selectedEnv) fetchGroups(selectedEnv.id);
     } catch (error) {
       toast.error("Erro ao remover grupo");
+    }
+  };
+
+  const handleToggleSplitPayment = async (company: Company, checked: boolean) => {
+    setSavingCompanyId(company.id);
+    try {
+      const res = await fetch("/api/config/companies", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: company.id,
+          name: company.name,
+          trade_name: company.trade_name,
+          aderiu_split_payment: checked,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to update");
+
+      const data = await res.json() as Partial<Company>;
+      setCompanies(prev =>
+        prev.map(c =>
+          c.id === company.id
+            ? {
+                ...c,
+                aderiu_split_payment: data.aderiu_split_payment ?? checked,
+                data_adesao_split_payment: data.data_adesao_split_payment ?? c.data_adesao_split_payment,
+              }
+            : c
+        )
+      );
+      toast.success("Adesão ao Split Payment atualizada");
+    } catch (error) {
+      toast.error("Erro ao atualizar adesão ao Split Payment");
+    } finally {
+      setSavingCompanyId(null);
     }
   };
 
@@ -609,14 +656,27 @@ export default function GestaoAmbiente() {
                     {company.cnpj && <p className="text-xs text-gray-500 font-mono">{company.cnpj}</p>}
                     {company.trade_name && <p className="text-xs text-gray-400 truncate">{company.trade_name}</p>}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-gray-400 hover:text-red-500"
-                    onClick={() => handleDeleteCompany(company.id)}
-                  >
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-col items-end">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] text-gray-400">Split Payment</span>
+                        <Switch
+                          checked={company.aderiu_split_payment}
+                          disabled={savingCompanyId === company.id}
+                          onCheckedChange={(checked) => handleToggleSplitPayment(company, checked)}
+                        />
+                      </div>
+                      <span className="text-[10px] text-gray-400">{formatDate(company.data_adesao_split_payment)}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-gray-400 hover:text-red-500"
+                      onClick={() => handleDeleteCompany(company.id)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
                 </div>
               ))
             )}

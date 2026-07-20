@@ -398,6 +398,8 @@ func main() {
 				handlers.GetCompaniesHandler(db)(w, r)
 			case http.MethodPost:
 				handlers.CreateCompanyHandler(db)(w, r)
+			case http.MethodPut:
+				handlers.UpdateCompanyHandler(db)(w, r)
 			case http.MethodDelete:
 				handlers.DeleteCompanyHandler(db)(w, r)
 			default:
