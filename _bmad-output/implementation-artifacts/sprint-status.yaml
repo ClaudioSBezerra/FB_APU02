@@ -1,5 +1,5 @@
 # generated: 2026-07-11
-# last_updated: 2026-07-12 (Story 3.3 revisada e concluída — Epic 3 done)
+# last_updated: 2026-07-20 (Retrospectivas das Epics 1, 2 e 3 concluídas)
 # project: FB_APU02
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: "2026-07-11"
-last_updated: "2026-07-11"
+last_updated: "2026-07-20"
 project: FB_APU02
 project_key: NOKEY
 tracking_system: file-system
@@ -46,7 +46,7 @@ development_status:
   epic-1: done
   1-1-cadastro-de-credenciais-e-mapeamento-de-bukrs-por-empresa: done
   1-2-teste-de-conexao-com-credenciais-sap: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   # ── Epic 2: Sincronização Automática e Confiável de Pagamentos SAP ──────────
   epic-2: done
@@ -55,11 +55,37 @@ development_status:
   2-3-persistencia-de-pagamentos-com-deduplicacao-robusta: done
   2-4-historico-de-execucoes-e-alertas-de-falha: done
   2-5-coexistencia-de-pagamentos-csv-e-sap-sem-duplicidade: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # ── Epic 3: Conciliação Completa e Transparente ─────────────────────────────
   epic-3: done
   3-1-creditos-sem-pagamento-localizado-aparecem-na-tela: done
   3-2-indicador-de-pagamento-como-evidencia-auxiliar: done
   3-3-revisao-dedicada-de-matches-ambiguos: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
+
+action_items:
+  - epic: 1
+    action: "Adicionar validação de tamanho/formato em sap_credentials.bukrs_list antes do INSERT (BUKRS >4 caracteres trunca silenciosamente na coluna VARCHAR(4) e falha depois na sincronização da Epic 2 — achado real da retrospectiva da Epic 1, 2026-07-20)"
+    owner: "Claudio (dev)"
+    status: open
+  - epic: 2
+    action: "Adicionar pg_advisory_xact_lock (ou transação) em torno de finishRun+maybeAlertOnFailure para eliminar race de alerta duplicado (Story 2.4) — mesma classe de problema do achado sap_resultados_busca órfão da Story 3.2, resolver junto"
+    owner: "Claudio (dev)"
+    status: open
+  - epic: 2
+    action: "Expor o status HTTP de services.GetToken (SAP) para distinguir falha de credencial de falha transitória de rede — hoje ambos classificados como falha_credencial (herdado da Story 1.2, Epic 1, causa fricção desde a Story 2.2)"
+    owner: "Claudio (dev)"
+    status: open
+  - epic: 2
+    action: "Introduzir context.Context com timeout no pacote backend/services — débito adiado 4x seguidas (Stories 2.1, 2.2, 2.3, 2.5) sem nunca ser endereçado"
+    owner: "Claudio (dev)"
+    status: open
+  - epic: 3
+    action: "Refatorar o SELECT * ... UNION ALL de 22 colunas na CTE de conciliação para listar colunas explicitamente (ou adicionar teste de regressão de ordem posicional) — convenção aceita 3x seguidas (Stories 3.1, 3.2, 3.3) sem nunca ser revisitada, e a CTE só cresceu"
+    owner: "Claudio (dev)"
+    status: open
+  - epic: 3
+    action: "Corrigir o dropdown de filtro de Status em RFBPagamentosFornecedores.tsx (linha ~361) para chamar setPage(1) no onChange — bug pré-existente a todas as opções, ainda não corrigido"
+    owner: "Claudio (dev)"
+    status: open
