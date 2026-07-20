@@ -558,7 +558,12 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			if reqTipoCopy == "credito" {
 				if err := services.ProcessarDownloadCreditosRFB(db, rfbClient, reqID); err != nil {
 					log.Printf("[RFB Webhook] Error processing credits for request %s: %v", reqID, err)
+					return
 				}
+				// mv_malha_fina_resumo agora também depende de rfb_creditos (nfe-entradas,
+				// cte) — sem este refresh, um download só-de-créditos nunca invalidaria
+				// a MV para esses tipos (achado de revisão do fix rfb_debitos→rfb_creditos).
+				RefreshMalhaFinaMV(db)
 				return
 			}
 			if err := services.ProcessarDownloadRFB(db, rfbClient, reqID); err != nil {

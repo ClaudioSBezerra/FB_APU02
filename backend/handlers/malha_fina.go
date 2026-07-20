@@ -51,7 +51,16 @@ type MalhaFinaResponse struct {
 // modelosDFe:      ex. []string{"55","65"} ou []string{"57"}
 // excludeTable:    "nfe_entradas" | "nfe_saidas" | "cte_entradas"
 // excludeChaveCol: "chave_nfe" | "chave_cte"
-func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDFe []string, excludeTable, excludeChaveCol string) {
+// sourceTable:     "rfb_creditos" (entradas/compras) | "rfb_debitos" (saídas/vendas) —
+//                  os nomes de coluna usados por esta função (chave_dfe, modelo_dfe,
+//                  numero_dfe, data_dfe_emissao, data_apuracao, ni_emitente, ni_adquirente,
+//                  valor_cbs_*, tipo_apuracao) existem nas duas tabelas, mas tipo/largura
+//                  divergem em vários pontos (ex: data_dfe_emissao é TIMESTAMPTZ em
+//                  rfb_debitos e DATE em rfb_creditos) — não são um espelho byte-a-byte,
+//                  só compatíveis o suficiente para esta query (achado de revisão).
+// situacaoCol:     "situacao_credito" | "situacao_debito" — nome de coluna que difere
+//                  entre as duas tabelas.
+func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDFe []string, excludeTable, excludeChaveCol, sourceTable, situacaoCol string) {
 	claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
 	if !ok {
 		jsonErr(w, http.StatusUnauthorized, "Unauthorized")
@@ -106,8 +115,8 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	// LEFT JOIN substitui duplo NOT EXISTS/EXISTS: 1 varredura em vez de 2 subconsultas por linha.
 	// UNIQUE constraint em (company_id, chave_nfe/chave_cte) garante no máximo 1 linha no JOIN.
 	fromClause := fmt.Sprintf(
-		"rfb_debitos rd LEFT JOIN %s excl ON excl.company_id = $1 AND excl.%s = rd.chave_dfe",
-		excludeTable, excludeChaveCol,
+		"%s rd LEFT JOIN %s excl ON excl.company_id = $1 AND excl.%s = rd.chave_dfe",
+		sourceTable, excludeTable, excludeChaveCol,
 	)
 
 	where := fmt.Sprintf(
@@ -183,14 +192,14 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 		       COALESCE(rd.valor_cbs_total, 0),
 		       COALESCE(rd.valor_cbs_extinto, 0),
 		       COALESCE(rd.valor_cbs_nao_extinto, 0),
-		       COALESCE(rd.situacao_debito, ''),
+		       COALESCE(rd.%s, ''),
 		       COALESCE(rd.tipo_apuracao, ''),
 		       CASE WHEN excl.%s IS NOT NULL THEN 'CANCELADA' ELSE 'AUSENTE' END AS status_nota
 		FROM %s
 		WHERE %s
 		ORDER BY %s %s NULLS LAST
 		LIMIT $%d OFFSET $%d
-	`, excludeChaveCol, fromClause, where, sortCol, sortDir, limitIdx, offsetIdx)
+	`, situacaoCol, excludeChaveCol, fromClause, where, sortCol, sortDir, limitIdx, offsetIdx)
 
 	rows, err := db.Query(dataSQL, dataArgs...)
 	if err != nil {
@@ -314,23 +323,27 @@ func malhaFinaResumoFromMV(db *sql.DB, w http.ResponseWriter, r *http.Request, t
 }
 
 // MalhaFinaNFeEntradasHandler — GET /api/malha-fina/nfe-entradas
+// Lado de CRÉDITO (compra) — corrigido para ler de rfb_creditos (achado de
+// revisão: comparava contra rfb_debitos, o lado de débito/venda, por engano).
 func MalhaFinaNFeEntradasHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		malhaFinaList(db, w, r, []string{"55", "65"}, "nfe_entradas", "chave_nfe")
+		malhaFinaList(db, w, r, []string{"55", "65"}, "nfe_entradas", "chave_nfe", "rfb_creditos", "situacao_credito")
 	}
 }
 
 // MalhaFinaNFeSaidasHandler — GET /api/malha-fina/nfe-saidas
+// Lado de DÉBITO (venda) — já estava correto, continua em rfb_debitos.
 func MalhaFinaNFeSaidasHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		malhaFinaList(db, w, r, []string{"55", "65"}, "nfe_saidas", "chave_nfe")
+		malhaFinaList(db, w, r, []string{"55", "65"}, "nfe_saidas", "chave_nfe", "rfb_debitos", "situacao_debito")
 	}
 }
 
 // MalhaFinaCTeHandler — GET /api/malha-fina/cte
+// Lado de CRÉDITO (compra de serviço de frete) — mesma correção da NFeEntradas.
 func MalhaFinaCTeHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		malhaFinaList(db, w, r, []string{"57"}, "cte_entradas", "chave_cte")
+		malhaFinaList(db, w, r, []string{"57"}, "cte_entradas", "chave_cte", "rfb_creditos", "situacao_credito")
 	}
 }
 
