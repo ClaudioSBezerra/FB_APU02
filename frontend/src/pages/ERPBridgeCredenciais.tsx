@@ -236,7 +236,12 @@ export default function ERPBridgeCredenciais() {
                 </div>
               </div>
               <Button size="sm" variant="outline" className="h-8 text-xs shrink-0"
-                onClick={() => generateApiKeyMutation.mutate()}
+                onClick={() => {
+                  if (!apiKey || window.confirm(
+                    'Confirmar: regenerar a API Key? A chave atual para de funcionar na hora — ' +
+                    'o ERP Bridge fica parado até o servidor ser atualizado com a nova chave.'
+                  )) generateApiKeyMutation.mutate();
+                }}
                 disabled={generateApiKeyMutation.isPending}>
                 {generateApiKeyMutation.isPending
                   ? <Loader2 className="h-3 w-3 animate-spin" />
