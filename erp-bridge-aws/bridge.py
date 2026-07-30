@@ -361,8 +361,9 @@ class FBTaxClient:
             timeout=120,
         )
         if not resp.ok:
-            log.error("enviar_batch HTTP %d: %s", resp.status_code, resp.text[:300])
-            resp.raise_for_status()
+            detail = resp.text[:300]
+            log.error("enviar_batch HTTP %d: %s", resp.status_code, detail)
+            raise RuntimeError(f"HTTP {resp.status_code}: {detail}")
         return resp.json()
 
     def sync_parceiros(self, parceiros: list, chunk_size: int = 500) -> dict:
@@ -591,9 +592,7 @@ class FBTaxClient:
     def finalize_run(self, run_id: str, grand: dict, erro_msg: str | None = None) -> None:
         total_erros = grand["erros"]
         total_env   = grand["enviados"]
-        if erro_msg:
-            status = "error"
-        elif total_erros > 0 and total_env > 0:
+        if total_erros > 0 and total_env > 0:
             status = "partial"
         elif total_erros > 0:
             status = "error"
@@ -790,6 +789,7 @@ def processar_sap(
             except Exception as exc:
                 log.error("Erro ao enviar lote %d: %s", i // BATCH_SIZE + 1, exc)
                 total_errors += len(lote)
+                stats["sap_batch"].setdefault("erro_msg", str(exc) or "erro desconhecido ao enviar lote")
 
             # Log de progresso + atualiza UI a cada 2 minutos
             if _time.monotonic() - _prog_ts >= 120:
@@ -1018,7 +1018,7 @@ def executar_importacao(
 
         if run_id:
             fbtax.report_items(run_id, {"FCCORP": stats})
-            fbtax.finalize_run(run_id, grand)
+            fbtax.finalize_run(run_id, grand, erro_msg=stats.get("sap_batch", {}).get("erro_msg"))
             log.info("Run API finalizado: %s", run_id)
 
         return 0 if grand["erros"] == 0 else 1
