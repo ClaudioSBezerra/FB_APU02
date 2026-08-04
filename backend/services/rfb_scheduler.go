@@ -176,19 +176,26 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 	tiquete, err := rfbClient.SolicitarCredito(token, cnpjBase)
 	if err != nil {
 		errMsg := err.Error()
-		// "no Route matched" = gateway 404: endpoint not yet live — skip DB record
-		if strings.Contains(errMsg, "no Route matched") || strings.Contains(errMsg, "404") {
-			log.Printf("[RFB Creditos] Endpoint /creditos-cbs/v1/ indisponível no gateway (HTTP 404) — aguardando liberação pela RFB")
-			return fmt.Errorf("endpoint não disponível: %w", err)
-		}
 		errorCode := "REQUEST_ERROR"
-		if strings.HasPrefix(errMsg, "RATE_LIMIT_429|") {
+		switch {
+		case strings.Contains(errMsg, "no Route matched") || strings.Contains(errMsg, "404"):
+			// Gateway 404: endpoint ainda não liberado pela RFB para este ambiente — condição
+			// conhecida e temporária, não uma falha real. Persiste a linha (antes: "skip DB
+			// record") para a UI poder exibi-la como Alerta em vez de silêncio total; sem risco
+			// de acúmulo diário, já que esta função só é chamada 1x/dia (via goroutine de
+			// SolicitarApuracaoParaEmpresa, já gated a 1 solicitação de débito por dia).
+			log.Printf("[RFB Creditos] Endpoint /creditos-cbs/v1/ indisponível no gateway (HTTP 404) — aguardando liberação pela RFB")
+			errorCode = "ENDPOINT_INDISPONIVEL"
+		case strings.HasPrefix(errMsg, "RATE_LIMIT_429|"):
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
 			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message)
 			VALUES ($1, $2, 'error', 'credito', $3, $4)
 		`, companyID, cnpjBase, errorCode, errMsg)
+		if errorCode == "ENDPOINT_INDISPONIVEL" {
+			return fmt.Errorf("endpoint não disponível: %w", err)
+		}
 		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 

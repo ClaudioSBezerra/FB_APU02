@@ -14,33 +14,6 @@ import (
 	jwt "github.com/golang-jwt/jwt/v5"
 )
 
-type RFBCreditoRequest struct {
-	ID              string             `json:"id"`
-	CompanyID       string             `json:"company_id"`
-	CNPJBase        string             `json:"cnpj_base"`
-	Tiquete         string             `json:"tiquete,omitempty"`
-	TiqueteDownload *string            `json:"tiquete_download,omitempty"`
-	Status          string             `json:"status"`
-	Ambiente        string             `json:"ambiente"`
-	ErrorCode       *string            `json:"error_code,omitempty"`
-	ErrorMessage    *string            `json:"error_message,omitempty"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	Resumo          *RFBCreditoResumo  `json:"resumo,omitempty"`
-}
-
-type RFBCreditoResumo struct {
-	ID                 string  `json:"id"`
-	RequestID          string  `json:"request_id"`
-	DataApuracao       string  `json:"data_apuracao"`
-	TotalCreditos      int     `json:"total_creditos"`
-	ValorCBSTotal      float64 `json:"valor_cbs_total"`
-	ValorCBSExtinto    float64 `json:"valor_cbs_extinto"`
-	ValorCBSNaoExtinto float64 `json:"valor_cbs_nao_extinto"`
-	TotalCorrente      int     `json:"total_corrente"`
-	TotalAjuste        int     `json:"total_ajuste"`
-}
-
 // SolicitarCreditosHandler — POST /api/rfb/creditos/solicitar
 func SolicitarCreditosHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -119,18 +92,17 @@ func StatusCreditosHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Créditos são extraídos da mesma importação de débitos — filtra por tipo='debito' concluídos
+		// Status das solicitações de crédito CBS (rfb_requests, tipo='credito') — mesmo shape
+		// de StatusApuracaoHandler, sem enriquecimento de resumo (não necessário pra exibir
+		// status/alerta; achado de revisão anterior confirmou que a query antiga aqui nunca
+		// refletiu o fluxo real de créditos, e não tinha nenhum consumidor no frontend).
 		rows, err := db.Query(`
-			SELECT r.id, r.company_id, r.cnpj_base, COALESCE(r.tiquete, ''), r.tiquete_download,
-				r.status, r.ambiente,
-				r.error_code, r.error_message, r.created_at, r.updated_at,
-				res.id, res.request_id, COALESCE(res.data_apuracao, ''), res.total_creditos,
-				res.valor_cbs_total, res.valor_cbs_extinto, res.valor_cbs_nao_extinto,
-				res.total_corrente, res.total_ajuste
-			FROM rfb_requests r
-			LEFT JOIN rfb_creditos_resumo res ON res.request_id = r.id
-			WHERE r.company_id = $1 AND r.tipo = 'debito' AND r.status = 'completed'
-			ORDER BY r.created_at DESC
+			SELECT id, company_id, cnpj_base, COALESCE(tiquete, ''), tiquete_download,
+				status, ambiente, error_code, error_message, created_at, updated_at,
+				(raw_json IS NOT NULL) AS has_raw_json
+			FROM rfb_requests
+			WHERE company_id = $1 AND tipo = 'credito'
+			ORDER BY created_at DESC
 			LIMIT 20
 		`, companyID)
 		if err != nil {
@@ -139,36 +111,17 @@ func StatusCreditosHandler(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 
-		var requests []RFBCreditoRequest
+		var requests []RFBRequest
 		for rows.Next() {
-			var req RFBCreditoRequest
-			var resID, resReqID, resData sql.NullString
-			var resTotalCred, resCorrente, resAjuste sql.NullInt64
-			var resCBSTotal, resCBSExtinto, resCBSNaoExtinto sql.NullFloat64
-
+			var req RFBRequest
 			if err := rows.Scan(
 				&req.ID, &req.CompanyID, &req.CNPJBase, &req.Tiquete, &req.TiqueteDownload,
 				&req.Status, &req.Ambiente,
 				&req.ErrorCode, &req.ErrorMessage, &req.CreatedAt, &req.UpdatedAt,
-				&resID, &resReqID, &resData, &resTotalCred,
-				&resCBSTotal, &resCBSExtinto, &resCBSNaoExtinto,
-				&resCorrente, &resAjuste,
+				&req.HasRawJSON,
 			); err != nil {
 				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao ler crédito", err, "[RFBCreditos]")
 				return
-			}
-			if resID.Valid {
-				req.Resumo = &RFBCreditoResumo{
-					ID:                 resID.String,
-					RequestID:          resReqID.String,
-					DataApuracao:       resData.String,
-					TotalCreditos:      int(resTotalCred.Int64),
-					ValorCBSTotal:      resCBSTotal.Float64,
-					ValorCBSExtinto:    resCBSExtinto.Float64,
-					ValorCBSNaoExtinto: resCBSNaoExtinto.Float64,
-					TotalCorrente:      int(resCorrente.Int64),
-					TotalAjuste:        int(resAjuste.Int64),
-				}
 			}
 			requests = append(requests, req)
 		}

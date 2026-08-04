@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { TrendingUp, RefreshCw, Info, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TrendingUp, RefreshCw, Info, ChevronLeft, ChevronRight, AlertTriangle, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 
 interface SituacaoTotais {
@@ -10,6 +11,25 @@ interface SituacaoTotais {
   quantidade: number;
   valor_total: number;
 }
+
+interface CreditoRequestItem {
+  id: string;
+  cnpj_base: string;
+  status: string;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  has_raw_json: boolean;
+}
+
+const REQUEST_STATUS_LABELS: Record<string, string> = {
+  pending: 'Pendente',
+  requested: 'Solicitado',
+  webhook_received: 'Processando',
+  downloading: 'Baixando',
+  reprocessing: 'Reprocessando',
+  completed: 'Concluído',
+};
 
 interface CreditoItem {
   id: string;
@@ -32,6 +52,11 @@ interface CreditoItem {
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
+}
+
+function formatCNPJBase(cnpj: string): string {
+  if (cnpj.length === 8) return `${cnpj.slice(0, 2)}.${cnpj.slice(2, 5)}.${cnpj.slice(5)}`;
+  return cnpj;
 }
 
 function formatDate(d: string | null): string {
@@ -88,6 +113,73 @@ export default function RFBCreditosCBS() {
   const [loading, setLoading] = useState(true);
   const [filterSituacao, setFilterSituacao] = useState('');
   const [filterPeriodo, setFilterPeriodo] = useState('');
+  const [requests, setRequests] = useState<CreditoRequestItem[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [resoliciting, setResoliciting] = useState<string | null>(null);
+  const [reprocessing, setReprocessing] = useState<string | null>(null);
+
+  const fetchRequests = useCallback(async () => {
+    setRequestsLoading(true);
+    try {
+      const response = await fetch('/api/rfb/creditos/status');
+      if (response.ok) {
+        const data = await response.json();
+        setRequests(data.requests || []);
+      }
+    } catch {
+      // silent
+    } finally {
+      setRequestsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRequests();
+  }, [fetchRequests]);
+
+  const handleResolicitar = async (requestId: string) => {
+    setResoliciting(requestId);
+    try {
+      const response = await fetch('/api/rfb/apuracao/resolicitar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        toast.error(text || 'Erro ao resolicitar');
+        return;
+      }
+      toast.success('Solicitação de créditos reenviada à Receita Federal.');
+      fetchRequests();
+    } catch {
+      toast.error('Erro de conexão');
+    } finally {
+      setResoliciting(null);
+    }
+  };
+
+  const handleReprocess = async (requestId: string) => {
+    setReprocessing(requestId);
+    try {
+      const response = await fetch('/api/rfb/apuracao/reprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        toast.error(text || 'Erro ao reprocessar');
+        return;
+      }
+      toast.success('Reprocessamento iniciado.');
+      fetchRequests();
+    } catch {
+      toast.error('Erro de conexão');
+    } finally {
+      setReprocessing(null);
+    }
+  };
 
   const fetchCreditos = useCallback(async (p: number, sit: string, per: string) => {
     setLoading(true);
@@ -153,6 +245,78 @@ export default function RFBCreditosCBS() {
           </Link>.
         </p>
       </div>
+
+      {/* Solicitações de Créditos CBS */}
+      <Card className="mb-6">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Solicitações de Créditos CBS</CardTitle>
+          <CardDescription>Status das tentativas de obter créditos junto à Receita Federal.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {requestsLoading ? (
+            <div className="flex items-center justify-center h-16">
+              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+            </div>
+          ) : requests.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">Nenhuma solicitação de crédito ainda.</p>
+          ) : (
+            <div className="space-y-2">
+              {requests.map(req => {
+                const isAlerta = req.status === 'error' && req.error_code === 'ENDPOINT_INDISPONIVEL';
+                const isErro = req.status === 'error' && !isAlerta;
+                return (
+                  <div key={req.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {req.status === 'completed' && <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />}
+                      {isErro && <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />}
+                      {isAlerta && <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">CNPJ: {formatCNPJBase(req.cnpj_base)}</span>
+                          {isAlerta
+                            ? <span className="inline-block px-2 py-0.5 rounded border text-xs font-medium bg-amber-100 text-amber-800 border-amber-300">Alerta</span>
+                            : isErro
+                              ? <span className="inline-block px-2 py-0.5 rounded border text-xs font-medium bg-red-100 text-red-700 border-red-300">Erro</span>
+                              : req.status === 'completed'
+                                ? <span className="inline-block px-2 py-0.5 rounded border text-xs font-medium bg-green-100 text-green-700 border-green-300">Concluído</span>
+                                : <span className="inline-block px-2 py-0.5 rounded border text-xs font-medium bg-gray-100 text-gray-700 border-gray-300">
+                                    {REQUEST_STATUS_LABELS[req.status] || req.status}
+                                  </span>}
+                        </div>
+                        {req.error_message && (
+                          <p className={`text-xs mt-0.5 truncate ${isAlerta ? 'text-amber-700' : 'text-red-600'}`}>
+                            {req.error_message}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {req.status === 'error' && !req.has_raw_json && (
+                      <button
+                        onClick={() => handleResolicitar(req.id)}
+                        disabled={resoliciting === req.id}
+                        className="shrink-0 inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50"
+                      >
+                        <RefreshCw className="mr-1 h-3 w-3" />
+                        {resoliciting === req.id ? 'Reenviando...' : 'Re-solicitar'}
+                      </button>
+                    )}
+                    {req.status === 'error' && req.has_raw_json && (
+                      <button
+                        onClick={() => handleReprocess(req.id)}
+                        disabled={reprocessing === req.id}
+                        className="shrink-0 inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-purple-100 text-purple-700 hover:bg-purple-200 disabled:opacity-50"
+                      >
+                        <RotateCcw className="mr-1 h-3 w-3" />
+                        {reprocessing === req.id ? 'Reprocessando...' : 'Reprocessar'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">

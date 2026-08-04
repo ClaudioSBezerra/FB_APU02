@@ -386,7 +386,9 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// fail reverte a linha para 'error' com o motivo real desta tentativa — nunca deixa em 'pending'.
+		// fail reverte a linha para 'error' com o motivo real desta tentativa — usado só quando
+		// o service NÃO chegou a criar nenhuma linha nova pra esta tentativa (falhou antes de
+		// qualquer chamada HTTP à RFB).
 		fail := func(status int, code, publicMsg string) {
 			if _, execErr := db.Exec(`
 				UPDATE rfb_requests SET status = 'error', error_code = $3, error_message = $4, updated_at = CURRENT_TIMESTAMP
@@ -397,17 +399,32 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			jsonErr(w, status, publicMsg)
 		}
 
+		// discard remove a linha antiga (claim) sem reverter — usado quando o service JÁ criou
+		// uma linha nova com o resultado real desta tentativa (sucesso ou erro). Sem isso, toda
+		// tentativa que falhasse por um motivo que o service já registra (TOKEN_ERROR, RATE_LIMIT,
+		// REQUEST_ERROR, ENDPOINT_INDISPONIVEL) deixava a linha antiga revertida-pra-erro AO LADO
+		// da linha nova recém-criada — duplicando o registro a cada tentativa (achado de revisão).
+		discard := func(status int, publicMsg string) {
+			if _, execErr := db.Exec(`DELETE FROM rfb_requests WHERE id = $1 AND company_id = $2 AND status = 'pending'`, req.RequestID, companyID); execErr != nil {
+				log.Printf("[Ressolicitar] Falha ao remover linha antiga %s: %v", req.RequestID, execErr)
+			}
+			jsonErr(w, status, publicMsg)
+		}
+
 		tipoLabel := "débitos"
 		if tipo == "credito" {
 			tipoLabel = "créditos"
 		}
 		// status != 'pending' exclui a própria linha que está sendo reenviada agora (claim
 		// atômico não altera created_at) — sem isso, a linha se autocontava e bloqueava seu
-		// próprio reenvio (achado de revisão).
+		// próprio reenvio (achado de revisão). error_code != 'ENDPOINT_INDISPONIVEL' exclui
+		// tentativas automáticas diárias que só constatam que a RFB ainda não liberou o
+		// endpoint — não é uma tentativa real, não deveria consumir a cota de reenvio manual.
 		var todayCount int
 		db.QueryRow(`
 			SELECT COUNT(*) FROM rfb_requests
 			WHERE company_id = $1 AND tipo = $2 AND status != 'pending'
+			  AND COALESCE(error_code, '') != 'ENDPOINT_INDISPONIVEL'
 			  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 		`, companyID, tipo).Scan(&todayCount)
 		if todayCount >= 2 {
@@ -425,18 +442,26 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			msg := solicitarErr.Error()
 			switch {
 			case strings.Contains(msg, "credenciais RFB não encontradas"):
+				// Falha antes de qualquer chamada à RFB — nenhuma linha nova foi criada.
 				fail(http.StatusBadRequest, "NO_CREDENTIALS", "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.")
 			case strings.Contains(msg, "slot automático já utilizado"):
 				// Limite interno de SolicitarApuracaoParaEmpresa (1 solicitação de débito/dia,
 				// distinto do limite de 2/dia checado acima) — mensagem própria, não reusar
 				// "máximo 2" aqui (achado de revisão: mensagem anterior citava o limite errado).
+				// Também falha antes de qualquer INSERT — nenhuma linha nova foi criada.
 				fail(http.StatusTooManyRequests, "DAILY_LIMIT", "Limite diário de apuração de débitos já utilizado hoje. Tente novamente amanhã.")
 			case strings.Contains(msg, "RATE_LIMIT"):
-				fail(http.StatusTooManyRequests, "RATE_LIMIT", msg)
+				// service já fez INSERT de uma linha nova com este erro — descarta a antiga.
+				discard(http.StatusTooManyRequests, msg)
 			case strings.Contains(msg, "TOKEN_ERROR"):
-				fail(http.StatusBadGateway, "TOKEN_ERROR", "Erro ao obter token da RFB: "+msg)
+				discard(http.StatusBadGateway, "Erro ao obter token da RFB: "+msg)
 			case strings.Contains(msg, "REQUEST_ERROR"):
-				fail(http.StatusBadGateway, "REQUEST_ERROR", "Erro ao resolicitar: "+msg)
+				discard(http.StatusBadGateway, "Erro ao resolicitar: "+msg)
+			case strings.Contains(msg, "endpoint não disponível"):
+				// Condição conhecida e temporária (RFB ainda não ativou /creditos-cbs/v1/ neste
+				// ambiente), não uma falha real — service já criou a linha nova com
+				// error_code=ENDPOINT_INDISPONIVEL (frontend estiliza como Alerta, não Erro).
+				discard(http.StatusServiceUnavailable, "A Receita Federal ainda não liberou o endpoint de créditos CBS para este ambiente. Tente novamente mais tarde.")
 			default:
 				log.Printf("[Ressolicitar] Erro inesperado: %v", solicitarErr)
 				fail(http.StatusInternalServerError, "UNKNOWN_ERROR", "Erro ao resolicitar. Tente novamente.")
