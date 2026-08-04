@@ -1247,6 +1247,53 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
+def apply_fetched_credentials(fbtax: "FBTaxClient", cfg: dict, erp_type: str) -> str:
+    """Busca credenciais do servidor FBTax (fbtax.fetch_credentials()) e aplica em cima de
+    fbtax/cfg. Usado tanto pelo modo daemon quanto pelo modo normal (CLI) — antes duplicado
+    em main(), o que já causou um bug real (um dos dois lugares corrigido, o outro não).
+    Retorna o erp_type efetivo (a API pode sobrescrever o valor do config.yaml).
+
+    oracle_dsn NUNCA é sobrescrito por aqui, de propósito — diferente de usuario/senha
+    (rotacionáveis via tela, criptografados), o host:porta/serviço de conexão é infraestrutura
+    do próprio servidor; deixar a tela sobrescrevê-lo a cada execução já causou um incidente
+    real (config.yaml corrigido localmente pro Oracle de produção, mas revertido pro DSN de
+    teste a cada restart porque o valor salvo na tela não refletia a correção). DSN é
+    controlado só pelo config.yaml local do servidor.
+    """
+    if not fbtax.api_key:
+        return erp_type
+    creds = fbtax.fetch_credentials()
+    if not creds:
+        log.warning("api_key configurada mas nao foi possivel buscar credenciais. Usando config.yaml.")
+        return erp_type
+
+    if creds.get("fbtax_email"):
+        fbtax.email = creds["fbtax_email"]
+    if creds.get("fbtax_password"):
+        fbtax.password = creds["fbtax_password"]
+    if creds.get("erp_type"):
+        cfg["erp_type"] = creds["erp_type"]
+        erp_type = creds["erp_type"]
+
+    if erp_type == "sap_s4hana":
+        if "oracle" not in cfg:
+            cfg["oracle"] = {}
+        if creds.get("oracle_usuario"):
+            cfg["oracle"]["usuario"] = creds["oracle_usuario"]
+        if creds.get("oracle_senha"):
+            cfg["oracle"]["senha"] = creds["oracle_senha"]
+    else:
+        # oracle_xml: propaga para todos os servidores
+        for srv in cfg.get("servidores", []):
+            if creds.get("oracle_usuario"):
+                srv["usuario"] = creds["oracle_usuario"]
+            if creds.get("oracle_senha"):
+                srv["senha"] = creds["oracle_senha"]
+
+    log.info("Credenciais carregadas do servidor FBTax (erp_type=%s).", erp_type)
+    return erp_type
+
+
 def main() -> int:
     if not CONFIG_F.exists():
         log.error("config.yaml nao encontrado em %s", CONFIG_F)
@@ -1262,37 +1309,7 @@ def main() -> int:
 
     # Modo daemon
     if args.daemon:
-        if fbtax.api_key:
-            creds = fbtax.fetch_credentials()
-            if creds:
-                if creds.get("fbtax_email"):
-                    fbtax.email = creds["fbtax_email"]
-                if creds.get("fbtax_password"):
-                    fbtax.password = creds["fbtax_password"]
-                # Sobrescreve erp_type com o valor da API (tem precedência sobre config.yaml)
-                if creds.get("erp_type"):
-                    cfg["erp_type"] = creds["erp_type"]
-                    erp_type = creds["erp_type"]
-                # SAP: credenciais Oracle vão para cfg["oracle"]
-                if erp_type == "sap_s4hana":
-                    if "oracle" not in cfg:
-                        cfg["oracle"] = {}
-                    if creds.get("oracle_usuario"):
-                        cfg["oracle"]["usuario"] = creds["oracle_usuario"]
-                    if creds.get("oracle_senha"):
-                        cfg["oracle"]["senha"] = creds["oracle_senha"]
-                    if creds.get("oracle_dsn"):
-                        cfg["oracle"]["dsn"] = creds["oracle_dsn"]
-                else:
-                    # oracle_xml: propaga para todos os servidores
-                    for srv in cfg.get("servidores", []):
-                        if creds.get("oracle_usuario"):
-                            srv["usuario"] = creds["oracle_usuario"]
-                        if creds.get("oracle_senha"):
-                            srv["senha"] = creds["oracle_senha"]
-                log.info("Credenciais carregadas do servidor FBTax (erp_type=%s).", erp_type)
-            else:
-                log.warning("api_key configurada mas nao foi possivel buscar credenciais. Usando config.yaml.")
+        erp_type = apply_fetched_credentials(fbtax, cfg, erp_type)
         try:
             fbtax.login()
         except Exception as exc:
@@ -1319,34 +1336,7 @@ def main() -> int:
         data_fim = date.fromisoformat(args.data_fim) if args.data_fim else date.today() + timedelta(days=1)
 
     # Busca credenciais do servidor FBTax (mesmo fluxo do daemon)
-    if fbtax.api_key:
-        creds = fbtax.fetch_credentials()
-        if creds:
-            if creds.get("fbtax_email"):
-                fbtax.email = creds["fbtax_email"]
-            if creds.get("fbtax_password"):
-                fbtax.password = creds["fbtax_password"]
-            if creds.get("erp_type"):
-                cfg["erp_type"] = creds["erp_type"]
-                erp_type = creds["erp_type"]
-            if erp_type == "sap_s4hana":
-                if "oracle" not in cfg:
-                    cfg["oracle"] = {}
-                if creds.get("oracle_usuario"):
-                    cfg["oracle"]["usuario"] = creds["oracle_usuario"]
-                if creds.get("oracle_senha"):
-                    cfg["oracle"]["senha"] = creds["oracle_senha"]
-                if creds.get("oracle_dsn"):
-                    cfg["oracle"]["dsn"] = creds["oracle_dsn"]
-            else:
-                for srv in cfg.get("servidores", []):
-                    if creds.get("oracle_usuario"):
-                        srv["usuario"] = creds["oracle_usuario"]
-                    if creds.get("oracle_senha"):
-                        srv["senha"] = creds["oracle_senha"]
-            log.info("Credenciais carregadas do servidor FBTax (erp_type=%s).", erp_type)
-        else:
-            log.warning("api_key configurada mas nao foi possivel buscar credenciais. Usando config.yaml.")
+    erp_type = apply_fetched_credentials(fbtax, cfg, erp_type)
 
     if not args.dry_run:
         try:

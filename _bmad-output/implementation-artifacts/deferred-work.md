@@ -353,3 +353,24 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-rfb-creditos-solicitacoes-alerta.md`
   summary: A seção nova "Solicitações de Créditos CBS" e a seção pré-existente "Créditos CBS" (créditos já importados) compartilham vocabulário e rotas quase idênticas (`/api/rfb/creditos/status` vs `/api/rfb/creditos/lista`) apesar de rastrearem dados estruturalmente não relacionados — risco de confusão pra usuários/mantenedores futuros sobre o que cada seção representa.
   evidence: Observação de design, não um bug funcional. Os títulos das seções já são distintos ("Solicitações de Créditos CBS" vs "Créditos Individuais"/cards de situação), mitigando parcialmente. **Revisitar** se usuários relatarem confusão entre as duas seções.
+
+## Deferred from: one-shot fix — remove sobrescrita de oracle_dsn via API (2026-08-04)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-erp-bridge-dsn-nao-sobrescrever.md`
+  summary: O campo "Oracle DSN" continua visível e editável na tela (Configurações → ERP Bridge → Cred. ERP Bridge, `frontend/src/pages/ERPBridgeCredenciais.tsx`), mas agora é um no-op pra clientes em `erp_type=sap_s4hana` — quem editar e salvar vê sucesso, mas o daemon nunca aplica o valor. Nada na tela avisa disso.
+  evidence: Confirmado por leitura de código — o campo só é mostrado condicionalmente a `erpType === 'sap_s4hana'`, exatamente o modo agora afetado. Corrigir exigiria mudança de frontend (desabilitar o campo nesse modo, ou trocar o texto de ajuda pra "edite direto no config.yaml do servidor") — fora do escopo desta correção pontual em Python. **Revisitar**: adicionar aviso/desabilitar o campo, ou documentar isso na tela.
+- source_spec: `_bmad-output/implementation-artifacts/spec-erp-bridge-dsn-nao-sobrescrever.md`
+  summary: Trocar `erp_type` de `oracle_xml` pra `sap_s4hana` (ou vice-versa) continua sendo possível remotamente via tela — mas agora, ao fazer essa troca, o DSN não acompanha automaticamente; exige um segundo passo manual (SSH no servidor, editar `config.yaml`, reiniciar) que antes não era necessário. Não documentado em nenhum lugar visível ao operador.
+  evidence: Consequência direta e aceita da decisão desta correção. **Revisitar**: adicionar essa observação à documentação de onboarding/troca de erp_type (`Bmad-output/04-INSTALACAO-AWS.md` ou similar).
+- source_spec: `_bmad-output/implementation-artifacts/spec-erp-bridge-dsn-nao-sobrescrever.md`
+  summary: A capacidade de rotacionar o DSN remotamente (útil pra failover de DR ou migração de host sem acesso SSH) foi perdida como efeito colateral desta correção — não foi discutida/registrada como tradeoff consciente até agora.
+  evidence: Análise de consequência da decisão já validada com o usuário. Baixa probabilidade de uso hoje (só 1 cliente sap_s4hana conhecido, FCCORP), mas vale documentar. **Revisitar** se um cenário de DR/migração de servidor Oracle aparecer no roadmap.
+- source_spec: `_bmad-output/implementation-artifacts/spec-erp-bridge-dsn-nao-sobrescrever.md`
+  summary: `oracle_dsn` continua sendo o único campo relacionado a Oracle no PATCH/GET de `backend/handlers/erp_bridge.go` que não passa por `crypto.EncryptField` (fica em texto puro no banco) — a própria premissa desta correção ("DSN é infraestrutura, não segredo rotacionável") era o momento natural de questionar se o campo devia sair do endpoint de credenciais criptografadas.
+  evidence: Não introduzido por esta correção (comportamento pré-existente), mas motivo direto pra reconsiderar agora que o campo é vestigial pro cliente sap_s4hana em modo daemon. **Revisitar** junto com a decisão sobre desabilitar/remover o campo da tela.
+- source_spec: `_bmad-output/implementation-artifacts/spec-erp-bridge-dsn-nao-sobrescrever.md`
+  summary: Clientes `sap_s4hana` cujo `config.yaml` nunca teve `oracle.dsn` preenchido (ex: onboarding feito só pela tela, ou troca recente de `oracle_xml` pra `sap_s4hana`) vão bater no erro existente "erp_type=sap_s4hana mas 'oracle.dsn' nao configurado em config.yaml" no próximo `--daemon`/execução — sem nenhuma migração ou aviso proativo desta correção pra esses casos.
+  evidence: Comportamento de fail-fast já existente no código (não introduzido agora), mas o cenário de acionamento mudou (antes a tela suprai isso automaticamente). **Revisitar** se outro cliente sap_s4hana for onboardado e travar nesse erro.
+- source_spec: `_bmad-output/implementation-artifacts/spec-erp-bridge-dsn-nao-sobrescrever.md`
+  summary: Nenhum teste automatizado cobre `apply_fetched_credentials` (função nova, consolidando lógica antes duplicada).
+  evidence: Consistente com a política já aceita no projeto — `erp-bridge-aws/` não tem framework de teste instalado. **Revisitar** se um framework de teste for adotado para esse diretório.
