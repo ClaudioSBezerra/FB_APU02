@@ -333,14 +333,22 @@ func AbortRequestHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-// RessolicitarHandler reseta uma solicitação com erro (sem raw_json) para pending,
-// permitindo que o scheduler a reenvie à API RFB.
+// RessolicitarHandler reenvia à API RFB uma solicitação que ficou em erro (sem raw_json):
+// faz um claim atômico da linha, chama o service correto (débito/crédito) e substitui a
+// linha antiga pela nova solicitação real criada pelo service. No caminho feliz a linha
+// nunca fica presa em 'pending' (achado de revisão: a versão anterior só resetava o status
+// e nunca rechamava a RFB de fato, deixando a linha órfã até o watchdog de 5h abortá-la com
+// timeout falso); se a reversão para 'error' em si falhar (DB indisponível), o erro é logado.
 func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodPost {
+			jsonErr(w, http.StatusMethodNotAllowed, "Method not allowed")
+			return
+		}
 		claims, ok := r.Context().Value(ClaimsKey).(jwt.MapClaims)
 		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			jsonErr(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
 		userID := claims["user_id"].(string)
@@ -356,23 +364,98 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			jsonErr(w, http.StatusBadRequest, "request_id obrigatório")
 			return
 		}
-		res, err := db.Exec(`
+
+		// Claim atômico: só avança se a linha ainda está em erro e sem dados baixados —
+		// evita reenvio duplicado em duplo clique.
+		var tipo string
+		err = db.QueryRow(`
 			UPDATE rfb_requests
 			SET status = 'pending', error_code = NULL, error_message = NULL,
 			    tiquete = NULL, tiquete_download = NULL, raw_json = NULL,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE id = $1 AND company_id = $2
 			  AND status = 'error' AND raw_json IS NULL
-		`, req.RequestID, companyID)
-		if err != nil {
-			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao resolicitar", err, "[Resolicitar]")
-			return
-		}
-		if rows, _ := res.RowsAffected(); rows == 0 {
+			RETURNING COALESCE(tipo, 'debito')
+		`, req.RequestID, companyID).Scan(&tipo)
+		if err == sql.ErrNoRows {
 			jsonErr(w, http.StatusNotFound, "Solicitação não encontrada, não está em erro, ou já possui dados baixados")
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{"status": "pending"})
+		if err != nil {
+			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao buscar solicitação", err, "[Ressolicitar]")
+			return
+		}
+
+		// fail reverte a linha para 'error' com o motivo real desta tentativa — nunca deixa em 'pending'.
+		fail := func(status int, code, publicMsg string) {
+			if _, execErr := db.Exec(`
+				UPDATE rfb_requests SET status = 'error', error_code = $3, error_message = $4, updated_at = CURRENT_TIMESTAMP
+				WHERE id = $1 AND company_id = $2
+			`, req.RequestID, companyID, code, publicMsg); execErr != nil {
+				log.Printf("[Ressolicitar] Falha ao reverter linha %s para error: %v", req.RequestID, execErr)
+			}
+			jsonErr(w, status, publicMsg)
+		}
+
+		tipoLabel := "débitos"
+		if tipo == "credito" {
+			tipoLabel = "créditos"
+		}
+		// status != 'pending' exclui a própria linha que está sendo reenviada agora (claim
+		// atômico não altera created_at) — sem isso, a linha se autocontava e bloqueava seu
+		// próprio reenvio (achado de revisão).
+		var todayCount int
+		db.QueryRow(`
+			SELECT COUNT(*) FROM rfb_requests
+			WHERE company_id = $1 AND tipo = $2 AND status != 'pending'
+			  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
+		`, companyID, tipo).Scan(&todayCount)
+		if todayCount >= 2 {
+			fail(http.StatusTooManyRequests, "DAILY_LIMIT", fmt.Sprintf("Limite diário atingido (máximo 2 solicitações de %s por dia)", tipoLabel))
+			return
+		}
+
+		var solicitarErr error
+		if tipo == "credito" {
+			solicitarErr = services.SolicitarCreditoParaEmpresa(db, companyID)
+		} else {
+			solicitarErr = services.SolicitarApuracaoParaEmpresa(db, companyID)
+		}
+		if solicitarErr != nil {
+			msg := solicitarErr.Error()
+			switch {
+			case strings.Contains(msg, "credenciais RFB não encontradas"):
+				fail(http.StatusBadRequest, "NO_CREDENTIALS", "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.")
+			case strings.Contains(msg, "slot automático já utilizado"):
+				// Limite interno de SolicitarApuracaoParaEmpresa (1 solicitação de débito/dia,
+				// distinto do limite de 2/dia checado acima) — mensagem própria, não reusar
+				// "máximo 2" aqui (achado de revisão: mensagem anterior citava o limite errado).
+				fail(http.StatusTooManyRequests, "DAILY_LIMIT", "Limite diário de apuração de débitos já utilizado hoje. Tente novamente amanhã.")
+			case strings.Contains(msg, "RATE_LIMIT"):
+				fail(http.StatusTooManyRequests, "RATE_LIMIT", msg)
+			case strings.Contains(msg, "TOKEN_ERROR"):
+				fail(http.StatusBadGateway, "TOKEN_ERROR", "Erro ao obter token da RFB: "+msg)
+			case strings.Contains(msg, "REQUEST_ERROR"):
+				fail(http.StatusBadGateway, "REQUEST_ERROR", "Erro ao resolicitar: "+msg)
+			default:
+				log.Printf("[Ressolicitar] Erro inesperado: %v", solicitarErr)
+				fail(http.StatusInternalServerError, "UNKNOWN_ERROR", "Erro ao resolicitar. Tente novamente.")
+			}
+			return
+		}
+
+		// Sucesso: o service já criou uma linha nova (INSERT com tiquete fresco) — remove a antiga.
+		if res, delErr := db.Exec(`DELETE FROM rfb_requests WHERE id = $1 AND company_id = $2 AND status = 'pending'`, req.RequestID, companyID); delErr != nil {
+			log.Printf("[Ressolicitar] Falha ao remover linha antiga %s: %v", req.RequestID, delErr)
+		} else if rows, _ := res.RowsAffected(); rows == 0 {
+			log.Printf("[Ressolicitar] Linha antiga %s não encontrada em 'pending' na hora de limpar (concorrência?)", req.RequestID)
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "requested",
+			"message": "Solicitação reenviada à Receita Federal. Aguarde o retorno via webhook.",
+		})
 	}
 }
 

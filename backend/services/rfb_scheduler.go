@@ -66,11 +66,15 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 	}
 
 	// 4. Verificar slot do dia para débitos (max 1 automático, deixa 1 slot para manual)
+	// status != 'pending' exclui a própria linha que o Ressolicitar está reenviando agora
+	// (claim atômico deixa a linha em 'pending' sem alterar created_at) — sem isso, uma linha
+	// sendo re-enviada hoje sempre se autocontava e bloqueava seu próprio reenvio (achado de revisão).
 	var todayCount int
 	db.QueryRow(`
 		SELECT COUNT(*) FROM rfb_requests
 		WHERE company_id = $1
 		  AND tipo = 'debito'
+		  AND status != 'pending'
 		  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 	`, companyID).Scan(&todayCount)
 	if todayCount >= 1 {
