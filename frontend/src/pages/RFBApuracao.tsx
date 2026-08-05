@@ -203,6 +203,10 @@ export default function RFBApuracao() {
       if (!response.ok) {
         const text = await response.text();
         setMessage({ type: 'error', text: text || 'Erro ao resolicitar' });
+        // Recarrega mesmo no erro: o backend pode ter substituído a linha antiga por uma
+        // nova (ex: falha de rate-limit/token) — sem isso a tela mantém o ID antigo e um
+        // novo clique em "Re-solicitar" repete o mesmo 404 (achado em produção, 05/08).
+        fetchRequests();
         return;
       }
       setMessage({ type: 'success', text: 'Solicitação reenviada à RFB. Aguarde processamento.' });

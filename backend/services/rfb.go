@@ -154,6 +154,20 @@ func (c *RFBClient) GetToken(clientID, clientSecret string) (string, error) {
 
 	body, _ := io.ReadAll(resp.Body)
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		retryAfterStr := resp.Header.Get("Retry-After")
+		if secs, err2 := strconv.Atoi(retryAfterStr); err2 == nil && secs > 0 {
+			until := time.Now().Add(time.Duration(secs) * time.Second)
+			brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
+			log.Printf("[RFB] Token endpoint rate limit — Retry-After: %ds (até %s BRT)",
+				secs, until.In(brtLoc).Format("02/01 15:04"))
+			return "", fmt.Errorf("RATE_LIMIT_429|retry_until=%s|token endpoint rate limit exceeded (Retry-After: %ds — tente após %s BRT)",
+				until.UTC().Format(time.RFC3339), secs, until.In(brtLoc).Format("15:04"))
+		}
+		log.Printf("[RFB] Token error (HTTP 429): %s", string(body))
+		return "", fmt.Errorf("RATE_LIMIT_429|token endpoint rate limit exceeded: %s", string(body))
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("[RFB] Token error (HTTP %d): %s", resp.StatusCode, string(body))
 		return "", fmt.Errorf("token request returned HTTP %d: %s", resp.StatusCode, string(body))

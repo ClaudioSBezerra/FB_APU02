@@ -8,6 +8,22 @@ import (
 	"time"
 )
 
+// extractRetryUntil procura um segmento "retry_until=RFC3339" numa mensagem de erro
+// delimitada por "|" (formato usado tanto pelo 429 de apuração/créditos quanto pelo
+// de token, ver rfb.go) e retorna o timestamp se ainda estiver no futuro.
+func extractRetryUntil(msg string) (time.Time, bool) {
+	for _, part := range strings.Split(msg, "|") {
+		if strings.HasPrefix(part, "retry_until=") {
+			t, err := time.Parse(time.RFC3339, strings.TrimPrefix(part, "retry_until="))
+			if err == nil && time.Now().Before(t) {
+				return t, true
+			}
+			return time.Time{}, false
+		}
+	}
+	return time.Time{}, false
+}
+
 // restoreRateLimitFromDB recarrega o bloqueio de rate-limit do banco após restart do container.
 // O error_message de registros RATE_LIMIT contém "retry_until=RFC3339|..." para persistência.
 func restoreRateLimitFromDB(db *sql.DB, companyID, cnpjBase string) {
@@ -20,17 +36,25 @@ func restoreRateLimitFromDB(db *sql.DB, companyID, cnpjBase string) {
 	if !msg.Valid {
 		return
 	}
-	for _, part := range strings.Split(msg.String, "|") {
-		if strings.HasPrefix(part, "retry_until=") {
-			t, err := time.Parse(time.RFC3339, strings.TrimPrefix(part, "retry_until="))
-			if err == nil && time.Now().Before(t) {
-				SetRateLimitUntil(cnpjBase, t)
-				brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
-				log.Printf("[RFB] Rate limit restaurado do banco para CNPJ %s — bloqueado até %s BRT",
-					cnpjBase, t.In(brtLoc).Format("02/01 15:04"))
-			}
-			return
-		}
+	if t, ok := extractRetryUntil(msg.String); ok {
+		SetRateLimitUntil(cnpjBase, t)
+		brtLoc, _ := time.LoadLocation("America/Sao_Paulo")
+		log.Printf("[RFB] Rate limit restaurado do banco para CNPJ %s — bloqueado até %s BRT",
+			cnpjBase, t.In(brtLoc).Format("02/01 15:04"))
+	}
+}
+
+// applyTokenRateLimit registra localmente (e loga) o bloqueio de rate-limit vindo do
+// endpoint de token — antes desse fix, um 429 de GetToken virava só um TOKEN_ERROR
+// genérico, sem impedir a próxima tentativa (manual ou agendada) de bater no mesmo
+// bloqueio imediatamente. Sem-op se o erro não tiver o prefixo RATE_LIMIT_429.
+func applyTokenRateLimit(cnpjBase string, err error) {
+	msg := err.Error()
+	if !strings.HasPrefix(msg, "RATE_LIMIT_429|") {
+		return
+	}
+	if t, ok := extractRetryUntil(msg); ok {
+		SetRateLimitUntil(cnpjBase, t)
 	}
 }
 
@@ -86,11 +110,16 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 	rfbClient.SetAmbiente(ambiente)
 	token, err := rfbClient.GetToken(clientID, clientSecret)
 	if err != nil {
+		applyTokenRateLimit(cnpjBase, err)
+		errorCode := "TOKEN_ERROR"
+		if strings.HasPrefix(err.Error(), "RATE_LIMIT_429|") {
+			errorCode = "RATE_LIMIT"
+		}
 		db.Exec(`
 			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message)
-			VALUES ($1, $2, 'error', 'TOKEN_ERROR', $3)
-		`, companyID, cnpjBase, err.Error())
-		return fmt.Errorf("TOKEN_ERROR: %w", err)
+			VALUES ($1, $2, 'error', $3, $4)
+		`, companyID, cnpjBase, errorCode, err.Error())
+		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
 	// 6. Solicitar apuração CBS
@@ -166,11 +195,16 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 	rfbClient.SetAmbiente(ambiente)
 	token, err := rfbClient.GetToken(clientID, clientSecret)
 	if err != nil {
+		applyTokenRateLimit(cnpjBase, err)
+		errorCode := "TOKEN_ERROR"
+		if strings.HasPrefix(err.Error(), "RATE_LIMIT_429|") {
+			errorCode = "RATE_LIMIT"
+		}
 		db.Exec(`
 			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message)
-			VALUES ($1, $2, 'error', 'credito', 'TOKEN_ERROR', $3)
-		`, companyID, cnpjBase, err.Error())
-		return fmt.Errorf("TOKEN_ERROR: %w", err)
+			VALUES ($1, $2, 'error', 'credito', $3, $4)
+		`, companyID, cnpjBase, errorCode, err.Error())
+		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
 	tiquete, err := rfbClient.SolicitarCredito(token, cnpjBase)
