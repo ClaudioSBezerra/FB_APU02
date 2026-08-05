@@ -786,6 +786,11 @@ def processar_sap(
                 if result.get("error_details"):
                     for err in result["error_details"][:5]:
                         log.warning("  Detalhe erro: %s", err)
+                    stats["sap_batch"].setdefault(
+                        "erro_msg",
+                        f"{result.get('errors', 0)} documento(s) rejeitado(s) pelo backend: "
+                        f"{result['error_details'][0]}"
+                    )
             except Exception as exc:
                 log.error("Erro ao enviar lote %d: %s", i // BATCH_SIZE + 1, exc)
                 total_errors += len(lote)

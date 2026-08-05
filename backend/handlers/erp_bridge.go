@@ -280,6 +280,17 @@ func ERPBridgeRunsHandler(db *sql.DB) http.HandlerFunc {
 			if origem == "" {
 				origem = "manual"
 			}
+			var running bool
+			db.QueryRow(`
+				SELECT EXISTS(
+					SELECT 1 FROM erp_bridge_runs
+					WHERE company_id = $1 AND status IN ('running','pending')
+				)
+			`, companyID).Scan(&running)
+			if running {
+				http.Error(w, "Já existe uma importação em andamento ou aguardando execução.", http.StatusConflict)
+				return
+			}
 			var id string
 			err := db.QueryRow(`
 				INSERT INTO erp_bridge_runs (company_id, data_ini, data_fim, origem, status)
