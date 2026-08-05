@@ -58,3 +58,7 @@ sap-mock-server/sap-mock-server
 
 # Debug tools (local only — contain dev credentials)
 backend/tools/
+
+# Python
+__pycache__/
+*.pyc
