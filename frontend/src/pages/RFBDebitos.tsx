@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronLeft, ChevronRight, Filter, X, Download, Copy, Check, FileText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Filter, X, Download, Copy, Check, FileText, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 
 // ── Interfaces ───────────────────────────────────────────────────────────────
@@ -41,9 +41,27 @@ interface RFBDebito {
   situacao_debito: string;
 }
 
+interface SituacaoBreakdown {
+  situacao: string;
+  quantidade: number;
+  valor_cbs_total: number;
+  valor_cbs_extinto: number;
+  valor_cbs_nao_extinto: number;
+}
+
+interface FormaPagamentoBreakdown {
+  arranjo_pagamento: string;
+  qtde_parcelas: number;
+  valor_cbs_previsto: number;
+  parcelas_liquidadas: number;
+  parcelas_reconciliadas: number;
+}
+
 interface DebitPage {
   debitos: RFBDebito[];
   resumo: ResumoAgregado;
+  resumo_por_situacao?: SituacaoBreakdown[];
+  resumo_por_pagamento?: FormaPagamentoBreakdown[];
   pagination: { page: number; page_size: number; total: number; total_pages: number };
 }
 
@@ -182,6 +200,7 @@ export default function RFBDebitos() {
   const [page,        setPage]        = useState(1);
   const [filters,     setFilters]     = useState<Filters>(EMPTY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const [chaveDebounced,   setChaveDebounced]   = useState('');
   const [clienteDebounced, setClienteDebounced] = useState('');
@@ -235,6 +254,8 @@ export default function RFBDebitos() {
       const empty: DebitPage = {
         debitos: [],
         resumo: { total_debitos: 0, valor_cbs_total: 0, valor_cbs_extinto: 0, valor_cbs_nao_extinto: 0, total_corrente: 0, total_ajuste: 0, total_extemporaneo: 0 },
+        resumo_por_situacao: [],
+        resumo_por_pagamento: [],
         pagination: { page: 1, page_size: 100, total: 0, total_pages: 1 },
       };
       if (!selectedPeriodo) return empty;
@@ -260,8 +281,10 @@ export default function RFBDebitos() {
     placeholderData: keepPreviousData,
   });
 
-  const debitos    = debitData?.debitos    || [];
-  const resumo     = debitData?.resumo     || null;
+  const debitos         = debitData?.debitos            || [];
+  const resumo          = debitData?.resumo              || null;
+  const porSituacao     = debitData?.resumo_por_situacao || [];
+  const porPagamento    = debitData?.resumo_por_pagamento || [];
   const pagination = debitData?.pagination || { page: 1, page_size: 100, total: 0, total_pages: 1 };
   const pageCount  = pagination.total_pages;
 
@@ -420,6 +443,83 @@ export default function RFBDebitos() {
           </div>
         )}
       </div>
+
+      {/* ── Detalhamento: por situação e por forma de pagamento (split payment) ── */}
+      {resumo && resumo.total_debitos > 0 && (
+        <div className="border rounded-lg bg-white">
+          <div
+            className="flex items-center justify-between px-3 py-2 cursor-pointer select-none"
+            onClick={() => setShowBreakdown(v => !v)}
+          >
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Layers className="h-3.5 w-3.5" />
+              Detalhamento por situação e forma de pagamento
+            </div>
+            {showBreakdown ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          </div>
+
+          {showBreakdown && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-3 pb-3">
+              {/* Por situação do débito */}
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Por situação
+                </p>
+                <table className="w-full text-[11px] border rounded overflow-hidden">
+                  <thead>
+                    <tr className="bg-muted/50">
+                      <th className="py-1 px-2 text-left font-medium text-muted-foreground">Situação</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Docs</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Não Extinto</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Extinto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {porSituacao.map(s => (
+                      <tr key={s.situacao} className="border-t">
+                        <td className="py-0.5 px-2">{s.situacao}</td>
+                        <td className="py-0.5 px-2 text-right">{formatNumber(s.quantidade)}</td>
+                        <td className="py-0.5 px-2 text-right text-orange-600">{formatCurrency(s.valor_cbs_nao_extinto)}</td>
+                        <td className="py-0.5 px-2 text-right text-green-600">{formatCurrency(s.valor_cbs_extinto)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Por forma de pagamento prevista (split payment) */}
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                  Por forma de pagamento prevista (split payment)
+                </p>
+                <table className="w-full text-[11px] border rounded overflow-hidden">
+                  <thead>
+                    <tr className="bg-muted/50">
+                      <th className="py-1 px-2 text-left font-medium text-muted-foreground">Arranjo</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Parcelas</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">CBS Previsto</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Liquidadas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {porPagamento.map(f => (
+                      <tr key={f.arranjo_pagamento} className="border-t">
+                        <td className="py-0.5 px-2">{f.arranjo_pagamento}</td>
+                        <td className="py-0.5 px-2 text-right">{formatNumber(f.qtde_parcelas)}</td>
+                        <td className="py-0.5 px-2 text-right">{formatCurrency(f.valor_cbs_previsto)}</td>
+                        <td className="py-0.5 px-2 text-right text-muted-foreground">{formatNumber(f.parcelas_liquidadas)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Cronograma esperado, a partir da forma de pagamento da venda. Preenchido conforme os dados de venda forem cadastrados — ainda sem confirmação da RFB (Split Payment na Etapa 2, data a definir).
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Barra de filtros ── */}
       <div className="border rounded-lg bg-white">

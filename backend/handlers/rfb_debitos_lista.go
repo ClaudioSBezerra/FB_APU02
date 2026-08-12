@@ -135,6 +135,73 @@ func ListarDebitosHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("[RFB Debitos Lista] aggregate error: %v", err)
 		}
 
+		// Quebra do resumo por situação do débito (dado já reportado pela RFB por documento).
+		type SituacaoBreakdown struct {
+			Situacao           string  `json:"situacao"`
+			Quantidade         int     `json:"quantidade"`
+			ValorCBSTotal      float64 `json:"valor_cbs_total"`
+			ValorCBSExtinto    float64 `json:"valor_cbs_extinto"`
+			ValorCBSNaoExtinto float64 `json:"valor_cbs_nao_extinto"`
+		}
+		var porSituacao []SituacaoBreakdown
+		situacaoQ := fmt.Sprintf(`
+			SELECT COALESCE(NULLIF(d.situacao_debito, ''), '(sem situação)'),
+				COUNT(*),
+				COALESCE(SUM(d.valor_cbs_total), 0),
+				COALESCE(SUM(d.valor_cbs_extinto), 0),
+				COALESCE(SUM(d.valor_cbs_nao_extinto), 0)
+			FROM rfb_debitos d
+			%s
+			GROUP BY 1
+			ORDER BY 3 DESC`, where)
+		if sitRows, sitErr := db.Query(situacaoQ, args...); sitErr == nil {
+			defer sitRows.Close()
+			for sitRows.Next() {
+				var s SituacaoBreakdown
+				if sitRows.Scan(&s.Situacao, &s.Quantidade, &s.ValorCBSTotal, &s.ValorCBSExtinto, &s.ValorCBSNaoExtinto) == nil {
+					porSituacao = append(porSituacao, s)
+				}
+			}
+		} else {
+			log.Printf("[RFB Debitos Lista] breakdown por situação error: %v", sitErr)
+		}
+
+		// Quebra por forma de pagamento prevista (cronograma de liquidação, migration 126).
+		// Documentos sem linha em rfb_debitos_liquidacoes caem em "(sem cronograma)" — a
+		// maioria hoje, até o cronograma ser populado a partir dos dados de compra/venda do ERP.
+		type FormaPagamentoBreakdown struct {
+			ArranjoPagamento      string  `json:"arranjo_pagamento"`
+			QtdeParcelas          int     `json:"qtde_parcelas"`
+			ValorCBSPrevisto      float64 `json:"valor_cbs_previsto"`
+			ParcelasLiquidadas    int     `json:"parcelas_liquidadas"`
+			ParcelasReconciliadas int     `json:"parcelas_reconciliadas"`
+		}
+		var porFormaPagamento []FormaPagamentoBreakdown
+		formaPagamentoQ := fmt.Sprintf(`
+			SELECT COALESCE(l.arranjo_pagamento, '(sem cronograma)'),
+				COUNT(*),
+				COALESCE(SUM(l.valor_cbs_proporcional), 0),
+				COUNT(*) FILTER (WHERE l.status = 'liquidado'),
+				COUNT(*) FILTER (WHERE l.status = 'reconciliado')
+			FROM rfb_debitos d
+			LEFT JOIN rfb_debitos_liquidacoes l
+				ON l.company_id = d.company_id AND l.chave_dfe = d.chave_dfe
+			%s
+			GROUP BY 1
+			ORDER BY 2 DESC`, where)
+		if fpRows, fpErr := db.Query(formaPagamentoQ, args...); fpErr == nil {
+			defer fpRows.Close()
+			for fpRows.Next() {
+				var f FormaPagamentoBreakdown
+				if fpRows.Scan(&f.ArranjoPagamento, &f.QtdeParcelas, &f.ValorCBSPrevisto,
+					&f.ParcelasLiquidadas, &f.ParcelasReconciliadas) == nil {
+					porFormaPagamento = append(porFormaPagamento, f)
+				}
+			}
+		} else {
+			log.Printf("[RFB Debitos Lista] breakdown por forma de pagamento error: %v", fpErr)
+		}
+
 		totalPages := (resumo.TotalDebitos + pageSize - 1) / pageSize
 		if totalPages == 0 {
 			totalPages = 1
@@ -197,8 +264,10 @@ func ListarDebitosHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"debitos": debitos,
-			"resumo":  resumo,
+			"debitos":              debitos,
+			"resumo":               resumo,
+			"resumo_por_situacao":  porSituacao,
+			"resumo_por_pagamento": porFormaPagamento,
 			"pagination": map[string]int{
 				"page":        page,
 				"page_size":   pageSize,

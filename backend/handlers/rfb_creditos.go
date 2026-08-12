@@ -325,21 +325,21 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 
 		type CreditoItem struct {
-			ID                 string   `json:"id"`
-			RequestID          string   `json:"request_id"`
-			TipoApuracao       string   `json:"tipo_apuracao"`
-			ModeloDfe          string   `json:"modelo_dfe"`
-			NumeroDfe          string   `json:"numero_dfe"`
-			ChaveDfe           string   `json:"chave_dfe"`
-			DataDfeEmissao     *string  `json:"data_dfe_emissao"`
-			DataApuracao       string   `json:"data_apuracao"`
-			NiEmitente         string   `json:"ni_emitente"`
-			NiAdquirente       string   `json:"ni_adquirente"`
-			ValorCBSTotal      float64  `json:"valor_cbs_total"`
-			ValorCBSExtinto    float64  `json:"valor_cbs_extinto"`
-			ValorCBSNaoExtinto float64  `json:"valor_cbs_nao_extinto"`
-			SituacaoCredito    string   `json:"situacao_credito"`
-			FormasExtincao     string   `json:"formas_extincao"`
+			ID                 string    `json:"id"`
+			RequestID          string    `json:"request_id"`
+			TipoApuracao       string    `json:"tipo_apuracao"`
+			ModeloDfe          string    `json:"modelo_dfe"`
+			NumeroDfe          string    `json:"numero_dfe"`
+			ChaveDfe           string    `json:"chave_dfe"`
+			DataDfeEmissao     *string   `json:"data_dfe_emissao"`
+			DataApuracao       string    `json:"data_apuracao"`
+			NiEmitente         string    `json:"ni_emitente"`
+			NiAdquirente       string    `json:"ni_adquirente"`
+			ValorCBSTotal      float64   `json:"valor_cbs_total"`
+			ValorCBSExtinto    float64   `json:"valor_cbs_extinto"`
+			ValorCBSNaoExtinto float64   `json:"valor_cbs_nao_extinto"`
+			SituacaoCredito    string    `json:"situacao_credito"`
+			FormasExtincao     string    `json:"formas_extincao"`
 			CreatedAt          time.Time `json:"created_at"`
 		}
 
@@ -365,9 +365,9 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 
 		// Totais por situação
 		type SituacaoTotais struct {
-			Situacao    string  `json:"situacao"`
-			Quantidade  int     `json:"quantidade"`
-			ValorTotal  float64 `json:"valor_total"`
+			Situacao   string  `json:"situacao"`
+			Quantidade int     `json:"quantidade"`
+			ValorTotal float64 `json:"valor_total"`
 		}
 		var totais []SituacaoTotais
 		totaisRows, err2 := db.Query(`
@@ -386,12 +386,50 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 			}
 		}
 
+		// Quebra por forma de pagamento prevista (cronograma de liquidação, migration 126).
+		// Documentos sem linha em rfb_creditos_liquidacoes caem em "(sem cronograma)" — a
+		// maioria hoje, até o cronograma ser populado a partir dos dados de compra do ERP.
+		type FormaPagamentoBreakdown struct {
+			ArranjoPagamento      string  `json:"arranjo_pagamento"`
+			QtdeParcelas          int     `json:"qtde_parcelas"`
+			ValorCBSPrevisto      float64 `json:"valor_cbs_previsto"`
+			ParcelasLiquidadas    int     `json:"parcelas_liquidadas"`
+			ParcelasReconciliadas int     `json:"parcelas_reconciliadas"`
+		}
+		var porFormaPagamento []FormaPagamentoBreakdown
+		fpRows, fpErr := db.Query(`
+			SELECT COALESCE(l.arranjo_pagamento, '(sem cronograma)'),
+				COUNT(*),
+				COALESCE(SUM(l.valor_cbs_proporcional), 0),
+				COUNT(*) FILTER (WHERE l.status = 'liquidado'),
+				COUNT(*) FILTER (WHERE l.status = 'reconciliado')
+			FROM rfb_creditos c
+			LEFT JOIN rfb_creditos_liquidacoes l
+				ON l.company_id = c.company_id AND l.chave_dfe = c.chave_dfe
+			WHERE c.company_id = $1
+			GROUP BY 1
+			ORDER BY 2 DESC
+		`, companyID)
+		if fpErr == nil {
+			defer fpRows.Close()
+			for fpRows.Next() {
+				var f FormaPagamentoBreakdown
+				if fpRows.Scan(&f.ArranjoPagamento, &f.QtdeParcelas, &f.ValorCBSPrevisto,
+					&f.ParcelasLiquidadas, &f.ParcelasReconciliadas) == nil {
+					porFormaPagamento = append(porFormaPagamento, f)
+				}
+			}
+		} else {
+			log.Printf("[RFB Creditos] breakdown por forma de pagamento error: %v", fpErr)
+		}
+
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"creditos":   creditos,
-			"total":      total,
-			"page":       page,
-			"page_size":  pageSize,
-			"totais":     totais,
+			"creditos":             creditos,
+			"total":                total,
+			"page":                 page,
+			"page_size":            pageSize,
+			"totais":               totais,
+			"resumo_por_pagamento": porFormaPagamento,
 		})
 	}
 }
