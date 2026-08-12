@@ -26,36 +26,46 @@ import (
 
 // batchDoc representa um documento fiscal já agregado vindo do bridge Python.
 type batchDoc struct {
-	Direct           string  `json:"direct"`            // "1" = entrada, "2" = saída
-	Chave            string  `json:"chave"`             // 44 dígitos
-	Modelo           string  `json:"modelo"`            // "55","57","65",...
-	Serie            string  `json:"serie"`
-	Numero           string  `json:"numero"`
-	DataEmissao      string  `json:"data_emissao"`      // "YYYY-MM-DD"
-	DataAutorizacao  string  `json:"data_autorizacao"`  // "YYYY-MM-DD"
-	MesAno           string  `json:"mes_ano"`           // "MM/YYYY"
-	EmitCNPJ         string  `json:"emit_cnpj"`
-	DestCNPJ         string  `json:"dest_cnpj"`
-	Cancelado        string  `json:"cancelado"`         // "S" = cancelada, demais = normal
-	NomeParceiro     string  `json:"nome_parceiro"`     // forn.razsoc (DIRECT=1) ou clie.razsoc (DIRECT=2)
-	CFOP             string  `json:"cfop"`              // código CFOP 4 dígitos (ex: "1102")
-	TipoCFOP         string  `json:"tipo_cfop"`         // C=Consumo,R=Revenda,A=Ativo Imobilizado,T=Transferência,O=Outros,S=Serviços
-	VTotal           float64 `json:"v_total"`
-	VBcIbsCbs        float64 `json:"v_bc_ibs_cbs"`
-	VIbsUf           float64 `json:"v_ibs_uf"`
-	VIbsMun          float64 `json:"v_ibs_mun"`
-	VIbs             float64 `json:"v_ibs"`
-	VCbs             float64 `json:"v_cbs"`
-	BaseIcms         float64 `json:"base_icms"`
-	Icms             float64 `json:"icms"`
-	IcmsSt           float64 `json:"icms_st"`
-	Ipi              float64 `json:"ipi"`
-	BasePis          float64 `json:"base_pis"`
-	Pis              float64 `json:"pis"`
-	BaseCofins       float64 `json:"base_cofins"`
-	Cofins           float64 `json:"cofins"`
-	BasePartilha     float64 `json:"base_partilha"`
-	IcmsPartilha     float64 `json:"icms_partilha"`
+	Direct          string           `json:"direct"` // "1" = entrada, "2" = saída
+	Chave           string           `json:"chave"`  // 44 dígitos
+	Modelo          string           `json:"modelo"` // "55","57","65",...
+	Serie           string           `json:"serie"`
+	Numero          string           `json:"numero"`
+	DataEmissao     string           `json:"data_emissao"`     // "YYYY-MM-DD"
+	DataAutorizacao string           `json:"data_autorizacao"` // "YYYY-MM-DD"
+	MesAno          string           `json:"mes_ano"`          // "MM/YYYY"
+	EmitCNPJ        string           `json:"emit_cnpj"`
+	DestCNPJ        string           `json:"dest_cnpj"`
+	Cancelado       string           `json:"cancelado"`     // "S" = cancelada, demais = normal
+	NomeParceiro    string           `json:"nome_parceiro"` // forn.razsoc (DIRECT=1) ou clie.razsoc (DIRECT=2)
+	CFOP            string           `json:"cfop"`          // código CFOP 4 dígitos (ex: "1102")
+	TipoCFOP        string           `json:"tipo_cfop"`     // C=Consumo,R=Revenda,A=Ativo Imobilizado,T=Transferência,O=Outros,S=Serviços
+	VTotal          float64          `json:"v_total"`
+	VBcIbsCbs       float64          `json:"v_bc_ibs_cbs"`
+	VIbsUf          float64          `json:"v_ibs_uf"`
+	VIbsMun         float64          `json:"v_ibs_mun"`
+	VIbs            float64          `json:"v_ibs"`
+	VCbs            float64          `json:"v_cbs"`
+	BaseIcms        float64          `json:"base_icms"`
+	Icms            float64          `json:"icms"`
+	IcmsSt          float64          `json:"icms_st"`
+	Ipi             float64          `json:"ipi"`
+	BasePis         float64          `json:"base_pis"`
+	Pis             float64          `json:"pis"`
+	BaseCofins      float64          `json:"base_cofins"`
+	Cofins          float64          `json:"cofins"`
+	BasePartilha    float64          `json:"base_partilha"`
+	IcmsPartilha    float64          `json:"icms_partilha"`
+	Duplicatas      []batchDuplicata `json:"duplicatas"` // Grupo Y (cobr/dup) — cronograma de parcelas, ver migration 126
+}
+
+// batchDuplicata representa uma parcela do Grupo Y (cobr/dup) da NF-e — cronograma
+// de cobrança concedido pelo próprio vendedor (boleto/prazo comercial). Ainda vazio
+// em produção enquanto a fonte do XML (bridge.py) não for decidida/implementada.
+type batchDuplicata struct {
+	NumeroParcela  int     `json:"numero_parcela"`
+	DataVencimento string  `json:"data_vencimento"` // "YYYY-MM-DD"
+	ValorParcela   float64 `json:"valor_parcela"`
 }
 
 type batchRequest struct {
@@ -211,6 +221,16 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 					}
 					tx.Exec("RELEASE SAVEPOINT parc_sp")
 				}
+
+				// Cronograma de duplicatas (Grupo Y) — hoje sempre vazio em produção
+				// (mock em bridge.py até a fonte do XML ser decidida), sem custo/risco.
+				if len(doc.Duplicatas) > 0 {
+					if direct == "2" {
+						upsertDuplicatas(stmts.debLiq, companyID, doc.Chave, doc.Duplicatas)
+					} else {
+						upsertDuplicatas(stmts.credLiq, companyID, doc.Chave, doc.Duplicatas)
+					}
+				}
 			}
 		}
 
@@ -230,7 +250,7 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 // batchStmts agrupa os prepared statements do lote — preparados uma única vez
 // por transação, eliminando parse/plan por documento.
 type batchStmts struct {
-	saida, entrada, cte, parceiro *sql.Stmt
+	saida, entrada, cte, parceiro, debLiq, credLiq *sql.Stmt
 }
 
 func prepareBatchStmts(tx *sql.Tx) (*batchStmts, error) {
@@ -248,7 +268,53 @@ func prepareBatchStmts(tx *sql.Tx) (*batchStmts, error) {
 	if s.parceiro, err = tx.Prepare(sqlBatchParceiro); err != nil {
 		return nil, err
 	}
+	if s.debLiq, err = tx.Prepare(sqlBatchDebitoLiquidacao); err != nil {
+		return nil, err
+	}
+	if s.credLiq, err = tx.Prepare(sqlBatchCreditoLiquidacao); err != nil {
+		return nil, err
+	}
 	return &s, nil
+}
+
+// sqlBatchDebitoLiquidacao/sqlBatchCreditoLiquidacao gravam o cronograma de
+// duplicatas (Grupo Y da NF-e) como previsão de liquidação — migration 126.
+// WHERE status='previsto' evita sobrescrever uma parcela que já avançou pra
+// liquidado/reconciliado num reimport do mesmo período.
+const sqlBatchDebitoLiquidacao = `
+		INSERT INTO rfb_debitos_liquidacoes (
+			company_id, chave_dfe, numero_parcela, total_parcelas,
+			arranjo_pagamento, valor_parcela, data_prevista_liquidacao, status, origem
+		) VALUES ($1,$2,$3,$4,'duplicata_mercantil',$5,$6,'previsto','erp')
+		ON CONFLICT (company_id, chave_dfe, numero_parcela) DO UPDATE SET
+			total_parcelas           = EXCLUDED.total_parcelas,
+			valor_parcela             = EXCLUDED.valor_parcela,
+			data_prevista_liquidacao  = EXCLUDED.data_prevista_liquidacao,
+			updated_at                = CURRENT_TIMESTAMP
+		WHERE rfb_debitos_liquidacoes.status = 'previsto'`
+
+const sqlBatchCreditoLiquidacao = `
+		INSERT INTO rfb_creditos_liquidacoes (
+			company_id, chave_dfe, numero_parcela, total_parcelas,
+			arranjo_pagamento, valor_parcela, data_prevista_liquidacao, status, origem
+		) VALUES ($1,$2,$3,$4,'duplicata_mercantil',$5,$6,'previsto','erp')
+		ON CONFLICT (company_id, chave_dfe, numero_parcela) DO UPDATE SET
+			total_parcelas           = EXCLUDED.total_parcelas,
+			valor_parcela             = EXCLUDED.valor_parcela,
+			data_prevista_liquidacao  = EXCLUDED.data_prevista_liquidacao,
+			updated_at                = CURRENT_TIMESTAMP
+		WHERE rfb_creditos_liquidacoes.status = 'previsto'`
+
+// upsertDuplicatas grava o cronograma de parcelas (Grupo Y) de um documento.
+// debito=true grava em rfb_debitos_liquidacoes (venda), false em
+// rfb_creditos_liquidacoes (compra). Erro em uma parcela não aborta as demais.
+func upsertDuplicatas(stmt *sql.Stmt, companyID, chave string, dups []batchDuplicata) {
+	total := len(dups)
+	for _, d := range dups {
+		if _, err := stmt.Exec(companyID, chave, d.NumeroParcela, total, d.ValorParcela, nullDate(d.DataVencimento)); err != nil {
+			log.Printf("[ERPBridgeBatch] Erro ao gravar duplicata %d/%d de %s: %v", d.NumeroParcela, total, chave, err)
+		}
+	}
 }
 
 const sqlBatchNFeSaida = `
@@ -299,7 +365,9 @@ const sqlBatchNFeSaida = `
 func batchInsertNFeSaida(stmt *sql.Stmt, companyID string, doc batchDoc, modelo string) (bool, error) {
 	modInt, _ := strconv.Atoi(modelo)
 	cancelado := doc.Cancelado
-	if cancelado != "S" { cancelado = "N" }
+	if cancelado != "S" {
+		cancelado = "N"
+	}
 	tipoCFOP := strings.TrimSpace(doc.TipoCFOP)
 	cfopCode := strings.TrimSpace(doc.CFOP)
 	res, err := stmt.Exec(
@@ -368,7 +436,9 @@ const sqlBatchNFeEntrada = `
 func batchInsertNFeEntrada(stmt *sql.Stmt, companyID string, doc batchDoc, modelo string) (bool, error) {
 	modInt, _ := strconv.Atoi(modelo)
 	cancelado := doc.Cancelado
-	if cancelado != "S" { cancelado = "N" }
+	if cancelado != "S" {
+		cancelado = "N"
+	}
 	// tipo_cfop: usa valor explícito do payload; se vazio, faz lookup na tabela cfop via SQL
 	tipoCFOP := strings.TrimSpace(doc.TipoCFOP)
 	cfopCode := strings.TrimSpace(doc.CFOP)
@@ -412,7 +482,9 @@ const sqlBatchCTeEntrada = `
 func batchInsertCTeEntrada(stmt *sql.Stmt, companyID string, doc batchDoc, modelo string) (bool, error) {
 	modInt, _ := strconv.Atoi(modelo)
 	cancelado := doc.Cancelado
-	if cancelado != "S" { cancelado = "N" }
+	if cancelado != "S" {
+		cancelado = "N"
+	}
 	res, err := stmt.Exec(
 		companyID, doc.Chave, modInt, doc.Serie, doc.Numero,
 		nullDate(doc.DataEmissao), nullDate(doc.DataAutorizacao), doc.MesAno,

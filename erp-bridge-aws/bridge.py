@@ -23,6 +23,7 @@ import re
 import sqlite3
 import sys
 import time as _time
+import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -614,6 +615,58 @@ class FBTaxClient:
             log.warning("Nao foi possivel finalizar run na API: %s", exc)
 
 
+# ─── Duplicatas (Grupo Y — cobr/dup — cronograma de parcelas da NF-e) ─────────
+# Split Payment (LC 214/2025, Etapa 2, data ainda não definida) exige cronograma
+# de liquidação. Cartão de crédito parcelado não aparece no XML (é acordo entre
+# cliente e emissor do cartão dele); o que existe hoje no XML é o Grupo Y
+# (cobr>dup[]) — duplicatas/parcelas de cobrança concedidas pelo próprio
+# vendedor (boleto/prazo comercial). Alimenta rfb_debitos_liquidacoes /
+# rfb_creditos_liquidacoes com esse dado real, via migration 126.
+
+_NFE_NS = {"nfe": "http://www.portalfiscal.inf.br/nfe"}
+
+def parse_duplicatas_do_xml(xml_bytes: bytes) -> list:
+    """Extrai o grupo cobr>dup[] (Y07) do XML da NF-e — nDup, dVenc, vDup.
+    Fixo independente de onde o XML venha (SAP centralizado ou legado por
+    filial) — só a busca do XML (abaixo) muda conforme a fonte real."""
+    try:
+        root = ET.fromstring(xml_bytes)
+    except ET.ParseError as exc:
+        log.warning("[Duplicatas] XML inválido, pulando: %s", exc)
+        return []
+    duplicatas = []
+    for i, dup in enumerate(root.findall(".//nfe:cobr/nfe:dup", _NFE_NS), start=1):
+        dVenc = dup.findtext("nfe:dVenc", namespaces=_NFE_NS)
+        vDup = dup.findtext("nfe:vDup", namespaces=_NFE_NS)
+        if not dVenc or not vDup:
+            continue
+        duplicatas.append({
+            "numero_parcela": i,
+            "data_vencimento": dVenc,
+            "valor_parcela": float(vDup),
+        })
+    return duplicatas
+
+
+def buscar_xml_duplicatas(chaves: list) -> dict:
+    """
+    MOCK — pendência: fonte real do XML da NF-e ainda não definida (avaliação
+    presencial prevista). Duas opções em avaliação:
+      1) SAP expõe o XML numa view centralizada (ex: s4i_nfe.xml), mesma conexão
+         já usada hoje — sem precisar dos 9 bancos legados por filial.
+      2) JOIN com SFC_NFE.NOTA_XML (BLOB) em cada uma das 9 bases de filial do
+         legado, casando pela coluna NFE — requer config nova (DSN por filial)
+         e conexões separadas, ainda não implementadas.
+    Enquanto isso não for decidido e implementado, retorna vazio — não tenta
+    conectar em lugar nenhum, não quebra o fluxo atual de importação.
+    Retorna: {chave: xml_bytes}.
+    """
+    if not chaves:
+        return {}
+    log.info("[Duplicatas] Fonte de XML ainda não configurada — pulando %d chave(s) (ver TODO em buscar_xml_duplicatas)", len(chaves))
+    return {}
+
+
 # ─── Processamento SAP S4/HANA ────────────────────────────────────────────────
 
 def processar_sap(
@@ -744,6 +797,14 @@ def processar_sap(
                 "icms_partilha":    f(r.get("icms_partilha")),
                 "cfop":             s(r.get("cfop_dom")),
             })
+
+        # Duplicatas (Grupo Y — cronograma de parcelas), ver buscar_xml_duplicatas.
+        # Hoje sempre vazio (mock) — sem custo/risco enquanto a fonte real não
+        # for decidida, já que a função não tenta conectar em lugar nenhum.
+        xml_por_chave = buscar_xml_duplicatas([d["chave"] for d in documents])
+        for d in documents:
+            xml_bytes = xml_por_chave.get(d["chave"])
+            d["duplicatas"] = parse_duplicatas_do_xml(xml_bytes) if xml_bytes else []
 
         # ── Sumário antes do envio ──────────────────────────────────────────
         _modelos_nfe = {"55", "62", "65"}
