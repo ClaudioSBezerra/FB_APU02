@@ -62,3 +62,6 @@ backend/tools/
 # Python
 __pycache__/
 *.pyc
+
+# Referências grandes (excedem o limite de 100MB do GitHub) — manter só localmente
+docs/*.pdf
