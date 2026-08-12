@@ -64,6 +64,7 @@ interface NfeSaidaRow {
   base_partilha: number;
   icms_partilha: number;
   cancelado: string; // "S" | "N"
+  qtde_parcelas_split_payment: number; // rfb_debitos_liquidacoes — 0 até a fonte do XML (Grupo Y) ser implementada
 }
 
 interface NfeSaidaResponse {
@@ -494,6 +495,7 @@ export default function ConsultaNFeSaidas() {
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">PIS (R$)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">ST (R$)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">COFINS (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] whitespace-nowrap">Split Payment</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -546,6 +548,15 @@ export default function ConsultaNFeSaidas() {
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.pis)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.icms_st)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.cofins)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] whitespace-nowrap">
+                          {row.qtde_parcelas_split_payment > 0 ? (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-50 text-blue-600 border-blue-200">
+                              {row.qtde_parcelas_split_payment} parcela{row.qtde_parcelas_split_payment > 1 ? 's' : ''}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
