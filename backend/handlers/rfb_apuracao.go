@@ -186,14 +186,14 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Sem tiqueteDownload (webhook nunca chegou): tenta mesmo assim com o
-		// tiqueteSolicitacao original — ProcessarDownloadRFB já sabe cair pra esse
-		// fallback (rfb_processor.go:115-122). A RFB pode ter concluído o
-		// processamento e só falhado em avisar via webhook; se não tiver nada
-		// pronto, a RFB responde com erro claro e a linha volta pra 'error'.
-		usandoFallback := tiqueteDownload == nil || *tiqueteDownload == ""
-		if usandoFallback {
-			log.Printf("[DownloadManual] request %s sem tiqueteDownload — tentando recuperar com tiqueteSolicitacao", requestID)
+		// tiqueteDownload é um valor distinto de tiquete (solicitação) — RFB gera
+		// dois tíquetes não relacionados, confirmado com dado real (67 apurações
+		// concluídas, tiquete != tiquete_download em todas). Sem confirmação do
+		// webhook, não existe tíquete correto pra tentar — não há endpoint de
+		// consulta que devolva o tiqueteDownload por outro caminho.
+		if tiqueteDownload == nil || *tiqueteDownload == "" {
+			http.Error(w, "Tíquete de download ainda não recebido — aguarde o webhook da RFB confirmar o processamento", http.StatusBadRequest)
+			return
 		}
 
 		if status == "completed" {
@@ -221,13 +221,9 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 			}
 		}()
 
-		message := "Download iniciado. Acompanhe o status na lista de solicitações."
-		if usandoFallback {
-			message = "Tentativa de recuperação iniciada (sem confirmação prévia da RFB) — pode falhar se o processamento realmente não tiver concluído. Acompanhe o status na lista de solicitações."
-		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "downloading",
-			"message": message,
+			"message": "Download iniciado. Acompanhe o status na lista de solicitações.",
 		})
 	}
 }
