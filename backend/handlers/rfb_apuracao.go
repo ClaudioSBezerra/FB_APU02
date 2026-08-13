@@ -22,33 +22,33 @@ import (
 
 // RFBRequest represents a request to the RFB API
 type RFBRequest struct {
-	ID               string      `json:"id"`
-	CompanyID        string      `json:"company_id"`
-	CNPJBase         string      `json:"cnpj_base"`
-	Tiquete          string      `json:"tiquete,omitempty"`
-	TiqueteDownload  *string     `json:"tiquete_download,omitempty"`
-	Status           string      `json:"status"`
-	Ambiente         string      `json:"ambiente"`
-	ErrorCode        *string     `json:"error_code,omitempty"`
-	ErrorMessage     *string     `json:"error_message,omitempty"`
-	CreatedAt        time.Time   `json:"created_at"`
-	UpdatedAt        time.Time   `json:"updated_at"`
-	HasRawJSON       bool        `json:"has_raw_json"`
-	Resumo           *RFBResumo  `json:"resumo,omitempty"`
+	ID              string     `json:"id"`
+	CompanyID       string     `json:"company_id"`
+	CNPJBase        string     `json:"cnpj_base"`
+	Tiquete         string     `json:"tiquete,omitempty"`
+	TiqueteDownload *string    `json:"tiquete_download,omitempty"`
+	Status          string     `json:"status"`
+	Ambiente        string     `json:"ambiente"`
+	ErrorCode       *string    `json:"error_code,omitempty"`
+	ErrorMessage    *string    `json:"error_message,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	HasRawJSON      bool       `json:"has_raw_json"`
+	Resumo          *RFBResumo `json:"resumo,omitempty"`
 }
 
 // RFBResumo represents the summary of a CBS assessment
 type RFBResumo struct {
-	ID               string  `json:"id"`
-	RequestID        string  `json:"request_id"`
-	DataApuracao     string  `json:"data_apuracao"`
-	TotalDebitos     int     `json:"total_debitos"`
-	ValorCBSTotal    float64 `json:"valor_cbs_total"`
-	ValorCBSExtinto  float64 `json:"valor_cbs_extinto"`
+	ID                 string  `json:"id"`
+	RequestID          string  `json:"request_id"`
+	DataApuracao       string  `json:"data_apuracao"`
+	TotalDebitos       int     `json:"total_debitos"`
+	ValorCBSTotal      float64 `json:"valor_cbs_total"`
+	ValorCBSExtinto    float64 `json:"valor_cbs_extinto"`
 	ValorCBSNaoExtinto float64 `json:"valor_cbs_nao_extinto"`
-	TotalCorrente    int     `json:"total_corrente"`
-	TotalAjuste      int     `json:"total_ajuste"`
-	TotalExtemporaneo int    `json:"total_extemporaneo"`
+	TotalCorrente      int     `json:"total_corrente"`
+	TotalAjuste        int     `json:"total_ajuste"`
+	TotalExtemporaneo  int     `json:"total_extemporaneo"`
 }
 
 // RFBDebitoRow represents a normalized debit row for the frontend
@@ -186,9 +186,14 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if tiqueteDownload == nil || *tiqueteDownload == "" {
-			http.Error(w, "Tíquete de download ainda não recebido — aguarde o webhook da RFB confirmar o processamento", http.StatusBadRequest)
-			return
+		// Sem tiqueteDownload (webhook nunca chegou): tenta mesmo assim com o
+		// tiqueteSolicitacao original — ProcessarDownloadRFB já sabe cair pra esse
+		// fallback (rfb_processor.go:115-122). A RFB pode ter concluído o
+		// processamento e só falhado em avisar via webhook; se não tiver nada
+		// pronto, a RFB responde com erro claro e a linha volta pra 'error'.
+		usandoFallback := tiqueteDownload == nil || *tiqueteDownload == ""
+		if usandoFallback {
+			log.Printf("[DownloadManual] request %s sem tiqueteDownload — tentando recuperar com tiqueteSolicitacao", requestID)
 		}
 
 		if status == "completed" {
@@ -216,9 +221,13 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 			}
 		}()
 
+		message := "Download iniciado. Acompanhe o status na lista de solicitações."
+		if usandoFallback {
+			message = "Tentativa de recuperação iniciada (sem confirmação prévia da RFB) — pode falhar se o processamento realmente não tiver concluído. Acompanhe o status na lista de solicitações."
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "downloading",
-			"message": "Download iniciado. Acompanhe o status na lista de solicitações.",
+			"message": message,
 		})
 	}
 }

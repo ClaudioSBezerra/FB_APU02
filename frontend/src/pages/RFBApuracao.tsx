@@ -227,7 +227,8 @@ export default function RFBApuracao() {
         body: JSON.stringify({ request_id: requestId }),
       });
       if (response.ok) {
-        setMessage({ type: 'success', text: 'Download iniciado! Acompanhe o status.' });
+        const data = await response.json().catch(() => null);
+        setMessage({ type: 'success', text: data?.message || 'Download iniciado! Acompanhe o status.' });
         fetchRequests();
       } else {
         const text = await response.text();
@@ -334,10 +335,12 @@ export default function RFBApuracao() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {(req.status === 'webhook_received' || (req.status === 'error' && req.tiquete_download)) && (
+                        {(req.status === 'webhook_received' || (req.status === 'error' && req.tiquete)) && (
                           <Button size="sm" variant="outline"
-                            onClick={() => handleDownloadManual(req.id)}>
-                            <Download className="mr-1 h-3 w-3" /> Download Manual
+                            onClick={() => handleDownloadManual(req.id)}
+                            title={req.tiquete_download ? undefined : 'Sem confirmação da RFB — tenta recuperar com o tíquete original, pode falhar'}>
+                            <Download className="mr-1 h-3 w-3" />
+                            {req.tiquete_download ? 'Download Manual' : 'Tentar Recuperar'}
                           </Button>
                         )}
                         {isStuck && (
