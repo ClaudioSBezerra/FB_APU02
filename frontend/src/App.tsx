@@ -15,6 +15,7 @@ import RFBApuracao from './pages/RFBApuracao'
 import RFBDebitos from './pages/RFBDebitos'
 import RFBCreditosCBS from './pages/RFBCreditosCBS'
 import RFBPagamentosFornecedores from './pages/RFBPagamentosFornecedores'
+import SimuladorProjetado from './pages/SimuladorProjetado'
 import GestaoCredIBSCBS from './pages/GestaoCredIBSCBS'
 import PainelApuracaoIBS from './pages/PainelApuracaoIBS'
 import PainelApuracaoCBS from './pages/PainelApuracaoCBS'
@@ -315,6 +316,7 @@ function AppLayout() {
       <Route path="/rfb/pagamentos-cbs"         element={<ComingSoon title="Pagamentos CBS mês corrente" />} />
       <Route path="/rfb/pagamentos-fornecedores" element={<RFBPagamentosFornecedores />} />
       <Route path="/rfb/concluir-apuracao"      element={<ComingSoon title="Concluir apuração mês anterior" />} />
+      <Route path="/rfb/simulador-projetado"    element={<SimuladorProjetado />} />
     </Routes>
   )
 

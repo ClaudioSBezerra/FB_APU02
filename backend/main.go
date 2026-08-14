@@ -324,8 +324,8 @@ func main() {
 	http.HandleFunc("/api/admin/users/delete", withAuth(handlers.DeleteUserHandler, "admin"))
 	http.HandleFunc("/api/admin/users/block", withAuth(handlers.BlockUserHandler, "admin"))
 	http.HandleFunc("/api/admin/users/reassign", withAuth(handlers.ReassignUserHandler, "admin"))
-	http.HandleFunc("/api/activity/log",                withAuth(handlers.LogActivityHandler, ""))
-	http.HandleFunc("/api/admin/user-activity",         withAuth(handlers.ListUserActivityHandler, "admin"))
+	http.HandleFunc("/api/activity/log", withAuth(handlers.LogActivityHandler, ""))
+	http.HandleFunc("/api/admin/user-activity", withAuth(handlers.ListUserActivityHandler, "admin"))
 	http.HandleFunc("/api/admin/user-activity/modules", withAuth(handlers.ListModuleActivityHandler, "admin"))
 
 	// Dashboard Endpoints
@@ -462,7 +462,7 @@ func main() {
 	http.HandleFunc("/api/rfb/apuracao/reprocess", withAuth(handlers.ReprocessHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/clear-errors", withAuth(handlers.ClearErrorsHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/status", withAuth(handlers.StatusApuracaoHandler, ""))
-	http.HandleFunc("/api/rfb/apuracao/abort",      withAuth(handlers.AbortRequestHandler, ""))
+	http.HandleFunc("/api/rfb/apuracao/abort", withAuth(handlers.AbortRequestHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/resolicitar", withAuth(handlers.RessolicitarHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/", withAuth(handlers.DetalheApuracaoHandler, ""))
 
@@ -476,6 +476,23 @@ func main() {
 
 	// RFB Pgtos Fornecedores — conciliação pagamentos vs CBS RFB
 	http.HandleFunc("/api/rfb/pagamentos-fornecedores", withAuth(handlers.RFBPagamentosFornecedoresHandler, ""))
+
+	// RFB Simulador Projetado — alíquotas editáveis por empresa (override de tabela_aliquotas) + projeção 2027-2033
+	http.HandleFunc("/api/rfb/simulador/aliquotas", withAuth(func(db *sql.DB) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				handlers.GetSimuladorAliquotasHandler(db)(w, r)
+			case http.MethodPut:
+				handlers.PutSimuladorAliquotaHandler(db)(w, r)
+			case http.MethodDelete:
+				handlers.DeleteSimuladorAliquotaHandler(db)(w, r)
+			default:
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
+		}
+	}, ""))
+	http.HandleFunc("/api/rfb/simulador/projecao", withAuth(handlers.GetSimuladorProjecaoHandler, ""))
 
 	// RFB Webhook (PUBLIC - no JWT auth)
 	http.HandleFunc("/api/rfb/webhook", withDB(handlers.RFBWebhookHandler))
@@ -508,47 +525,47 @@ func main() {
 	})
 
 	// CGIBS Apuração
-	http.HandleFunc("/api/cgibs/apuracao/solicitar",    withAuth(handlers.SolicitarCGIBSApuracaoHandler, ""))
+	http.HandleFunc("/api/cgibs/apuracao/solicitar", withAuth(handlers.SolicitarCGIBSApuracaoHandler, ""))
 	http.HandleFunc("/api/cgibs/apuracao/clear-errors", withAuth(handlers.ClearErrorsCGIBSHandler, ""))
-	http.HandleFunc("/api/cgibs/apuracao/status",       withAuth(handlers.StatusCGIBSApuracaoHandler, ""))
-	http.HandleFunc("/api/cgibs/apuracao/",             withAuth(handlers.DetalheCGIBSHandler, ""))
+	http.HandleFunc("/api/cgibs/apuracao/status", withAuth(handlers.StatusCGIBSApuracaoHandler, ""))
+	http.HandleFunc("/api/cgibs/apuracao/", withAuth(handlers.DetalheCGIBSHandler, ""))
 
 	// CGIBS Débitos IBS (fonte interna — nfe_saidas)
 	http.HandleFunc("/api/cgibs/debitos/periodos", withAuth(handlers.PeriodosDebitosIBSHandler, ""))
-	http.HandleFunc("/api/cgibs/debitos",          withAuth(handlers.ListarDebitosIBSHandler, ""))
+	http.HandleFunc("/api/cgibs/debitos", withAuth(handlers.ListarDebitosIBSHandler, ""))
 
 	// NF-e Saídas
-	http.HandleFunc("/api/nfe-saidas/upload",       withAuth(handlers.NfeSaidasUploadHandler, ""))
-	http.HandleFunc("/api/nfe-saidas/filiais",      withAuth(handlers.NfeSaidasFiliaisHandler, ""))
+	http.HandleFunc("/api/nfe-saidas/upload", withAuth(handlers.NfeSaidasUploadHandler, ""))
+	http.HandleFunc("/api/nfe-saidas/filiais", withAuth(handlers.NfeSaidasFiliaisHandler, ""))
 	http.HandleFunc("/api/nfe-saidas/competencias", withAuth(handlers.NfeSaidasCompetenciasHandler, ""))
-	http.HandleFunc("/api/nfe-saidas",              withAuth(handlers.NfeSaidasListHandler, ""))
+	http.HandleFunc("/api/nfe-saidas", withAuth(handlers.NfeSaidasListHandler, ""))
 
 	// NF-e Entradas
-	http.HandleFunc("/api/nfe-entradas/upload",       withAuth(handlers.NfeEntradasUploadHandler, ""))
-	http.HandleFunc("/api/nfe-entradas/filiais",      withAuth(handlers.NfeEntradasFiliaisHandler, ""))
+	http.HandleFunc("/api/nfe-entradas/upload", withAuth(handlers.NfeEntradasUploadHandler, ""))
+	http.HandleFunc("/api/nfe-entradas/filiais", withAuth(handlers.NfeEntradasFiliaisHandler, ""))
 	http.HandleFunc("/api/nfe-entradas/competencias", withAuth(handlers.NfeEntradasCompetenciasHandler, ""))
-	http.HandleFunc("/api/nfe-entradas",              withAuth(handlers.NfeEntradasListHandler, ""))
+	http.HandleFunc("/api/nfe-entradas", withAuth(handlers.NfeEntradasListHandler, ""))
 
 	// CT-e Entradas
-	http.HandleFunc("/api/cte-entradas/upload",       withAuth(handlers.CteEntradasUploadHandler, ""))
-	http.HandleFunc("/api/cte-entradas/filiais",      withAuth(handlers.CteEntradasFiliaisHandler, ""))
+	http.HandleFunc("/api/cte-entradas/upload", withAuth(handlers.CteEntradasUploadHandler, ""))
+	http.HandleFunc("/api/cte-entradas/filiais", withAuth(handlers.CteEntradasFiliaisHandler, ""))
 	http.HandleFunc("/api/cte-entradas/competencias", withAuth(handlers.CteEntradasCompetenciasHandler, ""))
-	http.HandleFunc("/api/cte-entradas",              withAuth(handlers.CteEntradasListHandler, ""))
+	http.HandleFunc("/api/cte-entradas", withAuth(handlers.CteEntradasListHandler, ""))
 
 	// Pagamentos a Fornecedores (CSV import)
-	http.HandleFunc("/api/pagamentos-fornecedores/import",   withAuth(handlers.PagamentosFornecedoresImportHandler, ""))
+	http.HandleFunc("/api/pagamentos-fornecedores/import", withAuth(handlers.PagamentosFornecedoresImportHandler, ""))
 	http.HandleFunc("/api/pagamentos-fornecedores/imports/", withAuth(handlers.PagamentosImportsDeleteHandler, ""))
-	http.HandleFunc("/api/pagamentos-fornecedores/imports",  withAuth(handlers.PagamentosImportsListHandler, ""))
+	http.HandleFunc("/api/pagamentos-fornecedores/imports", withAuth(handlers.PagamentosImportsListHandler, ""))
 	http.HandleFunc("/api/pagamentos-fornecedores/template", withAuth(handlers.PagamentosTemplateHandler, ""))
-	http.HandleFunc("/api/pagamentos-fornecedores",          withAuth(handlers.PagamentosFornecedoresListHandler, ""))
+	http.HandleFunc("/api/pagamentos-fornecedores", withAuth(handlers.PagamentosFornecedoresListHandler, ""))
 
 	// Parceiros (cadastro fornecedor/cliente) — edição manual de adesão ao Split Payment
 	http.HandleFunc("/api/parceiros/split-payment", withAuth(handlers.ParceirosUpdateSplitPaymentHandler, ""))
-	http.HandleFunc("/api/parceiros",               withAuth(handlers.ParceirosListHandler, ""))
+	http.HandleFunc("/api/parceiros", withAuth(handlers.ParceirosListHandler, ""))
 
 	// Créditos em Risco
 	http.HandleFunc("/api/apuracao/creditos-perdidos/notas", withAuth(handlers.CreditosPerdidosNotasHandler, ""))
-	http.HandleFunc("/api/apuracao/creditos-perdidos",       withAuth(handlers.CreditosPerdidosHandler, ""))
+	http.HandleFunc("/api/apuracao/creditos-perdidos", withAuth(handlers.CreditosPerdidosHandler, ""))
 
 	// Painel Apuração IBS/CBS
 	http.HandleFunc("/api/apuracao/painel", withAuth(handlers.ApuracaoPainelHandler, ""))
@@ -581,11 +598,11 @@ func main() {
 	http.HandleFunc("/api/malha-fina/cte/resumo", withAuth(handlers.MalhaFinaCTeResumoHandler, ""))
 
 	// ERP Bridge — agendamento e histórico de execuções
-	http.HandleFunc("/api/erp-bridge/config",      withAuth(handlers.ERPBridgeConfigHandler, ""))
-	http.HandleFunc("/api/erp-bridge/servidores",             withAuth(handlers.ERPBridgeServidoresHandler, ""))
-	http.HandleFunc("/api/erp-bridge/servidores/registrar",   withAuth(handlers.ERPBridgeRegistrarServidoresHandler, ""))
+	http.HandleFunc("/api/erp-bridge/config", withAuth(handlers.ERPBridgeConfigHandler, ""))
+	http.HandleFunc("/api/erp-bridge/servidores", withAuth(handlers.ERPBridgeServidoresHandler, ""))
+	http.HandleFunc("/api/erp-bridge/servidores/registrar", withAuth(handlers.ERPBridgeRegistrarServidoresHandler, ""))
 	http.HandleFunc("/api/erp-bridge/config/generate-api-key", withAuth(handlers.ERPBridgeGenerateAPIKeyHandler, ""))
-	http.HandleFunc("/api/erp-bridge/credentials",            func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/api/erp-bridge/credentials", func(w http.ResponseWriter, r *http.Request) {
 		database := getDB()
 		if database == nil {
 			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
@@ -593,13 +610,13 @@ func main() {
 		}
 		handlers.ERPBridgeCredentialsHandler(database).ServeHTTP(w, r)
 	})
-	http.HandleFunc("/api/erp-bridge/trigger",     withAuth(handlers.ERPBridgeTriggerHandler, ""))
-	http.HandleFunc("/api/erp-bridge/pending",     withAuth(handlers.ERPBridgePendingHandler, ""))
-	http.HandleFunc("/api/erp-bridge/runs",        withAuth(handlers.ERPBridgeRunsHandler, ""))
-	http.HandleFunc("/api/erp-bridge/runs/",       withAuth(handlers.ERPBridgeRunHandler, ""))
+	http.HandleFunc("/api/erp-bridge/trigger", withAuth(handlers.ERPBridgeTriggerHandler, ""))
+	http.HandleFunc("/api/erp-bridge/pending", withAuth(handlers.ERPBridgePendingHandler, ""))
+	http.HandleFunc("/api/erp-bridge/runs", withAuth(handlers.ERPBridgeRunsHandler, ""))
+	http.HandleFunc("/api/erp-bridge/runs/", withAuth(handlers.ERPBridgeRunHandler, ""))
 
 	// ERP Bridge — importação batch SAP S4/HANA, parceiros e heartbeat (auth via X-API-Key, sem JWT)
-	http.HandleFunc("/api/erp-bridge/import/batch",   withDB(handlers.ERPBridgeBatchImportHandler))
+	http.HandleFunc("/api/erp-bridge/import/batch", withDB(handlers.ERPBridgeBatchImportHandler))
 	http.HandleFunc("/api/erp-bridge/parceiros/sync", withDB(handlers.ERPBridgeParceirosSyncHandler))
 	http.HandleFunc("/api/erp-bridge/heartbeat", withDB(handlers.ERPBridgeHeartbeatHandler))
 

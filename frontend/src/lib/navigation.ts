@@ -57,6 +57,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Pgtos Fornecedores',       path: '/rfb/pagamentos-fornecedores' },
       { label: 'Gestão Eventos Cred/Deb.', path: '/rfb/gestao-eventos-cred-deb', disabled: true },
       { label: 'Concluir apuração',        path: '/rfb/concluir-apuracao',        disabled: true },
+      { label: 'Simulador Projetado',      path: '/rfb/simulador-projetado' },
     ],
   },
   malha: {
