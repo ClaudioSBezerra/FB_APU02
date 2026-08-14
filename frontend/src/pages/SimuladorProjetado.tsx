@@ -25,6 +25,20 @@ interface ProjecaoAno {
   debito_cbs_projetado: number;
   credito_ibs_projetado: number;
   credito_cbs_projetado: number;
+  saldo_ibs: number;
+  saldo_cbs: number;
+}
+
+const MESES = [
+  { v: '01', l: 'Janeiro' }, { v: '02', l: 'Fevereiro' }, { v: '03', l: 'Março' },
+  { v: '04', l: 'Abril' },   { v: '05', l: 'Maio' },      { v: '06', l: 'Junho' },
+  { v: '07', l: 'Julho' },   { v: '08', l: 'Agosto' },    { v: '09', l: 'Setembro' },
+  { v: '10', l: 'Outubro' }, { v: '11', l: 'Novembro' },  { v: '12', l: 'Dezembro' },
+];
+
+function fmtSaldo(v: number): string {
+  const abs = fmtBRL(Math.abs(v));
+  return v >= 0 ? `${abs} a pagar` : `${abs} a recuperar`;
 }
 
 interface ProjecaoResponse {
@@ -148,6 +162,7 @@ function LinhaAliquota({ aliquota, onSaved }: { aliquota: Aliquota; onSaved: () 
 export default function SimuladorProjetado() {
   const queryClient = useQueryClient();
   const [anoFiltro, setAnoFiltro] = useState<string>('todos');
+  const [mesFiltro, setMesFiltro] = useState<string>('todos');
 
   const { data: aliquotasData, isLoading: loadingAliquotas } = useQuery<{ aliquotas: Aliquota[] }>({
     queryKey: ['simulador-aliquotas'],
@@ -159,10 +174,14 @@ export default function SimuladorProjetado() {
   });
 
   const { data: projecaoData, isLoading: loadingProjecao } = useQuery<ProjecaoResponse>({
-    queryKey: ['simulador-projecao', anoFiltro],
+    queryKey: ['simulador-projecao', anoFiltro, mesFiltro],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (anoFiltro !== 'todos') params.set('ano', anoFiltro);
+      if (anoFiltro !== 'todos' && mesFiltro !== 'todos') {
+        params.set('periodo', `${mesFiltro}/${anoFiltro}`);
+      } else if (anoFiltro !== 'todos') {
+        params.set('ano', anoFiltro);
+      }
       const res = await fetch(`/api/rfb/simulador/projecao?${params}`);
       if (!res.ok) throw new Error('Erro ao carregar projeção');
       return res.json();
@@ -227,22 +246,42 @@ export default function SimuladorProjetado() {
       <Card>
         <CardHeader className="py-3 px-4 flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-sm">Projeção de Débitos e Créditos</CardTitle>
+            <CardTitle className="text-sm">Apuração Projetada (Débito − Crédito por imposto)</CardTitle>
             <CardDescription className="text-xs">
-              Base = soma de v_bc_ibs_cbs das notas importadas (débito: NF-e saídas; crédito: NF-e/CT-e entradas).
+              Base = soma de v_bc_ibs_cbs das notas importadas no período (débito: NF-e saídas; crédito: NF-e/CT-e entradas).
             </CardDescription>
           </div>
-          <Select value={anoFiltro} onValueChange={setAnoFiltro}>
-            <SelectTrigger className="h-8 text-xs w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos" className="text-xs">Todos os períodos</SelectItem>
-              {Array.from({ length: 6 }, (_, i) => 2026 - i).map(a => (
-                <SelectItem key={a} value={String(a)} className="text-xs">{a}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex gap-2">
+            <Select
+              value={mesFiltro}
+              onValueChange={setMesFiltro}
+              disabled={anoFiltro === 'todos'}
+            >
+              <SelectTrigger className="h-8 text-xs w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos" className="text-xs">Ano todo</SelectItem>
+                {MESES.map(m => (
+                  <SelectItem key={m.v} value={m.v} className="text-xs">{m.l}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={anoFiltro}
+              onValueChange={v => { setAnoFiltro(v); if (v === 'todos') setMesFiltro('todos'); }}
+            >
+              <SelectTrigger className="h-8 text-xs w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos" className="text-xs">Todos os períodos</SelectItem>
+                {Array.from({ length: 6 }, (_, i) => 2026 - i).map(a => (
+                  <SelectItem key={a} value={String(a)} className="text-xs">{a}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {loadingProjecao ? (
@@ -257,25 +296,36 @@ export default function SimuladorProjetado() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-muted/40">
-                      <th className="py-1.5 px-2 text-left font-medium text-muted-foreground">Ano</th>
-                      <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">% IBS</th>
-                      <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">% CBS</th>
-                      <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">Débito IBS</th>
-                      <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">Débito CBS</th>
-                      <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">Crédito IBS</th>
-                      <th className="py-1.5 px-2 text-right font-medium text-muted-foreground">Crédito CBS</th>
+                      <th className="py-1.5 px-2 text-left font-medium text-muted-foreground" rowSpan={2}>Ano</th>
+                      <th className="py-1.5 px-2 text-center font-medium text-muted-foreground border-l" colSpan={3}>IBS</th>
+                      <th className="py-1.5 px-2 text-center font-medium text-muted-foreground border-l" colSpan={3}>CBS</th>
+                    </tr>
+                    <tr className="bg-muted/40">
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground border-l">Débito</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Crédito</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Saldo</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground border-l">Débito</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Crédito</th>
+                      <th className="py-1 px-2 text-right font-medium text-muted-foreground">Saldo</th>
                     </tr>
                   </thead>
                   <tbody>
                     {projecao.map(p => (
                       <tr key={p.ano} className="border-t">
-                        <td className="py-1 px-2 font-medium">{p.ano}</td>
-                        <td className="py-1 px-2 text-right">{fmtPct(p.perc_ibs)}</td>
-                        <td className="py-1 px-2 text-right">{fmtPct(p.perc_cbs)}</td>
-                        <td className="py-1 px-2 text-right text-red-500">{fmtBRL(p.debito_ibs_projetado)}</td>
-                        <td className="py-1 px-2 text-right text-red-500">{fmtBRL(p.debito_cbs_projetado)}</td>
-                        <td className="py-1 px-2 text-right text-green-600">{fmtBRL(p.credito_ibs_projetado)}</td>
-                        <td className="py-1 px-2 text-right text-green-600">{fmtBRL(p.credito_cbs_projetado)}</td>
+                        <td className="py-1 px-2 font-medium">
+                          {p.ano}
+                          <div className="text-[9px] text-muted-foreground">IBS {fmtPct(p.perc_ibs)} · CBS {fmtPct(p.perc_cbs)}</div>
+                        </td>
+                        <td className="py-1 px-2 text-right border-l">{fmtBRL(p.debito_ibs_projetado)}</td>
+                        <td className="py-1 px-2 text-right">{fmtBRL(p.credito_ibs_projetado)}</td>
+                        <td className={`py-1 px-2 text-right font-semibold ${p.saldo_ibs >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {fmtSaldo(p.saldo_ibs)}
+                        </td>
+                        <td className="py-1 px-2 text-right border-l">{fmtBRL(p.debito_cbs_projetado)}</td>
+                        <td className="py-1 px-2 text-right">{fmtBRL(p.credito_cbs_projetado)}</td>
+                        <td className={`py-1 px-2 text-right font-semibold ${p.saldo_cbs >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          {fmtSaldo(p.saldo_cbs)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

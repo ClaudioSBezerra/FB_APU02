@@ -170,6 +170,8 @@ func DeleteSimuladorAliquotaHandler(db *sql.DB) http.HandlerFunc {
 }
 
 // SimuladorProjecaoAno é a projeção de débito/crédito IBS+CBS pra um ano da transição.
+// Saldo = débito - crédito por imposto (positivo = a pagar, negativo = a recuperar) —
+// o "quadro de apuração" da tela é justamente esses dois saldos lado a lado.
 type SimuladorProjecaoAno struct {
 	Ano        int     `json:"ano"`
 	PercIBS    float64 `json:"perc_ibs"` // perc_ibs_uf + perc_ibs_mun
@@ -178,6 +180,8 @@ type SimuladorProjecaoAno struct {
 	DebitoCBS  float64 `json:"debito_cbs_projetado"`
 	CreditoIBS float64 `json:"credito_ibs_projetado"`
 	CreditoCBS float64 `json:"credito_cbs_projetado"`
+	SaldoIBS   float64 `json:"saldo_ibs"`
+	SaldoCBS   float64 `json:"saldo_cbs"`
 }
 
 // GetSimuladorProjecaoHandler — GET /api/rfb/simulador/projecao?periodo=YYYYMM|ano=YYYY
@@ -262,6 +266,8 @@ func GetSimuladorProjecaoHandler(db *sql.DB) http.HandlerFunc {
 			p.DebitoCBS = baseDebito * p.PercCBS / 100.0
 			p.CreditoIBS = baseCredito * p.PercIBS / 100.0
 			p.CreditoCBS = baseCredito * p.PercCBS / 100.0
+			p.SaldoIBS = p.DebitoIBS - p.CreditoIBS
+			p.SaldoCBS = p.DebitoCBS - p.CreditoCBS
 			projecao = append(projecao, p)
 		}
 
