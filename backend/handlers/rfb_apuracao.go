@@ -643,10 +643,16 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Find the request by tiqueteSolicitacao
+		// Find the request by tiqueteSolicitacao. Aceita além de 'requested' também 'error'
+		// (linha já marcada como erro pelo watchdog de 5h ou por uma tentativa manual de
+		// "Tentar Recuperar") — a RFB pode responder atrasada, depois desses estados terem
+		// sido setados; sem isso o webhook tardio era descartado silenciosamente ("request
+		// not found"), perdendo um resultado que a RFB efetivamente entregou. Exclui só os
+		// estados que já processaram ou estão processando o resultado.
 		var requestID, reqTipo string
 		err = db.QueryRow(`
-			SELECT id, COALESCE(tipo, 'debito') FROM rfb_requests WHERE tiquete = $1 AND status = 'requested'
+			SELECT id, COALESCE(tipo, 'debito') FROM rfb_requests
+			WHERE tiquete = $1 AND status NOT IN ('completed', 'downloading', 'reprocessing')
 		`, tiqueteSolicitacao).Scan(&requestID, &reqTipo)
 		if err != nil {
 			log.Printf("[RFB Webhook] Request not found for tiqueteSolicitacao %s: %v", tiqueteSolicitacao, err)
@@ -655,10 +661,13 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Save tiqueteDownload and update status
+		// Save tiqueteDownload and update status. Limpa error_code/error_message — se a linha
+		// estava em 'error' (webhook atrasado, ver comentário acima), o erro antigo (ex:
+		// TIMEOUT) não deve continuar aparecendo junto do novo status na tela.
 		_, err = db.Exec(`
 			UPDATE rfb_requests
-			SET status = 'webhook_received', tiquete_download = $1, updated_at = CURRENT_TIMESTAMP
+			SET status = 'webhook_received', tiquete_download = $1,
+			    error_code = NULL, error_message = NULL, updated_at = CURRENT_TIMESTAMP
 			WHERE id = $2
 		`, tiqueteDownload, requestID)
 		if err != nil {
