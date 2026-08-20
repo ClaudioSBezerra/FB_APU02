@@ -65,3 +65,7 @@ __pycache__/
 
 # Referências grandes (excedem o limite de 100MB do GitHub) — manter só localmente
 docs/*.pdf
+docs/rfb/
+
+# Metadados do Windows/WSL (alternate data stream exposta como arquivo separado)
+*:Zone.Identifier
