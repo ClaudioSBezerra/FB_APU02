@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { TrendingUp, RefreshCw, Info, ChevronLeft, ChevronRight, AlertTriangle, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
+import { TrendingUp, RefreshCw, Info, ChevronLeft, ChevronRight, AlertTriangle, AlertCircle, CheckCircle2, RotateCcw, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 
@@ -20,6 +20,8 @@ interface CreditoRequestItem {
   error_message?: string;
   created_at: string;
   has_raw_json: boolean;
+  tiquete?: string;
+  tiquete_download?: string;
 }
 
 const REQUEST_STATUS_LABELS: Record<string, string> = {
@@ -57,6 +59,33 @@ function formatCurrency(value: number): string {
 function formatCNPJBase(cnpj: string): string {
   if (cnpj.length === 8) return `${cnpj.slice(0, 2)}.${cnpj.slice(2, 5)}.${cnpj.slice(5)}`;
   return cnpj;
+}
+
+// Mostra um tíquete truncado com botão de copiar — usado pra exibir os dois
+// tíquetes (solicitação e captura/download) lado a lado no histórico.
+function TiqueteCopy({ label, value }: { label: string; value?: string | null }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+        {label}: <span className="italic">ainda não recebido</span>
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      title={value}
+      className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors"
+    >
+      {label}: {value.slice(0, 8)}…
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  );
 }
 
 function formatDate(d: string | null): string {
@@ -288,6 +317,10 @@ export default function RFBCreditosCBS() {
                             {req.error_message}
                           </p>
                         )}
+                        <div className="flex items-center gap-3 mt-1">
+                          <TiqueteCopy label="Solicitação" value={req.tiquete} />
+                          <TiqueteCopy label="Captura" value={req.tiquete_download} />
+                        </div>
                       </div>
                     </div>
                     {req.status === 'error' && !req.has_raw_json && (
