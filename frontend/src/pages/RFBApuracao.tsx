@@ -335,7 +335,7 @@ export default function RFBApuracao() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {(req.status === 'webhook_received' || (req.status === 'error' && req.tiquete)) && (
+                        {(req.status === 'webhook_received' || req.status === 'requested' || (req.status === 'error' && req.tiquete)) && (
                           <Button size="sm" variant="outline"
                             onClick={() => handleDownloadManual(req.id)}
                             title={req.tiquete_download ? undefined : 'Sem confirmação da RFB — tenta recuperar com o tíquete original, pode falhar'}>
