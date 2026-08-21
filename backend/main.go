@@ -316,6 +316,7 @@ func main() {
 	http.HandleFunc("/api/admin/reset-db", withAuth(handlers.ResetDatabaseHandler, "admin"))
 	http.HandleFunc("/api/admin/limpar-apuracao", withAuth(handlers.LimparDadosApuracaoHandler, "admin"))
 	http.HandleFunc("/api/admin/limpeza-base", withAuth(handlers.LimpezaBaseHandler, "admin"))
+	http.HandleFunc("/api/admin/limpeza-total", withAuth(handlers.LimpezaTotalHandler, "admin"))
 	http.HandleFunc("/api/company/reset-data", withAuth(handlers.ResetCompanyDataHandler, ""))
 	http.HandleFunc("/api/admin/refresh-views", withAuth(handlers.RefreshViewsHandler, ""))
 	http.HandleFunc("/api/admin/users", withAuth(handlers.ListUsersHandler, "admin"))

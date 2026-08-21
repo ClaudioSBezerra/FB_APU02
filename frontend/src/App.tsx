@@ -35,6 +35,7 @@ import ArgusPortal from './pages/ArgusPortal'
 import AdminUsers from './pages/AdminUsers'
 import UserActivity from './pages/UserActivity'
 import LimparDadosApuracao from './pages/LimparDadosApuracao'
+import LimpezaTotalDados from './pages/LimpezaTotalDados'
 import CGIBSPainel from './pages/CGIBSPainel'
 import CGIBSApuracao from './pages/CGIBSApuracao'
 import CGIBSCredentials from './pages/CGIBSCredentials'
@@ -268,6 +269,7 @@ function AppLayout() {
       <Route path="/config/usuarios"        element={<AdminRoute><AdminUsers /></AdminRoute>} />
       <Route path="/config/user-activity"   element={<AdminRoute><UserActivity /></AdminRoute>} />
       <Route path="/config/limpar-dados"    element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
+      <Route path="/config/limpeza-total"   element={<AdminRoute><LimpezaTotalDados /></AdminRoute>} />
       <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
       <Route path="/config/sap-credenciais" element={<AdminRoute><SAPCredentials /></AdminRoute>} />
       <Route path="/config/sap-sincronizacoes" element={<AdminRoute><SAPSyncHistory /></AdminRoute>} />
