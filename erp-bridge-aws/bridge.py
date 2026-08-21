@@ -19,6 +19,7 @@ import argparse
 import io
 import json as _json
 import logging
+import os
 import re
 import sqlite3
 import sys
@@ -648,23 +649,161 @@ def parse_duplicatas_do_xml(xml_bytes: bytes) -> list:
     return duplicatas
 
 
-def buscar_xml_duplicatas(chaves: list) -> dict:
+_CHUNK_LEGADO = 500  # tamanho do lote no IN (...) — evita ORA-01795 (limite 1000 binds)
+
+# CNPJ (CGC) de cada filial 01-09 → alias TNS, obtido de sfc_servidor JOIN
+# param001 (planilha fornecida em 20/08/2026). Usado para rotear o emit_cnpj
+# do documento até o servidor certo dentro de cfg['servidores'] — a mesma
+# lista (com dsn/usuario/senha reais) já configurada no config.yaml para o
+# modo oracle_xml legado, casando pelo alias no final do dsn
+# (host:porta/alias). Fora de escopo por ora: FCALH/93, FCLAU/94, FCCAB/92 e
+# as demais unidades (OL*, MDCAB, AMERICAN, DBIMPORT).
+_CNPJ_ALIAS_LEGADO = {
+    "10230480000130": "fcgus",  # CD_EMPRESA 1 — Garanhuns
+    "10230480001960": "fcimb",  # CD_EMPRESA 2 — Recife/Imbiribeira
+    "10230480000300": "fcsal",  # CD_EMPRESA 3 — Salvador
+    "10230480000483": "fctam",  # CD_EMPRESA 4 — Tamarineira
+    "10230480001293": "fcaju",  # CD_EMPRESA 5 — Aracaju
+    "10230480002427": "fcjpa",  # CD_EMPRESA 6 — João Pessoa
+    "10230480002265": "fcnat",  # CD_EMPRESA 7 — Natal
+    "10230480003075": "fccau",  # CD_EMPRESA 8 — Caruaru
+    "10230480003156": "fcbar",  # CD_EMPRESA 9 — Barris
+}
+
+
+def _servidor_por_cnpj(cnpj: str, servidores: list) -> dict | None:
+    """Acha em cfg['servidores'] o servidor cujo dsn termina no alias TNS
+    mapeado para esse CNPJ emitente (ver _CNPJ_ALIAS_LEGADO), ou None."""
+    alias = _CNPJ_ALIAS_LEGADO.get(re.sub(r"\D", "", cnpj or ""))
+    if not alias:
+        return None
+    for srv in servidores:
+        if srv.get("dsn", "").rsplit("/", 1)[-1].strip().lower() == alias:
+            return srv
+    return None
+
+
+def _query_xml_por_chaves(
+    srv: dict,
+    chaves: list,
+    tabela: str = "sfc_nfe",
+    col_chave: str = "nfe",
+    col_xml: str = "nota_xml",
+) -> dict:
+    """Conecta no servidor legado (Oracle/Totvs por filial) e busca o XML para
+    as chaves dadas. tabela/col_chave/col_xml variam por direção: saída usa
+    sfc_nfe (nfe/nota_xml); entrada usa sfc_nfe_imp (chave_nfe/email_xml_nfe) —
+    mesmas fontes já usadas em FONTES["nfe_saidas"]/FONTES["nfe_entradas"]."""
+    resultado: dict = {}
+    try:
+        conn_ora = oracledb.connect(
+            user=srv["usuario"],
+            password=srv["senha"],
+            dsn=srv["dsn"],
+            expire_time=2,
+        )
+        # Teto de 5min por lote — evita segurar a conexão indefinidamente se
+        # uma base legada estiver lenta/instável.
+        conn_ora.call_timeout = 5 * 60 * 1000
+    except Exception as exc:
+        log.error("[Duplicatas] Falha ao conectar em %s: %s", srv["nome"], exc)
+        return resultado
+
+    try:
+        cur = conn_ora.cursor()
+        for i in range(0, len(chaves), _CHUNK_LEGADO):
+            lote = chaves[i:i + _CHUNK_LEGADO]
+            binds = {f"c{j}": v for j, v in enumerate(lote)}
+            placeholders = ", ".join(f":{k}" for k in binds)
+            cur.execute(
+                f"SELECT {col_chave}, {col_xml} FROM {tabela} WHERE {col_chave} IN ({placeholders})",
+                binds,
+            )
+            for chave, xml_clob in cur:
+                xml_str = clob_para_str(xml_clob)
+                if xml_str:
+                    resultado[str(chave).strip()] = (
+                        xml_str.encode("utf-8") if isinstance(xml_str, str) else xml_str
+                    )
+        cur.close()
+    except Exception as exc:
+        log.error("[Duplicatas] Erro na query em %s.%s: %s", srv["nome"], tabela, exc)
+    finally:
+        try:
+            conn_ora.close()
+        except Exception:
+            pass
+    return resultado
+
+
+def buscar_xml_duplicatas(
+    documents: list,
+    servidores: list,
+    fbtax: "FBTaxClient | None" = None,
+    run_id: str | None = None,
+) -> dict:
     """
-    MOCK — pendência: fonte real do XML da NF-e ainda não definida (avaliação
-    presencial prevista). Duas opções em avaliação:
-      1) SAP expõe o XML numa view centralizada (ex: s4i_nfe.xml), mesma conexão
-         já usada hoje — sem precisar dos 9 bancos legados por filial.
-      2) JOIN com SFC_NFE.NOTA_XML (BLOB) em cada uma das 9 bases de filial do
-         legado, casando pela coluna NFE — requer config nova (DSN por filial)
-         e conexões separadas, ainda não implementadas.
-    Enquanto isso não for decidido e implementado, retorna vazio — não tenta
-    conectar em lugar nenhum, não quebra o fluxo atual de importação.
+    Busca o XML da NF-e em SFC_NFE/SFC_NFE_IMP nas bases legadas por filial —
+    reaproveita cfg['servidores'] (dsn/usuario/senha já configurados para o
+    modo oracle_xml legado) e o mapeamento fixo CNPJ→alias em
+    _CNPJ_ALIAS_LEGADO (filiais 01-09). Cobre as duas direções, já que Grupo Y
+    (cobr>dup[]) tanto alimenta rfb_debitos_liquidacoes (venda, DIRECT=2 — o
+    próprio emitente concedeu prazo) quanto rfb_creditos_liquidacoes (compra,
+    DIRECT=1 — o fornecedor concedeu prazo pra FC): saída roteia por
+    emit_cnpj em SFC_NFE (nfe/nota_xml); entrada roteia por dest_cnpj em
+    SFC_NFE_IMP (chave_nfe/email_xml_nfe) — mesmas fontes de
+    FONTES["nfe_saidas"]/FONTES["nfe_entradas"]. Sem 'servidores' configurado,
+    não tenta conectar em lugar nenhum — não quebra o fluxo atual de
+    importação. Com fbtax/run_id, checa cancelamento entre um servidor e
+    outro (cada um pode levar minutos).
     Retorna: {chave: xml_bytes}.
     """
-    if not chaves:
+    if not documents:
         return {}
-    log.info("[Duplicatas] Fonte de XML ainda não configurada — pulando %d chave(s) (ver TODO em buscar_xml_duplicatas)", len(chaves))
-    return {}
+    if not servidores:
+        log.info("[Duplicatas] cfg['servidores'] não configurado — pulando %d chave(s)", len(documents))
+        return {}
+
+    por_servidor_saida: dict = {}
+    por_servidor_entrada: dict = {}
+    sem_mapa = 0
+    for d in documents:
+        direct = d.get("direct")
+        if direct == "2":
+            srv = _servidor_por_cnpj(d.get("emit_cnpj", ""), servidores)
+            alvo = por_servidor_saida
+        elif direct == "1":
+            srv = _servidor_por_cnpj(d.get("dest_cnpj", ""), servidores)
+            alvo = por_servidor_entrada
+        else:
+            continue
+        if srv is None:
+            sem_mapa += 1
+            continue
+        alvo.setdefault(srv["nome"], []).append(d["chave"])
+
+    if sem_mapa:
+        log.warning("[Duplicatas] %d chave(s) sem servidor legado mapeado para o CNPJ emitente/destinatário", sem_mapa)
+
+    xml_por_chave: dict = {}
+    for srv in servidores:
+        chaves_saida = por_servidor_saida.get(srv["nome"])
+        chaves_entrada = por_servidor_entrada.get(srv["nome"])
+        if not chaves_saida and not chaves_entrada:
+            continue
+        if fbtax is not None and run_id and fbtax.is_run_cancelled(run_id):
+            log.warning("[Cancelado] Run %s foi cancelado pela UI — interrompendo busca de duplicatas.", run_id)
+            break
+        if chaves_saida:
+            log.info("[Duplicatas] Buscando %d XML(s) de saída em %s...", len(chaves_saida), srv["nome"])
+            xml_por_chave.update(_query_xml_por_chaves(srv, chaves_saida))
+        if chaves_entrada:
+            log.info("[Duplicatas] Buscando %d XML(s) de entrada em %s...", len(chaves_entrada), srv["nome"])
+            xml_por_chave.update(_query_xml_por_chaves(
+                srv, chaves_entrada, tabela="sfc_nfe_imp", col_chave="chave_nfe", col_xml="email_xml_nfe",
+            ))
+
+    return xml_por_chave
 
 
 # ─── Processamento SAP S4/HANA ────────────────────────────────────────────────
@@ -675,6 +814,8 @@ def processar_sap(
     data_fim: date,
     fbtax: FBTaxClient,
     run_id: str | None = None,
+    servidores: list | None = None,
+    gerar_parcelas: bool = False,
 ) -> dict:
     """Lê s4i_nfe + s4i_nfe_impostos do FCCORP e envia via /api/erp-bridge/import/batch."""
     NOME = "FCCORP"
@@ -697,6 +838,10 @@ def processar_sap(
             dsn=oracle_cfg["dsn"],
             expire_time=2,  # keepalive TCP a cada 2 min — evita firewall cortar conexão longa
         )
+        # Teto de 30min por round-trip — evita que uma query travada (rede,
+        # Oracle preso, range grande demais) deixe o processo pendurado
+        # indefinidamente consumindo recursos do servidor sem nunca dar erro.
+        conn_ora.call_timeout = 30 * 60 * 1000
         log.info("Conectado ao Oracle SAP FCCORP (thin mode)")
     except Exception as exc:
         log.error("Falha ao conectar ao FCCORP: %s", exc)
@@ -718,6 +863,15 @@ def processar_sap(
         cur.close()
 
         log.info("%d documentos encontrados no FCCORP", len(rows))
+
+        if run_id and fbtax.is_run_cancelled(run_id):
+            log.warning("[Cancelado] Run %s foi cancelado pela UI — interrompendo antes de processar.", run_id)
+            try:
+                conn_ora.close()
+            except Exception:
+                pass
+            stats["sap_batch"]["cancelado"] = True
+            return stats
 
         # ── Etapa 1: buscar parceiros ainda com a conexão Oracle aberta ──────
         parceiros = []
@@ -799,9 +953,25 @@ def processar_sap(
             })
 
         # Duplicatas (Grupo Y — cronograma de parcelas), ver buscar_xml_duplicatas.
-        # Hoje sempre vazio (mock) — sem custo/risco enquanto a fonte real não
-        # for decidida, já que a função não tenta conectar em lugar nenhum.
-        xml_por_chave = buscar_xml_duplicatas([d["chave"] for d in documents])
+        # gerar_parcelas vem do toggle "Buscar cronograma de parcelas" na UI
+        # (erp_bridge_config.gerar_cronograma_parcelas) — desligado por padrão
+        # enquanto o Split Payment pra pagamento parcelado não tiver data de
+        # início. Desligado, nem conecta nas bases legadas por filial.
+        # SKIP_DUPLICATAS=1 (env var) desliga na marra por cima disso, útil
+        # pra backfills grandes onde o custo por chave pode virar horas mesmo
+        # com o toggle ligado.
+        if not gerar_parcelas:
+            log.info("[Duplicatas] gerar_cronograma_parcelas desligado — pulando %d chave(s)", len(documents))
+            xml_por_chave = {}
+        elif run_id and fbtax.is_run_cancelled(run_id):
+            log.warning("[Cancelado] Run %s foi cancelado pela UI — pulando duplicatas e envio.", run_id)
+            stats["sap_batch"]["cancelado"] = True
+            return stats
+        elif os.environ.get("SKIP_DUPLICATAS") == "1":
+            log.info("[Duplicatas] SKIP_DUPLICATAS=1 — pulando busca para %d chave(s)", len(documents))
+            xml_por_chave = {}
+        else:
+            xml_por_chave = buscar_xml_duplicatas(documents, servidores or [], fbtax=fbtax, run_id=run_id)
         for d in documents:
             xml_bytes = xml_por_chave.get(d["chave"])
             d["duplicatas"] = parse_duplicatas_do_xml(xml_bytes) if xml_bytes else []
@@ -837,6 +1007,11 @@ def processar_sap(
         _prog_ts = _time.monotonic()  # timestamp do último log de progresso
 
         for i in range(0, len(documents), BATCH_SIZE):
+            if run_id and fbtax.is_run_cancelled(run_id):
+                log.warning("[Cancelado] Run %s foi cancelado pela UI — interrompendo envio (%d/%d já enviados).",
+                            run_id, i, len(documents))
+                stats["sap_batch"]["cancelado"] = True
+                break
             lote = documents[i:i + BATCH_SIZE]
             processados = min(i + BATCH_SIZE, len(documents))
             try:
@@ -1042,6 +1217,7 @@ def executar_importacao(
     filtro_servidores: list | None = None,
     dry_run: bool = False,
     existing_run_id: str | None = None,
+    gerar_parcelas: bool = False,
 ) -> int:
     erp_type = cfg.get("erp_type", "oracle_xml")
 
@@ -1075,7 +1251,11 @@ def executar_importacao(
             log.error("erp_type=sap_s4hana mas 'oracle.dsn' nao configurado em config.yaml")
             return 1
 
-        stats = processar_sap(oracle_cfg, data_ini, data_fim, fbtax, run_id=run_id)
+        stats = processar_sap(
+            oracle_cfg, data_ini, data_fim, fbtax, run_id=run_id,
+            servidores=cfg.get("servidores", []),
+            gerar_parcelas=gerar_parcelas,
+        )
 
         for s in stats.values():
             grand["enviados"]  += s["enviados"]
@@ -1084,8 +1264,13 @@ def executar_importacao(
 
         if run_id:
             fbtax.report_items(run_id, {"FCCORP": stats})
-            fbtax.finalize_run(run_id, grand, erro_msg=stats.get("sap_batch", {}).get("erro_msg"))
-            log.info("Run API finalizado: %s", run_id)
+            if stats.get("sap_batch", {}).get("cancelado"):
+                # Não finaliza — deixaria o status voltar pra "success"/"error"
+                # e mascararia o cancelamento que a UI já registrou.
+                log.info("Run API %s: cancelado, não finalizado (status já é 'cancelled' na UI).", run_id)
+            else:
+                fbtax.finalize_run(run_id, grand, erro_msg=stats.get("sap_batch", {}).get("erro_msg"))
+                log.info("Run API finalizado: %s", run_id)
 
         return 0 if grand["erros"] == 0 else 1
 
@@ -1259,6 +1444,7 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                         origem="manual",
                         filtro_servidores=filtro_servidores,
                         existing_run_id=run_id,
+                        gerar_parcelas=bool(bridge_cfg_check and bridge_cfg_check.get("gerar_cronograma_parcelas")),
                     )
                 except Exception as exc:
                     log.error("[Daemon] Erro no run manual %s: %s", run_id, exc)
@@ -1300,6 +1486,7 @@ def run_daemon(cfg: dict, fbtax: FBTaxClient) -> int:
                         data_ini=data_ini_sched,
                         data_fim=data_fim_sched,
                         origem="scheduler",
+                        gerar_parcelas=bool(bridge_cfg.get("gerar_cronograma_parcelas")),
                     )
                     ultimo_run_data = hoje
                 except Exception as exc:
@@ -1449,6 +1636,7 @@ def main() -> int:
             return 1
         return 0
 
+    bridge_cfg_cli = fbtax.get_bridge_config()
     return executar_importacao(
         cfg=cfg,
         fbtax=fbtax,
@@ -1457,6 +1645,7 @@ def main() -> int:
         origem=args.origin,
         filtro_servidor=args.servidor,
         dry_run=args.dry_run,
+        gerar_parcelas=bool(bridge_cfg_cli and bridge_cfg_cli.get("gerar_cronograma_parcelas")),
     )
 
 

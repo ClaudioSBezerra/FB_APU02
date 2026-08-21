@@ -24,6 +24,7 @@ interface BridgeConfig {
   api_key: string;
   daemon_last_seen: string | null;
   daemon_online: boolean;
+  gerar_cronograma_parcelas: boolean;
 }
 
 interface BridgeRunItem {
@@ -146,6 +147,7 @@ export default function ERPBridgeConfig() {
   const [ativo, setAtivo] = useState(false);
   const [horario, setHorario] = useState('02:00');
   const [diasRetro, setDiasRetro] = useState(1);
+  const [gerarParcelas, setGerarParcelas] = useState(false);
 
 
   // ── Estado: trigger manual ────────────────────────────────────────────────
@@ -159,6 +161,7 @@ export default function ERPBridgeConfig() {
       setAtivo(cfg.ativo);
       setHorario(cfg.horario);
       setDiasRetro(cfg.dias_retroativos);
+      setGerarParcelas(cfg.gerar_cronograma_parcelas);
     }
   }, [cfg]);
 
@@ -207,7 +210,7 @@ const abortMutation = useMutation({
       const res = await fetch('/api/erp-bridge/config', {
         method: 'PATCH',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ativo, horario, dias_retroativos: diasRetro }),
+        body: JSON.stringify({ ativo, horario, dias_retroativos: diasRetro, gerar_cronograma_parcelas: gerarParcelas }),
       });
       if (!res.ok) throw new Error(await res.text());
     },
@@ -560,6 +563,19 @@ const abortMutation = useMutation({
               </p>
             </div>
             <Switch checked={ativo} onCheckedChange={setAtivo} />
+          </div>
+
+          {/* Cronograma de parcelas (Grupo Y / Split Payment) */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Buscar cronograma de parcelas (Grupo Y)</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Conecta nas bases legadas por filial pra capturar duplicatas de vendas/compras a prazo.
+                Deixe desligado enquanto o Split Payment para pagamento parcelado não tiver data de início —
+                liga sem custo (nenhuma conexão extra) quando não precisar.
+              </p>
+            </div>
+            <Switch checked={gerarParcelas} onCheckedChange={setGerarParcelas} />
           </div>
 
           {/* Horário */}

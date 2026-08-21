@@ -19,37 +19,38 @@ import (
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type ERPBridgeConfig struct {
-	CompanyID          string     `json:"company_id"`
-	Ativo              bool       `json:"ativo"`
-	Horario            string     `json:"horario"` // HH:MM
-	DiasRetroativos    int        `json:"dias_retroativos"`
-	UltimoRunEm        *time.Time `json:"ultimo_run_em"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	ResetTracker       bool       `json:"reset_tracker"`
-	ErpType            string     `json:"erp_type"`
-	FBTaxEmail         string     `json:"fbtax_email"`
-	FBTaxPasswordSet   bool       `json:"fbtax_password_set"`
-	OracleDsn          string     `json:"oracle_dsn"`
-	OracleUsuario      string     `json:"oracle_usuario"`
-	OracleSenhaSet     bool       `json:"oracle_senha_set"`
-	APIKey             string     `json:"api_key"`
-	DaemonLastSeen     *time.Time `json:"daemon_last_seen"`
-	DaemonOnline       bool       `json:"daemon_online"`
+	CompanyID               string     `json:"company_id"`
+	Ativo                   bool       `json:"ativo"`
+	Horario                 string     `json:"horario"` // HH:MM
+	DiasRetroativos         int        `json:"dias_retroativos"`
+	UltimoRunEm             *time.Time `json:"ultimo_run_em"`
+	UpdatedAt               time.Time  `json:"updated_at"`
+	ResetTracker            bool       `json:"reset_tracker"`
+	ErpType                 string     `json:"erp_type"`
+	FBTaxEmail              string     `json:"fbtax_email"`
+	FBTaxPasswordSet        bool       `json:"fbtax_password_set"`
+	OracleDsn               string     `json:"oracle_dsn"`
+	OracleUsuario           string     `json:"oracle_usuario"`
+	OracleSenhaSet          bool       `json:"oracle_senha_set"`
+	APIKey                  string     `json:"api_key"`
+	DaemonLastSeen          *time.Time `json:"daemon_last_seen"`
+	DaemonOnline            bool       `json:"daemon_online"`
+	GerarCronogramaParcelas bool       `json:"gerar_cronograma_parcelas"`
 }
 
 type ERPBridgeRun struct {
-	ID             string           `json:"id"`
-	CompanyID      string           `json:"company_id"`
-	IniciadoEm     time.Time        `json:"iniciado_em"`
-	FinalizadoEm   *time.Time       `json:"finalizado_em"`
-	Status         string           `json:"status"`
-	DataIni        *string          `json:"data_ini"`
-	DataFim        *string          `json:"data_fim"`
-	TotalEnviados  int              `json:"total_enviados"`
-	TotalIgnorados int              `json:"total_ignorados"`
-	TotalErros     int              `json:"total_erros"`
-	ErroMsg        *string          `json:"erro_msg"`
-	Origem         string           `json:"origem"`
+	ID             string             `json:"id"`
+	CompanyID      string             `json:"company_id"`
+	IniciadoEm     time.Time          `json:"iniciado_em"`
+	FinalizadoEm   *time.Time         `json:"finalizado_em"`
+	Status         string             `json:"status"`
+	DataIni        *string            `json:"data_ini"`
+	DataFim        *string            `json:"data_fim"`
+	TotalEnviados  int                `json:"total_enviados"`
+	TotalIgnorados int                `json:"total_ignorados"`
+	TotalErros     int                `json:"total_erros"`
+	ErroMsg        *string            `json:"erro_msg"`
+	Origem         string             `json:"origem"`
 	Items          []ERPBridgeRunItem `json:"items,omitempty"`
 }
 
@@ -98,21 +99,22 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 				       ultimo_run_em, updated_at, reset_tracker,
 				       COALESCE(erp_type, 'oracle_xml'),
 				       fbtax_email, fbtax_password, oracle_dsn, oracle_usuario, oracle_senha, api_key,
-				       daemon_last_seen
+				       daemon_last_seen, gerar_cronograma_parcelas
 				FROM erp_bridge_config WHERE company_id = $1
 			`, companyID).Scan(&cfg.CompanyID, &cfg.Ativo, &horario,
 				&cfg.DiasRetroativos, &cfg.UltimoRunEm, &cfg.UpdatedAt, &cfg.ResetTracker,
 				&erpType, &fbtaxEmail, &fbtaxPassword, &oracleDsn, &oracleUsuario, &oracleSenha, &apiKey,
-				&cfg.DaemonLastSeen)
+				&cfg.DaemonLastSeen, &cfg.GerarCronogramaParcelas)
 			if err == sql.ErrNoRows {
 				cfg = ERPBridgeConfig{
-					CompanyID:       companyID,
-					Ativo:           false,
-					Horario:         "02:00",
-					DiasRetroativos: 1,
-					UpdatedAt:       time.Now(),
-					ResetTracker:    false,
-					ErpType:         "oracle_xml",
+					CompanyID:               companyID,
+					Ativo:                   false,
+					Horario:                 "02:00",
+					DiasRetroativos:         1,
+					UpdatedAt:               time.Now(),
+					ResetTracker:            false,
+					ErpType:                 "oracle_xml",
+					GerarCronogramaParcelas: false,
 				}
 			} else if err != nil {
 				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar configuração", err, "[ERPBridgeConfig]")
@@ -147,31 +149,33 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 
 		case http.MethodPatch:
 			var req struct {
-				Ativo           *bool   `json:"ativo"`
-				Horario         *string `json:"horario"`
-				DiasRetroativos *int    `json:"dias_retroativos"`
-				ResetTracker    *bool   `json:"reset_tracker"`
-				ErpType         *string `json:"erp_type"`
-				FBTaxEmail      *string `json:"fbtax_email"`
-				FBTaxPassword   *string `json:"fbtax_password"`
-				OracleDsn       *string `json:"oracle_dsn"`
-				OracleUsuario   *string `json:"oracle_usuario"`
-				OracleSenha     *string `json:"oracle_senha"`
+				Ativo                   *bool   `json:"ativo"`
+				Horario                 *string `json:"horario"`
+				DiasRetroativos         *int    `json:"dias_retroativos"`
+				ResetTracker            *bool   `json:"reset_tracker"`
+				ErpType                 *string `json:"erp_type"`
+				FBTaxEmail              *string `json:"fbtax_email"`
+				FBTaxPassword           *string `json:"fbtax_password"`
+				OracleDsn               *string `json:"oracle_dsn"`
+				OracleUsuario           *string `json:"oracle_usuario"`
+				OracleSenha             *string `json:"oracle_senha"`
+				GerarCronogramaParcelas *bool   `json:"gerar_cronograma_parcelas"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "JSON inválido", http.StatusBadRequest)
 				return
 			}
 			_, err := db.Exec(`
-				INSERT INTO erp_bridge_config (company_id, ativo, horario, dias_retroativos, updated_at)
-				VALUES ($1, COALESCE($2, false), COALESCE($3::TIME, '02:00'), COALESCE($4, 1), NOW())
+				INSERT INTO erp_bridge_config (company_id, ativo, horario, dias_retroativos, gerar_cronograma_parcelas, updated_at)
+				VALUES ($1, COALESCE($2, false), COALESCE($3::TIME, '02:00'), COALESCE($4, 1), COALESCE($6, false), NOW())
 				ON CONFLICT (company_id) DO UPDATE SET
-				    ativo            = COALESCE($2, erp_bridge_config.ativo),
-				    horario          = COALESCE($3::TIME, erp_bridge_config.horario),
-				    dias_retroativos = COALESCE($4, erp_bridge_config.dias_retroativos),
-				    reset_tracker    = COALESCE($5, erp_bridge_config.reset_tracker),
-				    updated_at       = NOW()
-			`, companyID, req.Ativo, req.Horario, req.DiasRetroativos, req.ResetTracker)
+				    ativo                     = COALESCE($2, erp_bridge_config.ativo),
+				    horario                   = COALESCE($3::TIME, erp_bridge_config.horario),
+				    dias_retroativos          = COALESCE($4, erp_bridge_config.dias_retroativos),
+				    reset_tracker             = COALESCE($5, erp_bridge_config.reset_tracker),
+				    gerar_cronograma_parcelas = COALESCE($6, erp_bridge_config.gerar_cronograma_parcelas),
+				    updated_at                = NOW()
+			`, companyID, req.Ativo, req.Horario, req.DiasRetroativos, req.ResetTracker, req.GerarCronogramaParcelas)
 			if err != nil {
 				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao salvar configuração", err, "[ERPBridgeConfig]")
 				return
@@ -685,10 +689,10 @@ func ERPBridgeTriggerHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		var req struct {
-			DataIni        string   `json:"data_ini"`
-			DataFim        string   `json:"data_fim"`
-			FiliaisFilter  []string `json:"filiais_filter"`
-			OnlyParceiros  bool     `json:"only_parceiros"`
+			DataIni       string   `json:"data_ini"`
+			DataFim       string   `json:"data_fim"`
+			FiliaisFilter []string `json:"filiais_filter"`
+			OnlyParceiros bool     `json:"only_parceiros"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DataIni == "" || req.DataFim == "" {
 			http.Error(w, "data_ini e data_fim são obrigatórios", http.StatusBadRequest)
@@ -750,11 +754,11 @@ func ERPBridgePendingHandler(db *sql.DB) http.HandlerFunc {
 		}
 		defer rows.Close()
 		type PendingRun struct {
-			ID             string  `json:"id"`
-			DataIni        *string `json:"data_ini"`
-			DataFim        *string `json:"data_fim"`
-			FiliaisFilter  *string `json:"filiais_filter"`
-			OnlyParceiros  bool    `json:"only_parceiros"`
+			ID            string  `json:"id"`
+			DataIni       *string `json:"data_ini"`
+			DataFim       *string `json:"data_fim"`
+			FiliaisFilter *string `json:"filiais_filter"`
+			OnlyParceiros bool    `json:"only_parceiros"`
 		}
 		var items []PendingRun
 		for rows.Next() {

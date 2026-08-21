@@ -222,8 +222,8 @@ func ERPBridgeBatchImportHandler(db *sql.DB) http.HandlerFunc {
 					tx.Exec("RELEASE SAVEPOINT parc_sp")
 				}
 
-				// Cronograma de duplicatas (Grupo Y) — hoje sempre vazio em produção
-				// (mock em bridge.py até a fonte do XML ser decidida), sem custo/risco.
+				// Cronograma de duplicatas (Grupo Y) — bridge.py busca no Oracle
+				// legado por filial (saída e entrada) desde 21/08/2026.
 				if len(doc.Duplicatas) > 0 {
 					if direct == "2" {
 						upsertDuplicatas(stmts.debLiq, companyID, doc.Chave, doc.Duplicatas)
