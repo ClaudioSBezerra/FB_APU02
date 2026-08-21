@@ -14,13 +14,13 @@ import (
 // limpeza global de dados de teste (pedido do gestor Marlos, ago/2026 — o
 // servidor só tem dados de teste até a operação real começar em jan/2027).
 // Diferente de LimpezaBaseHandler (escopado por empresa, DELETE, 3 tabelas),
-// esta ação é global — sem filtro de company_id — e usa TRUNCATE nas ~37
+// esta ação é global — sem filtro de company_id — e usa TRUNCATE nas ~36
 // tabelas de movimento do sistema inteiro. NUNCA adicionar aqui uma tabela
 // estrutural/config/autenticação (companies, users, credenciais, etc).
 // 'participants' entra porque tem FK ON DELETE CASCADE em import_jobs (sem
 // isso o TRUNCATE ... CASCADE a arrastaria de qualquer forma).
 var LimpezaTotalTabelas = []string{
-	"nfe_entradas", "nfe_saidas", "cte_entradas", "dfe_xml",
+	"nfe_entradas", "nfe_saidas", "cte_entradas",
 	"rfb_debitos", "rfb_creditos", "rfb_debitos_liquidacoes", "rfb_creditos_liquidacoes",
 	"rfb_resumo", "rfb_creditos_resumo", "rfb_requests",
 	"cgibs_debitos", "cgibs_requests", "cgibs_resumo",
