@@ -8,12 +8,44 @@
  *
  * The verifier and state are stored in sessionStorage so handleCallback
  * can retrieve them on redirect.
+ *
+ * A config do Keycloak (realm URL, client_id, redirect_uri, scopes) é buscada em
+ * RUNTIME do backend (/api/auth/sso/config), não lida de env var de build (VITE_IAM_*)
+ * — a mesma imagem de frontend é compartilhada entre servidores com configs diferentes
+ * (ex: Hostinger multi-cliente sem SSO, AWS dedicado à Ferreira Costa com SSO); cravar
+ * a config no build vazaria o botão pra quem não devia ter.
  */
 
 import { sha256 } from '@noble/hashes/sha2.js';
 
 export const SESSION_KEY_VERIFIER = 'iam_pkce_verifier';
 export const SESSION_KEY_STATE = 'iam_oauth_state';
+
+export interface IAMConfig {
+  enabled: boolean;
+  base_url?: string;
+  client_id?: string;
+  redirect_uri?: string;
+  scopes?: string;
+}
+
+let cachedConfig: IAMConfig | null = null;
+
+/** Busca (e cacheia em memória) a config de SSO deste servidor. Nunca lança — em
+ * qualquer falha de rede/parse, retorna enabled:false (fail-safe: esconde o botão
+ * em vez de quebrar a tela de login). */
+export async function fetchIAMConfig(): Promise<IAMConfig> {
+  if (cachedConfig) return cachedConfig;
+  try {
+    const res = await fetch('/api/auth/sso/config');
+    if (!res.ok) return { enabled: false }; // não cacheia falha — próxima chamada tenta de novo
+    const data = (await res.json()) as IAMConfig;
+    cachedConfig = data;
+    return data;
+  } catch {
+    return { enabled: false };
+  }
+}
 
 function base64UrlEncode(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
@@ -49,18 +81,14 @@ async function generateCodeChallenge(verifier: string): Promise<string> {
  * Generates PKCE params, persists verifier + state in sessionStorage, and
  * returns the full Keycloak authorization URL.
  *
- * Throws if VITE_IAM_BASE_URL or VITE_IAM_CLIENT_ID are not configured.
+ * Throws if o backend deste servidor não tem o SSO configurado (`enabled:false` ou
+ * campos essenciais ausentes) — o chamador (botão de login) só deve invocar isto
+ * depois de já ter confirmado `fetchIAMConfig().enabled === true`.
  */
 export async function buildLoginUrl(): Promise<string> {
-  const iamBaseUrl = import.meta.env.VITE_IAM_BASE_URL as string | undefined;
-  const clientId = import.meta.env.VITE_IAM_CLIENT_ID as string | undefined;
-  const redirectUri = import.meta.env.VITE_IAM_REDIRECT_URI as string | undefined;
-  const scopes = (import.meta.env.VITE_IAM_SCOPES as string | undefined) ?? 'openid profile email';
-
-  if (!iamBaseUrl || !clientId || !redirectUri) {
-    throw new Error(
-      'IAM not configured: set VITE_IAM_BASE_URL, VITE_IAM_CLIENT_ID, and VITE_IAM_REDIRECT_URI',
-    );
+  const config = await fetchIAMConfig();
+  if (!config.enabled || !config.base_url || !config.client_id || !config.redirect_uri) {
+    throw new Error('SSO Keycloak não configurado neste servidor.');
   }
 
   const verifier = await generateCodeVerifier();
@@ -72,22 +100,13 @@ export async function buildLoginUrl(): Promise<string> {
 
   const params = new URLSearchParams({
     response_type: 'code',
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    scope: scopes,
+    client_id: config.client_id,
+    redirect_uri: config.redirect_uri,
+    scope: config.scopes || 'openid profile email',
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
   });
 
-  return `${iamBaseUrl}/protocol/openid-connect/auth?${params.toString()}`;
-}
-
-/** Returns true if VITE_IAM_BASE_URL is configured (IAM mode active). */
-export function isIAMEnabled(): boolean {
-  return Boolean(
-    import.meta.env.VITE_IAM_BASE_URL &&
-    import.meta.env.VITE_IAM_CLIENT_ID &&
-    import.meta.env.VITE_IAM_REDIRECT_URI,
-  );
+  return `${config.base_url}/protocol/openid-connect/auth?${params.toString()}`;
 }

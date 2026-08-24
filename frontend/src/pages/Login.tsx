@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
-import { buildLoginUrl, isIAMEnabled } from "@/lib/keycloak/buildLoginUrl";
+import { buildLoginUrl, fetchIAMConfig } from "@/lib/keycloak/buildLoginUrl";
 
 const FEATURES = [
   "Importação e análise de SPEDs EFD",
@@ -23,11 +23,22 @@ const Login = () => {
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [ssoEnabled, setSsoEnabled] = useState(false);
   const navigate = useNavigate();
   const { login } = useAuth();
 
   const sessionExpired = localStorage.getItem('session_expired') === '1';
   if (sessionExpired) localStorage.removeItem('session_expired');
+
+  useEffect(() => {
+    let mounted = true;
+    fetchIAMConfig().then((config) => {
+      if (mounted) setSsoEnabled(config.enabled);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleSSOLogin = async () => {
     try {
@@ -201,7 +212,7 @@ const Login = () => {
               <Button type="submit" className="w-full text-sm" disabled={isLoading}>
                 {isLoading ? "Entrando..." : "Entrar"}
               </Button>
-              {isIAMEnabled() && (
+              {ssoEnabled && (
                 <>
                   <div className="relative py-1">
                     <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>

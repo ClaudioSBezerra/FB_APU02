@@ -310,9 +310,10 @@ func main() {
 	http.HandleFunc("/api/auth/refresh", withDB(handlers.RefreshHandler))
 	http.HandleFunc("/api/auth/logout", withDB(handlers.LogoutHandler))
 
-	// SSO Keycloak (Ferreira Costa) — opção paralela ao login por senha, não o substitui.
-	// Só ativo se IAM_BASE_URL estiver configurado (sem isso, o botão de SSO no frontend
-	// não deve nem aparecer — ver VITE_IAM_BASE_URL).
+	// SSO Keycloak — opção paralela ao login por senha, não o substitui. Config exposta
+	// em runtime (não build-time) via /api/auth/sso/config, já que a mesma imagem de
+	// frontend é compartilhada entre servidores com configs diferentes (ver SSOConfigHandler).
+	http.HandleFunc("/api/auth/sso/config", handlers.SSOConfigHandler())
 	if iamBaseURL := os.Getenv("IAM_BASE_URL"); iamBaseURL != "" {
 		var allowedClientIDs []string
 		for _, id := range strings.Split(os.Getenv("IAM_ALLOWED_CLIENT_IDS"), ",") {

@@ -9,7 +9,7 @@
  * reaproveitando 100% do gerenciamento de sessão que já existe (AuthContext).
  */
 
-import { SESSION_KEY_VERIFIER, SESSION_KEY_STATE } from './buildLoginUrl';
+import { SESSION_KEY_VERIFIER, SESSION_KEY_STATE, fetchIAMConfig } from './buildLoginUrl';
 
 export class CallbackError extends Error {
   constructor(message: string, public readonly code: string) {
@@ -38,18 +38,19 @@ export async function handleCallback(searchParams: URLSearchParams): Promise<any
     throw new CallbackError('State inválido (possível CSRF) ou sessão de login expirada.', 'invalid_state');
   }
 
-  const iamBaseUrl = import.meta.env.VITE_IAM_BASE_URL as string;
-  const clientId = import.meta.env.VITE_IAM_CLIENT_ID as string;
-  const redirectUri = import.meta.env.VITE_IAM_REDIRECT_URI as string;
+  const config = await fetchIAMConfig();
+  if (!config.enabled || !config.base_url || !config.client_id || !config.redirect_uri) {
+    throw new CallbackError('SSO Keycloak não configurado neste servidor.', 'iam_not_configured');
+  }
 
   // 1. Troca code por access_token do Keycloak (fluxo OIDC padrão, direto no realm)
-  const tokenResp = await fetch(`${iamBaseUrl}/protocol/openid-connect/token`, {
+  const tokenResp = await fetch(`${config.base_url}/protocol/openid-connect/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'authorization_code',
-      client_id: clientId,
-      redirect_uri: redirectUri,
+      client_id: config.client_id,
+      redirect_uri: config.redirect_uri,
       code,
       code_verifier: verifier,
     }),

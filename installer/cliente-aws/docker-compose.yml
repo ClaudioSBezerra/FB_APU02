@@ -22,6 +22,11 @@ services:
       - RFB_API_URL=${RFB_API_URL}
       - RFB_TOKEN_URL=${RFB_TOKEN_URL}
       - RFB_WEBHOOK_URL=${RFB_WEBHOOK_URL}
+      - IAM_BASE_URL=${IAM_BASE_URL}
+      - IAM_ALLOWED_CLIENT_IDS=${IAM_ALLOWED_CLIENT_IDS}
+      - IAM_CLIENT_ID=${IAM_CLIENT_ID}
+      - IAM_REDIRECT_URI=${IAM_REDIRECT_URI}
+      - IAM_SCOPES=${IAM_SCOPES}
     depends_on:
       db:
         condition: service_healthy
