@@ -141,6 +141,7 @@ var (
 	ForgotPasswordRL = newRateLimiter(3, time.Hour)
 	ResetPasswordRL  = newRateLimiter(5, time.Hour)      // por IP
 	ChangePasswordRL = newRateLimiter(5, 15*time.Minute) // por userID
+	SSOKeycloakRL    = newRateLimiter(5, 15*time.Minute) // por IP — mesmo limite de LoginRL
 )
 
 // Allow checks AND records one attempt. Returns false if limit is exceeded.

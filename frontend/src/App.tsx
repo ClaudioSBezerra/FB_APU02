@@ -42,6 +42,8 @@ import CGIBSCredentials from './pages/CGIBSCredentials'
 import CGIBSDebitos from './pages/CGIBSDebitos'
 import DashboardResumo from './pages/DashboardResumo'
 import Login from './pages/Login'
+import AuthCallback from './pages/AuthCallback'
+import AuthError from './pages/AuthError'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
@@ -351,6 +353,8 @@ function App() {
         <AuthProvider>
           <Routes>
             <Route path="/login"        element={<Login />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/auth/error"   element={<AuthError />} />
             <Route path="/register"     element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-senha"  element={<ResetPassword />} />

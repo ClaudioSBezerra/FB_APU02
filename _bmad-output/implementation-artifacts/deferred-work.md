@@ -374,3 +374,33 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-erp-bridge-dsn-nao-sobrescrever.md`
   summary: Nenhum teste automatizado cobre `apply_fetched_credentials` (função nova, consolidando lógica antes duplicada).
   evidence: Consistente com a política já aceita no projeto — `erp-bridge-aws/` não tem framework de teste instalado. **Revisitar** se um framework de teste for adotado para esse diretório.
+
+## Deferred from: code review of spec-auth-sso-keycloak (2026-08-05)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: `JWKSClient.GetKey` refaz o fetch completo do JWKS (sob lock exclusivo) sempre que recebe um `kid` desconhecido — como isso roda ANTES da verificação de assinatura, qualquer requisição com um JWT mal-formado mas com header `kid` arbitrário força um GET síncrono ao Keycloak e serializa todos os logins SSO concorrentes atrás desse lock. Sem cache negativo por `kid`.
+  evidence: Comportamento herdado do template da skill (não modificado nesta integração) — mitigado parcialmente pelo rate limit adicionado ao endpoint (`SSOKeycloakRL`), mas o rate limit é por IP, não impede um único IP malicioso de já causar o efeito. **Revisitar**: adicionar cache negativo de `kid` com TTL curto, ou mover a checagem de assinatura pra antes de qualquer I/O de rede.
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: Uma resposta JWKS vazia/toda-inválida do Keycloak é tratada como refresh bem-sucedido — trava todo login SSO por até 1h (o TTL do cache) sem re-tentar antes disso.
+  evidence: Mesma origem (template da skill, não modificado). Cenário exigiria uma falha real do lado do Keycloak (não algo sob nosso controle). **Revisitar** se um incidente do Keycloak causar esse comportamento.
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: `IAM_BASE_URL` é reusado tanto pra montar a URL do JWKS quanto pra validar a claim `iss` — qualquer diferença de barra final/protocolo entre o valor configurado e o que o Keycloak realmente grava em `iss` (comum atrás de proxy reverso) faz todo login falhar com "invalid_token" genérico, sem log mostrando o `iss` esperado vs. recebido pra facilitar o diagnóstico.
+  evidence: Comportamento do template, não modificado. Só se manifesta com configuração de proxy divergente — não confirmado como problema real no ambiente do Marlos. **Revisitar** se o primeiro teste real falhar com "invalid_token" sem causa óbvia.
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: Nenhuma checagem adicional de autorização além de "linha existe em `users` e não está bloqueada/trial expirado" — uma conta `role=admin` ou de qualquer empresa pode logar via SSO sem nenhum controle extra específico de SSO.
+  evidence: Mesmo modelo de confiança já usado pelo login por senha (não é uma regressão desta spec) — `finishLogin` é compartilhada entre os dois fluxos de propósito. **Revisitar** se o Marlos pedir controle de acesso por grupo/role do Keycloak (`realm_access.roles`) no futuro — o middleware já tem um ponto de extensão comentado pra isso.
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: O botão de SSO na tela de login (controlado por env vars de build `VITE_IAM_*`) e a rota do backend (controlada por env vars de runtime `IAM_*`) podem ficar dessincronizados — nada detecta se um está ligado e o outro não.
+  evidence: São dois sistemas de configuração inerentemente distintos (build-time frontend vs runtime backend); detectar drift exigiria um endpoint de "capabilities" novo. **Revisitar** se acontecer um deploy com só um dos dois lados configurado.
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: `generateCodeChallenge` (`buildLoginUrl.ts`) usa `sha256(data).buffer` direto em vez de fatiar por `byteOffset`/`byteLength` do `Uint8Array` retornado — só é correto se `@noble/hashes` sempre devolver um buffer novo, offset zero, tamanho exato (não é um contrato documentado do tipo `Uint8Array`, é um detalhe de implementação da lib).
+  evidence: Código copiado sem alteração do template da skill, que afirma vir de "uma migração de produção" já validada. Não modificado nesta integração. **Revisitar** se uma atualização futura de `@noble/hashes` mudar esse comportamento interno (o PKCE challenge silenciosamente ficaria errado).
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: `finishLogin` compara `user.TrialEndsAt.Before(time.Now())` contra um valor que, quando `trial_ends_at` é NULL no banco, veio de `COALESCE(trial_ends_at, NOW())` calculado no MOMENTO DA QUERY — um instante antes do `time.Now()` do Go rodar depois — fazendo usuários com trial NULL sempre serem tratados como "trial expirado" (a menos que `role=admin`).
+  evidence: Bug pré-existente no `LoginHandler` original, copiado sem alteração nesta extração (não introduzido por esta spec). **Revisitar**: usar `sql.NullTime` e checar `.Valid` em vez de COALESCE com NOW(), ou comparar contra o mesmo timestamp da query.
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: O `INSERT INTO companies` do auto-provisioning (dentro de `finishLogin`) não tem `ON CONFLICT`, diferente do `INSERT INTO user_environments` logo acima (que tem `ON CONFLICT DO NOTHING`) — dois primeiros-logins concorrentes do mesmo usuário novo podem criar 2 empresas duplicadas.
+  evidence: Bug pré-existente no `LoginHandler` original, copiado sem alteração. **Revisitar** junto com um endurecimento geral de concorrência no fluxo de auto-provisioning.
+- source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
+  summary: `fetchUserByEmail` agora retorna `passwordHash` como valor de retorno público (antes era uma variável totalmente local dentro de `LoginHandler`) — `KeycloakSSOHandler` já descarta via `_`, mas a extração torna mais fácil um futuro chamador logar/serializar esse hash por engano.
+  evidence: Consequência da extração necessária pra evitar duplicar a query (ver spec). Risco teórico, não um bug atual. **Revisitar** se um novo consumidor de `fetchUserByEmail` for adicionado no futuro — considerar não retornar o hash, ou um tipo dedicado que não serializa por padrão.

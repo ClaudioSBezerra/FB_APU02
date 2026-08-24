@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"fb_apu02/handlers"
+	"fb_apu02/iam"
 	"fb_apu02/services"
 
 	"github.com/joho/godotenv"
@@ -308,6 +309,25 @@ func main() {
 	http.HandleFunc("/api/auth/change-password", withAuth(handlers.ChangePasswordHandler, ""))
 	http.HandleFunc("/api/auth/refresh", withDB(handlers.RefreshHandler))
 	http.HandleFunc("/api/auth/logout", withDB(handlers.LogoutHandler))
+
+	// SSO Keycloak (Ferreira Costa) — opção paralela ao login por senha, não o substitui.
+	// Só ativo se IAM_BASE_URL estiver configurado (sem isso, o botão de SSO no frontend
+	// não deve nem aparecer — ver VITE_IAM_BASE_URL).
+	if iamBaseURL := os.Getenv("IAM_BASE_URL"); iamBaseURL != "" {
+		var allowedClientIDs []string
+		for _, id := range strings.Split(os.Getenv("IAM_ALLOWED_CLIENT_IDS"), ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				allowedClientIDs = append(allowedClientIDs, id)
+			}
+		}
+		if len(allowedClientIDs) == 0 {
+			log.Printf("[Auth] AVISO: SSO Keycloak habilitado (IAM_BASE_URL=%s) mas IAM_ALLOWED_CLIENT_IDS está vazio — toda tentativa de login via Keycloak vai falhar (azp nunca bate com uma allowlist vazia)", iamBaseURL)
+		}
+		jwksClient := iam.NewJWKSClient(iamBaseURL, "", time.Hour, false)
+		iamAuthMW := iam.IAMAuthMiddleware(jwksClient, iamBaseURL, allowedClientIDs, nil, nil)
+		http.Handle("/api/auth/sso/keycloak", iamAuthMW(withDB(handlers.KeycloakSSOHandler)))
+		log.Printf("[Auth] SSO Keycloak habilitado (realm: %s)", iamBaseURL)
+	}
 	http.HandleFunc("/api/user/hierarchy", withAuth(handlers.GetUserHierarchyHandler, ""))
 	http.HandleFunc("/api/user/companies", withAuth(handlers.GetUserCompaniesHandler, ""))
 	http.HandleFunc("/api/user/preferred-company", withAuth(handlers.UpdatePreferredCompanyHandler, ""))

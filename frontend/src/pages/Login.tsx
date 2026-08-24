@@ -9,6 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
+import { buildLoginUrl, isIAMEnabled } from "@/lib/keycloak/buildLoginUrl";
 
 const FEATURES = [
   "Importação e análise de SPEDs EFD",
@@ -27,6 +28,14 @@ const Login = () => {
 
   const sessionExpired = localStorage.getItem('session_expired') === '1';
   if (sessionExpired) localStorage.removeItem('session_expired');
+
+  const handleSSOLogin = async () => {
+    try {
+      window.location.href = await buildLoginUrl();
+    } catch (error: any) {
+      toast.error(error.message || "SSO não configurado");
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,6 +201,19 @@ const Login = () => {
               <Button type="submit" className="w-full text-sm" disabled={isLoading}>
                 {isLoading ? "Entrando..." : "Entrar"}
               </Button>
+              {isIAMEnabled() && (
+                <>
+                  <div className="relative py-1">
+                    <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-white px-2 text-gray-400">ou</span>
+                    </div>
+                  </div>
+                  <Button type="button" variant="outline" className="w-full text-sm" onClick={handleSSOLogin}>
+                    Entrar com SSO Ferreira Costa
+                  </Button>
+                </>
+              )}
               <div className="text-center text-xs text-gray-500 mt-2">
                 Não tem uma conta?{" "}
                 <Link to="/register" className="text-primary hover:underline">
