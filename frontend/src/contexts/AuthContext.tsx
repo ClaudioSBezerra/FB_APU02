@@ -45,10 +45,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const companyIdRef = useRef<string | null>(null);
   // Guarda contra dupla-invocação de logout() (duplo clique, 2 componentes de navegação)
   const loggingOutRef = useRef(false);
+  // Dedup de refresh: garante no máximo 1 chamada a /api/auth/refresh em voo por aba
+  const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
   // Mantém refs atualizados com o estado mais recente
   useEffect(() => { tokenRef.current = token; }, [token]);
   useEffect(() => { companyIdRef.current = companyId; }, [companyId]);
+
+  // Renova o access token via refresh cookie httpOnly. Compartilhada (dedup) pelo
+  // interceptor de fetch e pela restauração de sessão no mount — nunca duas chamadas
+  // concorrentes a /api/auth/refresh na mesma aba.
+  const refreshAccessToken = (): Promise<string | null> => {
+    if (!refreshPromiseRef.current) {
+      refreshPromiseRef.current = (async () => {
+        // Logout em andamento vence qualquer refresh pendente — nunca reautentica
+        // silenciosamente uma sessão que o usuário acabou de encerrar.
+        if (loggingOutRef.current) return null;
+
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+        try {
+          const res = await fetch('/api/auth/refresh', { method: 'POST', signal: controller.signal });
+          if (!res.ok) return null;
+          const data = await res.json();
+          if (typeof data.token !== 'string' || !data.token) return null;
+          if (loggingOutRef.current) return null;
+          tokenRef.current = data.token;
+          sessionStorage.setItem('token', data.token);
+          setToken(data.token);
+          return data.token;
+        } catch {
+          return null;
+        } finally {
+          window.clearTimeout(timeoutId);
+          refreshPromiseRef.current = null;
+        }
+      })();
+    }
+    return refreshPromiseRef.current;
+  };
 
   // Interceptor global de fetch: injeta Authorization e X-Company-ID e trata 401 (token expirado)
   useEffect(() => {
@@ -67,7 +102,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const url = typeof input === 'string' ? input : (input as Request).url ?? '';
       const isApiCall  = url.includes('/api/');
       const isAuthCall = url.includes('/api/auth/');
-      if (response.status === 401 && isApiCall && !isAuthCall && tokenRef.current) {
+      if (response.status === 401 && isApiCall && !isAuthCall && tokenRef.current && !loggingOutRef.current) {
+        const newToken = await refreshAccessToken();
+        if (newToken && !loggingOutRef.current) {
+          const retryHeaders = new Headers(init.headers || {});
+          retryHeaders.set('Authorization', `Bearer ${newToken}`);
+          if (companyIdRef.current) {
+            retryHeaders.set('X-Company-ID', companyIdRef.current);
+          }
+          try {
+            return await originalFetch(input, { ...init, headers: retryHeaders });
+          } catch (retryErr) {
+            console.error('[Auth] Falha ao repetir requisição após refresh:', retryErr);
+          }
+        }
+        console.error('[Auth] Refresh de token falhou — sessão encerrada.');
         sessionStorage.clear();
         sessionStorage.setItem('session_expired', '1');
         window.location.href = '/login';
@@ -103,9 +152,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       fetch('/api/auth/me', {
         headers: { Authorization: `Bearer ${storedToken}` }
       })
-      .then(res => {
+      .then(async (res) => {
         if (res.ok) return res.json();
         if (res.status === 401) {
+          const newToken = await refreshAccessToken();
+          if (newToken) {
+            const retryRes = await fetch('/api/auth/me', {
+              headers: { Authorization: `Bearer ${newToken}` }
+            });
+            if (retryRes.ok) return retryRes.json();
+          }
           sessionStorage.clear();
           window.location.href = '/login';
           throw new Error('Session expired');
@@ -113,6 +169,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         throw new Error('Failed to refresh user data');
       })
       .then(userData => {
+        // Se um logout aconteceu enquanto o refresh estava em voo, não repopula a
+        // sessão que acabou de ser encerrada.
+        if (loggingOutRef.current) return;
         setUser(userData);
         sessionStorage.setItem('user', JSON.stringify(userData));
       })
