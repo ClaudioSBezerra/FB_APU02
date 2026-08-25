@@ -404,3 +404,12 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-auth-sso-keycloak.md`
   summary: `fetchUserByEmail` agora retorna `passwordHash` como valor de retorno público (antes era uma variável totalmente local dentro de `LoginHandler`) — `KeycloakSSOHandler` já descarta via `_`, mas a extração torna mais fácil um futuro chamador logar/serializar esse hash por engano.
   evidence: Consequência da extração necessária pra evitar duplicar a query (ver spec). Risco teórico, não um bug atual. **Revisitar** se um novo consumidor de `fetchUserByEmail` for adicionado no futuro — considerar não retornar o hash, ou um tipo dedicado que não serializa por padrão.
+
+## Deferred from: code review of spec-login-sso-auto-redirect (2026-08-25)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-login-sso-auto-redirect.md`
+  summary: O alerta "Sessão expirada" em `Login.tsx` provavelmente nunca funcionou — `AuthContext.tsx` grava a flag via `sessionStorage.setItem('session_expired', '1')`, mas `Login.tsx` lê via `localStorage.getItem('session_expired')`, backends de Web Storage diferentes.
+  evidence: Confirmado por 2 revisores adversariais independentes lendo os dois arquivos. Pré-existente, não introduzido por esta spec — só ficou mais visível porque no servidor da Ferreira Costa o auto-redirect agora torna esse branch ainda mais difícil de alcançar (usuário nunca vê o formulário pra começo de conversa). **Revisitar**: trocar um dos dois lados pra usar o mesmo storage.
+- source_spec: `_bmad-output/implementation-artifacts/spec-login-sso-auto-redirect.md`
+  summary: No servidor da Ferreira Costa, além do botão de logout (já aceito como fora de escopo pelo usuário), o interceptor de 401 e a restauração de sessão em `AuthContext.tsx` também navegam pra `/login` puro — ou seja, expiração de token EM PLENO USO (não só um clique deliberado de logout) também pode re-autenticar silenciosamente via sessão Keycloak/AD ainda ativa no navegador, sem o usuário ter feito nada.
+  evidence: Confirmado por revisão adversarial lendo `AuthContext.tsx` (handler de 401 e de restauração de sessão). Mesma classe de comportamento já aceita pelo usuário para o botão de logout, então não gerou um novo bloqueio nesta spec (o boundary já proíbe mexer em `AuthContext.tsx`) — mas vale uma solução definitiva. **Revisitar**: implementar `end_session` do Keycloak (logout único) resolveria esta e a questão do logout ao mesmo tempo, em vez de aceitar re-autenticação silenciosa como comportamento permanente.

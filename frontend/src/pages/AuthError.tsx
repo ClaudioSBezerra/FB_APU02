@@ -19,7 +19,7 @@ export default function AuthError() {
           <CardDescription className="text-sm">{message}</CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
-          <Link to="/login">
+          <Link to="/login?password">
             <Button variant="outline">Voltar para o login</Button>
           </Link>
         </CardContent>

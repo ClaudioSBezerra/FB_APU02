@@ -27,17 +27,54 @@ const Login = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
 
+  const hasPasswordFallback = new URLSearchParams(window.location.search).has("password");
+  const [autoRedirecting, setAutoRedirecting] = useState(!hasPasswordFallback);
+
   const sessionExpired = localStorage.getItem('session_expired') === '1';
   if (sessionExpired) localStorage.removeItem('session_expired');
 
   useEffect(() => {
     let mounted = true;
-    fetchIAMConfig().then((config) => {
-      if (mounted) setSsoEnabled(config.enabled);
+    let settled = false;
+
+    const timeoutId = window.setTimeout(() => {
+      if (!settled && mounted) {
+        settled = true;
+        setAutoRedirecting(false);
+      }
+    }, 5000);
+
+    fetchIAMConfig().then(async (config) => {
+      if (!mounted) return;
+      setSsoEnabled(config.enabled);
+
+      // O timeout já pode ter revelado o formulário (settled=true) enquanto esperávamos
+      // a config chegar — nesse caso não force mais um redirect por cima do usuário.
+      if (settled) return;
+
+      if (hasPasswordFallback || !config.enabled) {
+        settled = true;
+        setAutoRedirecting(false);
+        return;
+      }
+
+      try {
+        const url = await buildLoginUrl();
+        if (settled) return;
+        settled = true;
+        if (mounted) window.location.href = url;
+      } catch (error) {
+        console.error("[Login] Falha ao montar URL do Keycloak:", error);
+        settled = true;
+        if (mounted) setAutoRedirecting(false);
+      }
     });
+
     return () => {
       mounted = false;
+      window.clearTimeout(timeoutId);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSSOLogin = async () => {
@@ -77,6 +114,19 @@ const Login = () => {
       setIsLoading(false);
     }
   };
+
+  if (autoRedirecting) {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center gap-3 bg-gray-100"
+        role="status"
+        aria-live="polite"
+      >
+        <div className="h-8 w-8 rounded-full border-2 border-gray-300 border-t-gray-600 animate-spin" />
+        <p className="text-sm text-gray-500">Redirecionando para login corporativo...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex">
