@@ -207,9 +207,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       window.clearTimeout(timeoutId);
 
       if (config.enabled && config.base_url && config.client_id) {
+        // URI exata cadastrada pelo time do Marlos em "Valid Post Logout Redirect URIs"
+        // no client fb-apu02 do Keycloak — sem query string. O loop de auto-redirect que
+        // motivaria um "?password" já é evitado pela flag SESSION_KEY_LOGOUT_SUPPRESS_REDIRECT
+        // acima, que sobrevive à ida-e-volta pelo Keycloak (outro domínio) no sessionStorage
+        // desta origem.
         const params = new URLSearchParams({
           client_id: config.client_id,
-          post_logout_redirect_uri: `${window.location.origin}/login?password`,
+          post_logout_redirect_uri: `${window.location.origin}/login`,
         });
         window.location.href = `${config.base_url}/protocol/openid-connect/logout?${params.toString()}`;
       } else {
