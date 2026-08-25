@@ -1,4 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import {
+  SESSION_KEY_AUTH_VIA_SSO,
+  SESSION_KEY_LOGOUT_SUPPRESS_REDIRECT,
+  fetchIAMConfig,
+} from '@/lib/keycloak/buildLoginUrl';
 
 interface User {
   id: string;
@@ -17,7 +22,7 @@ interface AuthContextType {
   companyId: string | null;
   cnpj: string | null;
   loading: boolean;
-  login: (data: any) => void;
+  login: (data: any, opts?: { viaSSO?: boolean }) => void;
   logout: () => void;
   switchCompany: (id: string, name: string, cnpj: string) => void;
   isAuthenticated: boolean;
@@ -38,6 +43,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // Refs para o interceptor de fetch (sem stale closure)
   const tokenRef = useRef<string | null>(null);
   const companyIdRef = useRef<string | null>(null);
+  // Guarda contra dupla-invocação de logout() (duplo clique, 2 componentes de navegação)
+  const loggingOutRef = useRef(false);
 
   // Mantém refs atualizados com o estado mais recente
   useEffect(() => { tokenRef.current = token; }, [token]);
@@ -116,7 +123,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
-  const login = (data: any) => {
+  const login = (data: any, opts?: { viaSSO?: boolean }) => {
     setToken(data.token);
     setUser(data.user);
     setEnvironment(data.environment_name);
@@ -151,10 +158,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     sessionStorage.setItem('company', companyName || '');
     sessionStorage.setItem('companyId', companyIdVal || '');
     sessionStorage.setItem('cnpj', cnpjVal || '');
+    // Sempre reescrita — nunca deixa resíduo de uma sessão anterior (ex: aba duplicada
+    // com sessão SSO que depois loga por senha) marcando um logout futuro como SSO.
+    sessionStorage.setItem(SESSION_KEY_AUTH_VIA_SSO, opts?.viaSSO ? '1' : '0');
   };
 
   const logout = () => {
-    // Limpa dados de sessão; preferências de empresa (pref_company_*) ficam intactas no localStorage
+    // Evita que uma segunda chamada concorrente (duplo clique, 2 componentes de
+    // navegação) vença a navegação já em curso da primeira.
+    if (loggingOutRef.current) return;
+    loggingOutRef.current = true;
+
+    // Captura a marca de origem SSO antes do .clear() — decide o destino do redirect.
+    const wasSSO = sessionStorage.getItem(SESSION_KEY_AUTH_VIA_SSO) === '1';
+
+    // Limpeza local sempre acontece de imediato, antes de qualquer chamada de rede ao
+    // Keycloak — o app nunca fica "preso" esperando o IdP responder. Preferências de
+    // empresa (pref_company_*) ficam intactas no localStorage.
     sessionStorage.clear();
 
     setUser(null);
@@ -164,7 +184,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setCompany(null);
     setCompanyId(null);
     setCnpj(null);
-    window.location.href = '/login';
+
+    if (!wasSSO) {
+      window.location.href = '/login';
+      return;
+    }
+
+    // Sessão via SSO: suprime o auto-redirect de login que Login.tsx dispararia caso
+    // monte (via ProtectedRoute) antes de fetchIAMConfig() resolver.
+    sessionStorage.setItem(SESSION_KEY_LOGOUT_SUPPRESS_REDIRECT, '1');
+
+    let settled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      window.location.href = '/login';
+    }, 5000);
+
+    fetchIAMConfig().then((config) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+
+      if (config.enabled && config.base_url && config.client_id) {
+        const params = new URLSearchParams({
+          client_id: config.client_id,
+          post_logout_redirect_uri: `${window.location.origin}/login?password`,
+        });
+        window.location.href = `${config.base_url}/protocol/openid-connect/logout?${params.toString()}`;
+      } else {
+        window.location.href = '/login';
+      }
+    }).catch(() => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      window.location.href = '/login';
+    });
   };
 
   const switchCompany = (id: string, name: string, newCnpj: string) => {

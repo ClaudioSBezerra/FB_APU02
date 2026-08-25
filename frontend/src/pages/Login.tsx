@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
-import { buildLoginUrl, fetchIAMConfig } from "@/lib/keycloak/buildLoginUrl";
+import { buildLoginUrl, fetchIAMConfig, SESSION_KEY_LOGOUT_SUPPRESS_REDIRECT } from "@/lib/keycloak/buildLoginUrl";
 
 const FEATURES = [
   "Importação e análise de SPEDs EFD",
@@ -33,7 +33,24 @@ const Login = () => {
   const sessionExpired = localStorage.getItem('session_expired') === '1';
   if (sessionExpired) localStorage.removeItem('session_expired');
 
+  // Guarda a leitura destrutiva da flag de supressão contra o duplo-invoke de efeitos do
+  // React.StrictMode em dev (mount→cleanup→mount): sem isso, a 1ª invocação (descartada)
+  // consumiria a flag antes da 2ª (a que vale) rodar, reabrindo a race com o Keycloak.
+  // Mesmo padrão de `handled` ref já usado em AuthCallback.tsx.
+  const suppressRedirectRef = useRef<boolean | null>(null);
+
   useEffect(() => {
+    // Leitura única: se logout() acabou de suprimir o auto-redirect (sessão SSO ainda
+    // aguardando fetchIAMConfig() resolver quando o ProtectedRoute montou esta tela via
+    // navegação client-side), trata como hasPasswordFallback nesta montagem — fecha a
+    // race com o redirect pro Keycloak (logout) que logout() está prestes a disparar.
+    if (suppressRedirectRef.current === null) {
+      const flag = sessionStorage.getItem(SESSION_KEY_LOGOUT_SUPPRESS_REDIRECT) === '1';
+      if (flag) sessionStorage.removeItem(SESSION_KEY_LOGOUT_SUPPRESS_REDIRECT);
+      suppressRedirectRef.current = flag;
+    }
+    const skipAutoRedirect = hasPasswordFallback || suppressRedirectRef.current;
+
     let mounted = true;
     let settled = false;
 
@@ -52,7 +69,7 @@ const Login = () => {
       // a config chegar — nesse caso não force mais um redirect por cima do usuário.
       if (settled) return;
 
-      if (hasPasswordFallback || !config.enabled) {
+      if (skipAutoRedirect || !config.enabled) {
         settled = true;
         setAutoRedirecting(false);
         return;

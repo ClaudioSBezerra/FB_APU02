@@ -20,6 +20,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 
 export const SESSION_KEY_VERIFIER = 'iam_pkce_verifier';
 export const SESSION_KEY_STATE = 'iam_oauth_state';
+export const SESSION_KEY_AUTH_VIA_SSO = 'auth_via_sso';
+export const SESSION_KEY_LOGOUT_SUPPRESS_REDIRECT = 'sso_logout_suppress_redirect';
 
 export interface IAMConfig {
   enabled: boolean;

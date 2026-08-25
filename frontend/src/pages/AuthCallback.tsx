@@ -18,7 +18,7 @@ export default function AuthCallback() {
     const run = async () => {
       try {
         const data = await handleCallback(new URLSearchParams(window.location.search));
-        login(data);
+        login(data, { viaSSO: true });
         navigate("/rfb/gestao-creditos", { replace: true });
       } catch (err) {
         const message = err instanceof CallbackError ? err.message : "Erro ao concluir login via Keycloak.";
