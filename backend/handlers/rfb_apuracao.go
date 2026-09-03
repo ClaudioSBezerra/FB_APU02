@@ -583,6 +583,18 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
+		// Hipótese principal (log de acesso do nginx: HEAD da RFB no mesmo segundo em
+		// que aceita nossa solicitação, em 5 dias diferentes, sem nenhum POST real
+		// chegar em nenhum deles): a RFB usa esse HEAD pra validar a URL do webhook
+		// antes de agendar a entrega real, e descartava a entrega ao receber 405 daqui.
+		// Correlação temporal forte, mas não confirmada pela RFB — se o POST real
+		// continuar não chegando após esta mudança, revisitar essa hipótese.
+		if r.Method == http.MethodHead {
+			log.Printf("[RFB Webhook] HEAD recebido (provável checagem de vivacidade da RFB, não é o callback real)")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return

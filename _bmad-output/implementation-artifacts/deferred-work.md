@@ -446,3 +446,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-auth-token-refresh.md`
   summary: O efeito de restauração de sessão em `AuthContext.tsx` (mount, `[]` deps) não tem guarda contra o duplo-invoke de efeitos do `React.StrictMode` em dev — com token expirado no mount, isso agora dispara 2 chamadas a `/api/auth/me`, cada uma com seu próprio retry pós-refresh (o dedup do refresh em si funciona corretamente, só 1 `POST /api/auth/refresh` é observado).
   evidence: Achados dos 2 revisores. Pré-existente (o efeito já duplicava a chamada a `/api/auth/me` antes desta spec); esta mudança só amplia com chamadas de retry extras. Só ocorre em dev (`React.StrictMode` não duplica efeitos em build de produção) e é inofensivo (ambas as invocações convergem pro mesmo resultado correto). **Revisitar** apenas se comportamento incorreto (não só chamadas redundantes) for observado.
+
+## Deferred from: code review of fix HEAD RFBWebhookHandler (2026-09-03)
+
+- source_spec: `backend/handlers/rfb_apuracao.go`
+  summary: Não existe nenhum alerta/monitoramento pra "solicitação de débito RFB sem webhook recebido depois de N horas" — o problema do HEAD/405 (8 tentativas diárias falhando, sempre com o mesmo padrão) só foi descoberto porque o usuário percebeu manualmente e pediu investigação, uma semana depois do início do problema.
+  evidence: Achado do Blind Hunter, correto — se a hipótese do HEAD estiver errada ou o comportamento da RFB mudar de novo no futuro, o ciclo de "descobrir que parou de funcionar" pode levar dias de novo sem um alerta automático. **Revisitar** se um mecanismo de alerta (ex: e-mail/log destacado quando `AbortStuckRFBRequests` aborta uma solicitação) virar prioridade.
+- source_spec: `backend/handlers/rfb_apuracao.go`
+  summary: `/api/rfb/webhook` continua sem nenhum rate limit ou validação de origem (IP allowlist) pra qualquer método, incluindo o novo branch de `HEAD` — é um endpoint público (sem JWT, por natureza) que agora responde grátis (sem ler corpo/calcular HMAC) a qualquer HEAD de qualquer origem na internet.
+  evidence: Achado do Blind Hunter. Pré-existente — o `POST` já não tinha rate limit nem allowlist antes desta mudança (e a validação de assinatura HMAC já está desabilitada por falta de `RFB_WEBHOOK_SECRET`, achado de sessão anterior). O `HEAD` novo só barateia um pouco mais uma superfície que já era aberta. **Revisitar** junto com a configuração de `RFB_WEBHOOK_SECRET` (achado já registrado antes) se o endpoint virar alvo de abuso real.
+- source_spec: `backend/handlers/rfb_apuracao.go`
+  summary: Nada no código correlaciona o `HEAD` recebido com a solicitação (`tiquete`/linha de `rfb_requests`) que o motivou — a evidência de correlação temporal ("mesmo segundo") veio só de comparar logs manualmente, não é rastreável automaticamente.
+  evidence: Achado do Blind Hunter. Se o fix desta sessão (aceitar HEAD) não resolver o problema (POST real continuar não chegando), essa correlação mais rígida ajudaria a confirmar/descartar a hipótese sem precisar repetir a investigação manual de logs. **Revisitar** se o POST real ainda não chegar depois do próximo ciclo de solicitações.
