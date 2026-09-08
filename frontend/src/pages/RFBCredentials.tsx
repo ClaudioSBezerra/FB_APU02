@@ -4,7 +4,29 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Globe, Save, Trash2, Pencil, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Globe, Save, Trash2, Pencil, CheckCircle2, XCircle, Clock, AlertTriangle } from 'lucide-react';
+
+// Aviso exibido quando o ambiente da credencial é "Produção" (rtc). Enquanto durar o
+// Ambiente de Produção Beta/Restrita da RFB, a Apuração Assistida da CBS só existe lá:
+// em Produção a Receita aceita a solicitação e devolve tíquete, mas nunca retorna os
+// dados, e a captura falha sem erro visível.
+function AvisoAmbienteProducao() {
+  return (
+    <div
+      role="alert"
+      className="mt-3 flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+    >
+      <AlertTriangle aria-hidden="true" className="h-4 w-4 shrink-0 mt-0.5" />
+      <p className="text-xs leading-relaxed">
+        <strong>Atenção:</strong> a Apuração Assistida da CBS roda no ambiente de{' '}
+        <strong>Produção Restrita</strong> enquanto durar o Ambiente de Produção Beta da Receita.
+        Em Produção, a solicitação é aceita e o tíquete é gerado normalmente, mas os dados nunca
+        retornam — a captura falha silenciosamente. Selecione <strong>Produção Restrita</strong>{' '}
+        (credenciais geradas via <code className="bg-muted px-1 rounded">credencial-api-beta</code>).
+      </p>
+    </div>
+  );
+}
 
 interface RFBCredential {
   id: string;
@@ -41,7 +63,11 @@ export default function RFBCredentials() {
     cnpj_matriz: '',
     client_id: '',
     client_secret: '',
-    ambiente: 'producao',
+    // Este default só vale para credencial NOVA (sem registro salvo) — ao editar/carregar
+    // uma existente, o valor vem do banco. Era 'producao', o que tornava um cadastro do
+    // zero (ex: excluir + recadastrar ao renovar) o caminho mais fácil para o ambiente
+    // errado — falha silenciosa que custou ~2 meses de captura de débitos parada.
+    ambiente: 'producao_restrita',
   });
 
   const fetchCredential = async () => {
@@ -286,6 +312,7 @@ export default function RFBCredentials() {
                     <span className="text-xs text-muted-foreground">(acesso irrestrito — <code className="bg-muted px-1 rounded">rtc</code>)</span>
                   </label>
                 </div>
+                {formData.ambiente === 'producao' && <AvisoAmbienteProducao />}
               </div>
               <div className="flex gap-2 pt-2">
                 <Button type="submit" disabled={saving}>
@@ -329,6 +356,9 @@ export default function RFBCredentials() {
                   </p>
                 </div>
               </div>
+              {/* Também na visualização: quem só abre a tela (sem editar) precisa ver o
+                  alerta — foi exatamente esse o cenário que passou meses despercebido. */}
+              {credential && credential.ambiente !== 'producao_restrita' && <AvisoAmbienteProducao />}
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" onClick={handleEdit}>
                   <Pencil className="mr-2 h-4 w-4" />

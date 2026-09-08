@@ -458,3 +458,18 @@
 - source_spec: `backend/handlers/rfb_apuracao.go`
   summary: Nada no código correlaciona o `HEAD` recebido com a solicitação (`tiquete`/linha de `rfb_requests`) que o motivou — a evidência de correlação temporal ("mesmo segundo") veio só de comparar logs manualmente, não é rastreável automaticamente.
   evidence: Achado do Blind Hunter. Se o fix desta sessão (aceitar HEAD) não resolver o problema (POST real continuar não chegando), essa correlação mais rígida ajudaria a confirmar/descartar a hipótese sem precisar repetir a investigação manual de logs. **Revisitar** se o POST real ainda não chegar depois do próximo ciclo de solicitações.
+
+## Deferred from: code review de aviso/default de ambiente em RFBCredentials (2026-09-08)
+
+- source_spec: `frontend/src/pages/RFBCredentials.tsx`
+  summary: **AÇÃO OPERACIONAL PENDENTE** — nenhuma auditoria foi feita nas credenciais já gravadas para saber quantos tenants estão hoje com `ambiente='producao'` (o valor que quebra a captura silenciosamente). A correção desta sessão só protege cadastros futuros; registros existentes de OUTRAS empresas podem estar quebrados do mesmo jeito e ninguém saberia.
+  evidence: Achado do Blind Hunter, correto e relevante num sistema multi-tenant. Consulta para rodar: `SELECT company_id, cnpj_matriz, ambiente FROM rfb_credentials WHERE ambiente <> 'producao_restrita';`. **Revisitar assim que houver acesso ao banco de produção** (na sessão em que isso foi levantado não havia SSH/VPN disponível).
+- source_spec: `frontend/src/pages/RFBCredentials.tsx`
+  summary: O backend (`backend/handlers/rfb_credentials.go`, ~linha 119) força `ambiente = "producao"` para qualquer valor diferente de `"producao_restrita"`, e a migration `062_rfb_credentials_ambiente.sql` usa `DEFAULT 'producao'` — ou seja, a regra de negócio "o padrão seguro é produção restrita" hoje só existe na camada de apresentação (React). Qualquer POST sem o campo (script, curl, refactor do form) grava o ambiente que quebra.
+  evidence: Achado do Blind Hunter. A correção desta sessão foi deliberadamente só no frontend (escopo pedido pelo usuário). **Revisitar** se for desejável mover o default seguro para o backend/migration — decisão de produto, já que em 2027+ "produção" pode passar a ser o correto.
+- source_spec: `frontend/src/pages/RFBCredentials.tsx`
+  summary: `fetchCredential` não trata resposta não-ok: em 401/500/troca de empresa, a tela renderiza "Não conectado" com campos vazios embora a credencial exista no servidor — e dali um "Editar" + salvar sobrescreve a credencial boa (o botão "Excluir" também fica ativo nesse estado).
+  evidence: Achado do Blind Hunter — é um caminho real de sobrescrita silenciosa, independente do campo ambiente. **Revisitar** junto com um tratamento de erro adequado nessa tela.
+- source_spec: `frontend/src/pages/RFBCredentials.tsx`
+  summary: `ambiente` é `string` na interface e a literal `'producao_restrita'` está repetida em ~6 pontos do arquivo (mais o backend), sem constante compartilhada nem union type — um typo compila, passa no `tsc --strict` e reproduz o incidente, porque o backend converte valor desconhecido em `producao`.
+  evidence: Achado do Blind Hunter. **Revisitar** com `ambiente: 'producao' | 'producao_restrita'` na interface + constante compartilhada, se/quando esse arquivo for mexido de novo.
