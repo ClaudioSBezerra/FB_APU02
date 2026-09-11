@@ -106,13 +106,13 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := services.SolicitarApuracaoParaEmpresa(db, companyID); err != nil {
+		if err := services.SolicitarApuracaoParaEmpresa(db, companyID, services.LimiteDebitosDiaRFB); err != nil {
 			msg := err.Error()
 			switch {
 			case strings.Contains(msg, "credenciais RFB não encontradas"):
 				http.Error(w, "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.", http.StatusBadRequest)
-			case strings.Contains(msg, "slot automático já utilizado"):
-				http.Error(w, "Limite diário atingido (máximo 2 solicitações por dia)", http.StatusTooManyRequests)
+			case strings.HasPrefix(msg, "DAILY_LIMIT"):
+				http.Error(w, fmt.Sprintf("Limite diário atingido (máximo %d solicitações de débitos por dia)", services.LimiteDebitosDiaRFB), http.StatusTooManyRequests)
 			case strings.Contains(msg, "RATE_LIMIT"):
 				http.Error(w, msg, http.StatusTooManyRequests)
 			case strings.Contains(msg, "TOKEN_ERROR"):
@@ -445,7 +445,7 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 		if tipo == "credito" {
 			solicitarErr = services.SolicitarCreditoParaEmpresa(db, companyID)
 		} else {
-			solicitarErr = services.SolicitarApuracaoParaEmpresa(db, companyID)
+			solicitarErr = services.SolicitarApuracaoParaEmpresa(db, companyID, services.LimiteDebitosDiaRFB)
 		}
 		if solicitarErr != nil {
 			msg := solicitarErr.Error()
@@ -453,12 +453,11 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			case strings.Contains(msg, "credenciais RFB não encontradas"):
 				// Falha antes de qualquer chamada à RFB — nenhuma linha nova foi criada.
 				fail(http.StatusBadRequest, "NO_CREDENTIALS", "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.")
-			case strings.Contains(msg, "slot automático já utilizado"):
-				// Limite interno de SolicitarApuracaoParaEmpresa (1 solicitação de débito/dia,
-				// distinto do limite de 2/dia checado acima) — mensagem própria, não reusar
-				// "máximo 2" aqui (achado de revisão: mensagem anterior citava o limite errado).
-				// Também falha antes de qualquer INSERT — nenhuma linha nova foi criada.
-				fail(http.StatusTooManyRequests, "DAILY_LIMIT", "Limite diário de apuração de débitos já utilizado hoje. Tente novamente amanhã.")
+			case strings.HasPrefix(msg, "DAILY_LIMIT"):
+				// Teto diário rechecado dentro de SolicitarApuracaoParaEmpresa (mesmo limite de
+				// 2/dia acima; só dispara numa corrida entre duas solicitações simultâneas).
+				// Falha antes de qualquer INSERT — nenhuma linha nova foi criada.
+				fail(http.StatusTooManyRequests, "DAILY_LIMIT", fmt.Sprintf("Limite diário atingido (máximo %d solicitações de débitos por dia)", services.LimiteDebitosDiaRFB))
 			case strings.Contains(msg, "RATE_LIMIT"):
 				// service já fez INSERT de uma linha nova com este erro — descarta a antiga.
 				discard(http.StatusTooManyRequests, msg)

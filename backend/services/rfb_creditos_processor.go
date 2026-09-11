@@ -53,27 +53,29 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 	log.Printf("[RFB Creditos] Iniciando download | request: %s", requestID)
 	log.Printf("[RFB Creditos] ============================================================")
 
-	var companyID, tiquete, cnpjBase string
+	var companyID, tiquete, cnpjBase, ambiente string
 	var tiqueteDownload *string
 	err := db.QueryRow(`
-		SELECT r.company_id, r.tiquete, r.cnpj_base, r.tiquete_download
+		SELECT r.company_id, r.tiquete, r.cnpj_base, r.tiquete_download, COALESCE(r.ambiente, 'producao')
 		FROM rfb_requests r WHERE r.id = $1
-	`, requestID).Scan(&companyID, &tiquete, &cnpjBase, &tiqueteDownload)
+	`, requestID).Scan(&companyID, &tiquete, &cnpjBase, &tiqueteDownload, &ambiente)
 	if err != nil {
 		log.Printf("[RFB Creditos] ERRO ao buscar request: %v", err)
 		return fmt.Errorf("failed to fetch request: %w", err)
 	}
 
-	var clientID, clientSecret, ambiente string
+	var clientID, clientSecret string
 	err = db.QueryRow(`
-		SELECT client_id, client_secret, COALESCE(ambiente, 'producao') FROM rfb_credentials
+		SELECT client_id, client_secret FROM rfb_credentials
 		WHERE company_id = $1 AND ativo = true
-	`, companyID).Scan(&clientID, &clientSecret, &ambiente)
+	`, companyID).Scan(&clientID, &clientSecret)
 	if err != nil {
 		updateRequestError(db, requestID, "CRED_NOT_FOUND", "Credenciais RFB não encontradas ou inativas")
 		return fmt.Errorf("failed to fetch credentials: %w", err)
 	}
 
+	// Ambiente da SOLICITAÇÃO, não do cadastro da credencial (ver ProcessarDownloadRFB).
+	log.Printf("[RFB Creditos] Request %s — ambiente da solicitação: %s", requestID, ambiente)
 	rfbClient.SetAmbiente(ambiente)
 
 	tiqueteParaDownload := tiquete

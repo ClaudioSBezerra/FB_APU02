@@ -58,9 +58,22 @@ func applyTokenRateLimit(cnpjBase string, err error) {
 	}
 }
 
+// Limites diários de solicitações de débito CBS por empresa. A RFB aceita no máximo
+// 2 chamadas/dia no endpoint de apuração; o agendamento usa só 1 para sempre sobrar
+// um slot para a chamada manual. Antes o limite de 1 ficava fixo dentro de
+// SolicitarApuracaoParaEmpresa e bloqueava também o botão manual — depois da coleta
+// automática, a 2ª chamada do dia nunca era possível.
+const (
+	LimiteDebitosDiaAgendamento = 1
+	LimiteDebitosDiaRFB         = 2
+)
+
 // SolicitarApuracaoParaEmpresa executa uma solicitação de apuração CBS para a empresa.
-// Usada pelo scheduler (limite: 1/dia, preserva 1 slot manual) e pelo handler HTTP.
-func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
+// limiteDiario é o total de solicitações de débito já feitas hoje (scheduler + manual,
+// incluindo erros) a partir do qual a chamada é recusada com erro DAILY_LIMIT, sem
+// chamar a RFB: o scheduler passa LimiteDebitosDiaAgendamento, os handlers manuais
+// passam LimiteDebitosDiaRFB.
+func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int) error {
 	// 1. Carregar credenciais ativas
 	var clientID, clientSecret, cnpjMatriz, ambiente string
 	err := db.QueryRow(`
@@ -89,7 +102,7 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 			cnpjBase, until.In(brtLoc).Format("02/01 15:04"))
 	}
 
-	// 4. Verificar slot do dia para débitos (max 1 automático, deixa 1 slot para manual)
+	// 4. Verificar limite diário de débitos (ver LimiteDebitosDia*)
 	// status != 'pending' exclui a própria linha que o Ressolicitar está reenviando agora
 	// (claim atômico deixa a linha em 'pending' sem alterar created_at) — sem isso, uma linha
 	// sendo re-enviada hoje sempre se autocontava e bloqueava seu próprio reenvio (achado de revisão).
@@ -101,8 +114,8 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 		  AND status != 'pending'
 		  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 	`, companyID).Scan(&todayCount)
-	if todayCount >= 1 {
-		return fmt.Errorf("slot automático já utilizado hoje para company_id=%s (count=%d)", companyID, todayCount)
+	if todayCount >= limiteDiario {
+		return fmt.Errorf("DAILY_LIMIT: %d de %d solicitação(ões) de débito já feitas hoje para company_id=%s", todayCount, limiteDiario, companyID)
 	}
 
 	// 5. Obter token OAuth2
@@ -116,9 +129,9 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message)
-			VALUES ($1, $2, 'error', $3, $4)
-		`, companyID, cnpjBase, errorCode, err.Error())
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message, ambiente)
+			VALUES ($1, $2, 'error', $3, $4, $5)
+		`, companyID, cnpjBase, errorCode, err.Error(), ambiente)
 		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
@@ -131,19 +144,19 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string) error {
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message)
-			VALUES ($1, $2, 'error', $3, $4)
-		`, companyID, cnpjBase, errorCode, errMsg)
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message, ambiente)
+			VALUES ($1, $2, 'error', $3, $4, $5)
+		`, companyID, cnpjBase, errorCode, errMsg, ambiente)
 		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
 	// 7. Persistir registro da solicitação
 	var requestID string
 	err = db.QueryRow(`
-		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status)
-		VALUES ($1, $2, $3, 'requested')
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, ambiente)
+		VALUES ($1, $2, $3, 'requested', $4)
 		RETURNING id
-	`, companyID, cnpjBase, tiquete).Scan(&requestID)
+	`, companyID, cnpjBase, tiquete, ambiente).Scan(&requestID)
 	if err != nil {
 		return fmt.Errorf("erro ao salvar solicitação: %w", err)
 	}
@@ -201,9 +214,9 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message)
-			VALUES ($1, $2, 'error', 'credito', $3, $4)
-		`, companyID, cnpjBase, errorCode, err.Error())
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message, ambiente)
+			VALUES ($1, $2, 'error', 'credito', $3, $4, $5)
+		`, companyID, cnpjBase, errorCode, err.Error(), ambiente)
 		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
@@ -216,17 +229,17 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 			// Gateway 404: endpoint ainda não liberado pela RFB para este ambiente — condição
 			// conhecida e temporária, não uma falha real. Persiste a linha (antes: "skip DB
 			// record") para a UI poder exibi-la como Alerta em vez de silêncio total; sem risco
-			// de acúmulo diário, já que esta função só é chamada 1x/dia (via goroutine de
-			// SolicitarApuracaoParaEmpresa, já gated a 1 solicitação de débito por dia).
+			// de acúmulo: a goroutine de SolicitarApuracaoParaEmpresa roda no máximo 2x/dia (teto
+			// LimiteDebitosDiaRFB), e o reenvio manual de créditos também é limitado a 2/dia.
 			log.Printf("[RFB Creditos] Endpoint /creditos-cbs/v1/ indisponível no gateway (HTTP 404) — aguardando liberação pela RFB")
 			errorCode = "ENDPOINT_INDISPONIVEL"
 		case strings.HasPrefix(errMsg, "RATE_LIMIT_429|"):
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message)
-			VALUES ($1, $2, 'error', 'credito', $3, $4)
-		`, companyID, cnpjBase, errorCode, errMsg)
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message, ambiente)
+			VALUES ($1, $2, 'error', 'credito', $3, $4, $5)
+		`, companyID, cnpjBase, errorCode, errMsg, ambiente)
 		if errorCode == "ENDPOINT_INDISPONIVEL" {
 			return fmt.Errorf("endpoint não disponível: %w", err)
 		}
@@ -235,10 +248,10 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 
 	var requestID string
 	err = db.QueryRow(`
-		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo)
-		VALUES ($1, $2, $3, 'requested', 'credito')
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo, ambiente)
+		VALUES ($1, $2, $3, 'requested', 'credito', $4)
 		RETURNING id
-	`, companyID, cnpjBase, tiquete).Scan(&requestID)
+	`, companyID, cnpjBase, tiquete, ambiente).Scan(&requestID)
 	if err != nil {
 		return fmt.Errorf("erro ao salvar solicitação de créditos: %w", err)
 	}
@@ -314,7 +327,7 @@ func StartRFBScheduler(dbFn func() *sql.DB) {
 		for _, companyID := range companies {
 			cid := companyID
 			go func() {
-				if runErr := SolicitarApuracaoParaEmpresa(db, cid); runErr != nil {
+				if runErr := SolicitarApuracaoParaEmpresa(db, cid, LimiteDebitosDiaAgendamento); runErr != nil {
 					log.Printf("[RFB Scheduler] [ERRO] companyID=%s: %v", cid, runErr)
 				} else {
 					log.Printf("[RFB Scheduler] [OK] companyID=%s — solicitação concluída com sucesso", cid)

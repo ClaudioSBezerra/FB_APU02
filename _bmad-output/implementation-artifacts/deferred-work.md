@@ -473,3 +473,15 @@
 - source_spec: `frontend/src/pages/RFBCredentials.tsx`
   summary: `ambiente` é `string` na interface e a literal `'producao_restrita'` está repetida em ~6 pontos do arquivo (mais o backend), sem constante compartilhada nem union type — um typo compila, passa no `tsc --strict` e reproduz o incidente, porque o backend converte valor desconhecido em `producao`.
   evidence: Achado do Blind Hunter. **Revisitar** com `ambiente: 'producao' | 'producao_restrita'` na interface + constante compartilhada, se/quando esse arquivo for mexido de novo.
+
+## Deferred from: code review de limite manual + ambiente por solicitação (2026-09-11)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-5-rfb-limite-manual-ambiente-solicitacao.md`
+  summary: A cota diária da RFB é contada por LINHAS de `rfb_requests`, não por chamadas — e o `RessolicitarHandler`, ao dar certo, apaga a linha antiga (que representava uma chamada real à RFB). Sequência "Ressolicitar a linha de débito de hoje → Solicitar" pode fazer uma 3ª chamada no dia.
+  evidence: Achado da revisão (Edge Case). A subcontagem é pré-existente (a exclusão de `status='pending'` + o DELETE no sucesso já existiam), mas com o limite fixo de 1 ela ficava escondida; com o teto manual de 2 fica alcançável pelo botão "Solicitar". Pior caso: a RFB responde 429, que o código já trata (linha RATE_LIMIT + bloqueio até o Retry-After — atenção: pode bloquear a coleta agendada seguinte se o Retry-After passar das 06:00). Correção de verdade exige contar chamadas (coluna ou tabela nova → migration, Ask First). **Até lá: evitar Ressolicitar + Solicitar no mesmo dia.**
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-5-rfb-limite-manual-ambiente-solicitacao.md`
+  summary: `SolicitarCreditoParaEmpresa` não tem limite diário próprio — é chamada em goroutine a cada débito bem-sucedido (agora até 2x/dia) e pelos handlers manuais de créditos (que checam 2/dia contando só linhas). Solicitações manuais de crédito antes dos débitos do dia podem somar 3–4 chamadas de créditos.
+  evidence: Achado da revisão. Pré-existente (antes: 1 automática + 2 manuais). Irrelevante enquanto `/creditos-cbs/v1/` retornar 404 (rota não liberada pela RFB); **revisitar quando a RFB liberar créditos**.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-5-rfb-limite-manual-ambiente-solicitacao.md`
+  summary: **AÇÃO OPERACIONAL** — as solicitações feitas em `prr-rtc` entre 08/09 e 11/09/2026 no servidor AWS estão gravadas com `ambiente='producao'` (o INSERT não gravava a coluna), e os débitos de teste que elas trouxeram estão em `rfb_debitos` misturados com o resto.
+  evidence: Consequência do bug corrigido nesta spec; o código novo só corrige solicitações futuras. Correção de dados (UPDATE do ambiente + remoção dos débitos de teste, com backup) depende de VPN e de autorização explícita do usuário.
