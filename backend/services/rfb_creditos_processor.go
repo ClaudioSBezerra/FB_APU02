@@ -157,9 +157,16 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 
-	var totalCorrente, totalAjuste, totalExtemporaneo, totalFlat, insertErrors int
+	var totalCorrente, totalAjuste, insertErrors int
 	var valorTotal, valorExtinto, valorNaoExtinto float64
 	var dataApuracao string
+
+	// Acumuladores em memória SOMENTE das linhas sem chave_dfe desta chamada — sem chave
+	// não há UPSERT/dedup, então a agregação SQL não pode contá-las (ver
+	// aggregateRfbCreditosSQL e Spec Change Log / Loopback 1). Extemporâneo e a estrutura
+	// plana são sempre inseridos com tipo_apuracao <> 'ajuste', então caem no bucket
+	// corrente — mesma regra usada pela agregação SQL.
+	var semChaveCorrente, semChaveAjuste rfbAggBucket
 
 	log.Printf("[RFB Creditos] Etapa 4/4: Inserindo registros...")
 
@@ -168,17 +175,21 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 		nc := len(creditos.ApuracaoCorrente.Creditos)
 		nd := len(creditos.ApuracaoCorrente.Debitos)
 		log.Printf("[RFB Creditos] ApuracaoCorrente: %d créditos + %d débitos (perspectiva comprador)", nc, nd)
+		ins := 0
 		for _, c := range creditos.ApuracaoCorrente.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
 				log.Printf("[RFB Creditos] ERRO crédito corrente (chave=%s): %v", c.ChaveDfe, err)
 				insertErrors++
 			} else {
-				totalCorrente++
-				valorTotal += c.ValorCBSTotal
-				valorExtinto += c.ValorCBSExtinto
-				valorNaoExtinto += c.ValorCBSNaoExtinto
+				ins++
 				if dataApuracao == "" && c.DataApuracao != "" {
 					dataApuracao = c.DataApuracao
+				}
+				if string(c.ChaveDfe) == "" {
+					semChaveCorrente.Count++
+					semChaveCorrente.ValorTotal += c.ValorCBSTotal
+					semChaveCorrente.ValorExtinto += c.ValorCBSExtinto
+					semChaveCorrente.ValorNaoExtinto += c.ValorCBSNaoExtinto
 				}
 			}
 		}
@@ -187,16 +198,19 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 				log.Printf("[RFB Creditos] ERRO débito-comprador corrente (chave=%s): %v", c.ChaveDfe, err)
 				insertErrors++
 			} else {
-				totalCorrente++
-				valorTotal += c.ValorCBSTotal
-				valorExtinto += c.ValorCBSExtinto
-				valorNaoExtinto += c.ValorCBSNaoExtinto
+				ins++
 				if dataApuracao == "" && c.DataApuracao != "" {
 					dataApuracao = c.DataApuracao
 				}
+				if string(c.ChaveDfe) == "" {
+					semChaveCorrente.Count++
+					semChaveCorrente.ValorTotal += c.ValorCBSTotal
+					semChaveCorrente.ValorExtinto += c.ValorCBSExtinto
+					semChaveCorrente.ValorNaoExtinto += c.ValorCBSNaoExtinto
+				}
 			}
 		}
-		log.Printf("[RFB Creditos] ApuracaoCorrente inserida: %d registros", totalCorrente)
+		log.Printf("[RFB Creditos] ApuracaoCorrente inserida: %d registros", ins)
 	}
 
 	// Grupo ajuste
@@ -204,16 +218,22 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 		nc := len(creditos.ApuracaoAjuste.Creditos)
 		nd := len(creditos.ApuracaoAjuste.Debitos)
 		log.Printf("[RFB Creditos] ApuracaoAjuste: %d créditos + %d débitos", nc, nd)
-		ajusteAntes := totalAjuste
+		ins := 0
 		for _, c := range creditos.ApuracaoAjuste.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "ajuste", c); err != nil {
 				log.Printf("[RFB Creditos] ERRO crédito ajuste (chave=%s): %v", c.ChaveDfe, err)
 				insertErrors++
 			} else {
-				totalAjuste++
-				valorTotal += c.ValorCBSTotal
-				valorExtinto += c.ValorCBSExtinto
-				valorNaoExtinto += c.ValorCBSNaoExtinto
+				ins++
+				if dataApuracao == "" && c.DataApuracao != "" {
+					dataApuracao = c.DataApuracao
+				}
+				if string(c.ChaveDfe) == "" {
+					semChaveAjuste.Count++
+					semChaveAjuste.ValorTotal += c.ValorCBSTotal
+					semChaveAjuste.ValorExtinto += c.ValorCBSExtinto
+					semChaveAjuste.ValorNaoExtinto += c.ValorCBSNaoExtinto
+				}
 			}
 		}
 		for _, c := range creditos.ApuracaoAjuste.Debitos {
@@ -221,30 +241,42 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 				log.Printf("[RFB Creditos] ERRO débito-comprador ajuste (chave=%s): %v", c.ChaveDfe, err)
 				insertErrors++
 			} else {
-				totalAjuste++
-				valorTotal += c.ValorCBSTotal
-				valorExtinto += c.ValorCBSExtinto
-				valorNaoExtinto += c.ValorCBSNaoExtinto
+				ins++
+				if dataApuracao == "" && c.DataApuracao != "" {
+					dataApuracao = c.DataApuracao
+				}
+				if string(c.ChaveDfe) == "" {
+					semChaveAjuste.Count++
+					semChaveAjuste.ValorTotal += c.ValorCBSTotal
+					semChaveAjuste.ValorExtinto += c.ValorCBSExtinto
+					semChaveAjuste.ValorNaoExtinto += c.ValorCBSNaoExtinto
+				}
 			}
 		}
-		log.Printf("[RFB Creditos] ApuracaoAjuste inserida: %d registros", totalAjuste-ajusteAntes)
+		log.Printf("[RFB Creditos] ApuracaoAjuste inserida: %d registros", ins)
 	}
 
-	// Extemporâneos
+	// Extemporâneos — contam no bucket corrente (tipo_apuracao <> 'ajuste')
 	if creditos.DebitosExtemporaneos != nil {
 		nc := len(creditos.DebitosExtemporaneos.Creditos)
 		nd := len(creditos.DebitosExtemporaneos.Debitos)
 		log.Printf("[RFB Creditos] DebitosExtemporaneos: %d créditos + %d débitos", nc, nd)
-		extAntes := totalExtemporaneo
+		ins := 0
 		for _, c := range creditos.DebitosExtemporaneos.Creditos {
 			if err := insertCredito(tx, requestID, companyID, "extemporaneo", c); err != nil {
 				log.Printf("[RFB Creditos] ERRO crédito extemporaneo (chave=%s): %v", c.ChaveDfe, err)
 				insertErrors++
 			} else {
-				totalExtemporaneo++
-				valorTotal += c.ValorCBSTotal
-				valorExtinto += c.ValorCBSExtinto
-				valorNaoExtinto += c.ValorCBSNaoExtinto
+				ins++
+				if dataApuracao == "" && c.DataApuracao != "" {
+					dataApuracao = c.DataApuracao
+				}
+				if string(c.ChaveDfe) == "" {
+					semChaveCorrente.Count++
+					semChaveCorrente.ValorTotal += c.ValorCBSTotal
+					semChaveCorrente.ValorExtinto += c.ValorCBSExtinto
+					semChaveCorrente.ValorNaoExtinto += c.ValorCBSNaoExtinto
+				}
 			}
 		}
 		for _, c := range creditos.DebitosExtemporaneos.Debitos {
@@ -252,27 +284,38 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 				log.Printf("[RFB Creditos] ERRO débito-comprador extemporaneo (chave=%s): %v", c.ChaveDfe, err)
 				insertErrors++
 			} else {
-				totalExtemporaneo++
-				valorTotal += c.ValorCBSTotal
-				valorExtinto += c.ValorCBSExtinto
-				valorNaoExtinto += c.ValorCBSNaoExtinto
+				ins++
+				if dataApuracao == "" && c.DataApuracao != "" {
+					dataApuracao = c.DataApuracao
+				}
+				if string(c.ChaveDfe) == "" {
+					semChaveCorrente.Count++
+					semChaveCorrente.ValorTotal += c.ValorCBSTotal
+					semChaveCorrente.ValorExtinto += c.ValorCBSExtinto
+					semChaveCorrente.ValorNaoExtinto += c.ValorCBSNaoExtinto
+				}
 			}
 		}
-		log.Printf("[RFB Creditos] DebitosExtemporaneos inseridos: %d registros", totalExtemporaneo-extAntes)
+		log.Printf("[RFB Creditos] DebitosExtemporaneos inseridos: %d registros", ins)
 	}
 
-	// Fallback: estrutura plana
+	// Fallback: estrutura plana — também insere com tipo_apuracao="corrente", já cai
+	// no bucket corrente naturalmente (tipo_apuracao <> 'ajuste').
+	totalFlat := 0
 	for _, c := range creditos.Creditos {
 		if err := insertCredito(tx, requestID, companyID, "corrente", c); err != nil {
 			log.Printf("[RFB Creditos] ERRO crédito flat (chave=%s): %v", c.ChaveDfe, err)
 			insertErrors++
 		} else {
 			totalFlat++
-			valorTotal += c.ValorCBSTotal
-			valorExtinto += c.ValorCBSExtinto
-			valorNaoExtinto += c.ValorCBSNaoExtinto
 			if dataApuracao == "" && c.DataApuracao != "" {
 				dataApuracao = c.DataApuracao
+			}
+			if string(c.ChaveDfe) == "" {
+				semChaveCorrente.Count++
+				semChaveCorrente.ValorTotal += c.ValorCBSTotal
+				semChaveCorrente.ValorExtinto += c.ValorCBSExtinto
+				semChaveCorrente.ValorNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
 	}
@@ -282,11 +325,14 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 			insertErrors++
 		} else {
 			totalFlat++
-			valorTotal += c.ValorCBSTotal
-			valorExtinto += c.ValorCBSExtinto
-			valorNaoExtinto += c.ValorCBSNaoExtinto
 			if dataApuracao == "" && c.DataApuracao != "" {
 				dataApuracao = c.DataApuracao
+			}
+			if string(c.ChaveDfe) == "" {
+				semChaveCorrente.Count++
+				semChaveCorrente.ValorTotal += c.ValorCBSTotal
+				semChaveCorrente.ValorExtinto += c.ValorCBSExtinto
+				semChaveCorrente.ValorNaoExtinto += c.ValorCBSNaoExtinto
 			}
 		}
 	}
@@ -294,9 +340,24 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 		log.Printf("[RFB Creditos] Estrutura plana: %d registros", totalFlat)
 	}
 
-	totalCreditos := totalCorrente + totalAjuste + totalExtemporaneo + totalFlat
+	// Agregação SQL sobre rfb_creditos (linhas com chave_dfe, já deduplicadas via UPSERT)
+	// + acumulador em memória das linhas sem chave desta chamada. Roda dentro da mesma tx,
+	// depois de todos os insertCredito, antes do commit — reflete o estado real acumulado
+	// da tabela para o período (prep para consulta incremental da RFB a partir de out/2026).
+	sqlCorrente, sqlAjuste, aggErr := aggregateRfbCreditosSQL(tx, companyID, dataApuracao)
+	if aggErr != nil {
+		tx.Rollback()
+		updateRequestError(db, requestID, "DB_ERROR", "Falha ao agregar resumo de créditos: "+aggErr.Error())
+		return fmt.Errorf("failed to aggregate rfb_creditos summary: %w", aggErr)
+	}
+	totalCorrente = sqlCorrente.Count + semChaveCorrente.Count
+	totalAjuste = sqlAjuste.Count + semChaveAjuste.Count
+	valorTotal = sqlCorrente.ValorTotal + sqlAjuste.ValorTotal + semChaveCorrente.ValorTotal + semChaveAjuste.ValorTotal
+	valorExtinto = sqlCorrente.ValorExtinto + sqlAjuste.ValorExtinto + semChaveCorrente.ValorExtinto + semChaveAjuste.ValorExtinto
+	valorNaoExtinto = sqlCorrente.ValorNaoExtinto + sqlAjuste.ValorNaoExtinto + semChaveCorrente.ValorNaoExtinto + semChaveAjuste.ValorNaoExtinto
+	totalCreditos := totalCorrente + totalAjuste
 
-	log.Printf("[RFB Creditos] Totais: %d créditos | CBS R$ %.2f | extinto R$ %.2f | não extinto R$ %.2f | período: %s",
+	log.Printf("[RFB Creditos] Totais (SQL+memória): %d créditos | CBS R$ %.2f | extinto R$ %.2f | não extinto R$ %.2f | período: %s",
 		totalCreditos, valorTotal, valorExtinto, valorNaoExtinto, dataApuracao)
 
 	if totalCreditos > 0 {
@@ -389,9 +450,14 @@ func ReprocessarRawJSONCreditosRFB(db *sql.DB, requestID string) error {
 	deleted, _ := resD.RowsAffected()
 	log.Printf("[RFB Creditos Reprocess] Removidos: %d créditos anteriores", deleted)
 
-	var totalCorrente, totalAjuste, totalExtemporaneo, totalFlat, insertErrors int
+	var totalCorrente, totalAjuste, insertErrors int
 	var valorTotal, valorExtinto, valorNaoExtinto float64
 	var dataApuracao string
+
+	// Acumuladores em memória SOMENTE das linhas sem chave_dfe desta chamada — ver
+	// aggregateRfbCreditosSQL e Spec Change Log / Loopback 1. Extemporâneo e a estrutura
+	// plana são inseridos com tipo_apuracao <> 'ajuste', então caem no bucket corrente.
+	var semChaveCorrente, semChaveAjuste rfbAggBucket
 
 	insertOne := func(tipoApuracao string, c RFBCredito) {
 		if err := insertCredito(tx, requestID, companyID, tipoApuracao, c); err != nil {
@@ -399,55 +465,74 @@ func ReprocessarRawJSONCreditosRFB(db *sql.DB, requestID string) error {
 			insertErrors++
 			return
 		}
-		valorTotal += c.ValorCBSTotal
-		valorExtinto += c.ValorCBSExtinto
-		valorNaoExtinto += c.ValorCBSNaoExtinto
 		if dataApuracao == "" && c.DataApuracao != "" {
 			dataApuracao = c.DataApuracao
+		}
+		if string(c.ChaveDfe) != "" {
+			return
+		}
+		if tipoApuracao == "ajuste" {
+			semChaveAjuste.Count++
+			semChaveAjuste.ValorTotal += c.ValorCBSTotal
+			semChaveAjuste.ValorExtinto += c.ValorCBSExtinto
+			semChaveAjuste.ValorNaoExtinto += c.ValorCBSNaoExtinto
+		} else {
+			semChaveCorrente.Count++
+			semChaveCorrente.ValorTotal += c.ValorCBSTotal
+			semChaveCorrente.ValorExtinto += c.ValorCBSExtinto
+			semChaveCorrente.ValorNaoExtinto += c.ValorCBSNaoExtinto
 		}
 	}
 
 	if creditos.ApuracaoCorrente != nil {
 		for _, c := range creditos.ApuracaoCorrente.Creditos {
 			insertOne("corrente", c)
-			totalCorrente++
 		}
 		for _, c := range creditos.ApuracaoCorrente.Debitos {
 			insertOne("corrente", c)
-			totalCorrente++
 		}
 	}
 	if creditos.ApuracaoAjuste != nil {
 		for _, c := range creditos.ApuracaoAjuste.Creditos {
 			insertOne("ajuste", c)
-			totalAjuste++
 		}
 		for _, c := range creditos.ApuracaoAjuste.Debitos {
 			insertOne("ajuste", c)
-			totalAjuste++
 		}
 	}
 	if creditos.DebitosExtemporaneos != nil {
 		for _, c := range creditos.DebitosExtemporaneos.Creditos {
 			insertOne("extemporaneo", c)
-			totalExtemporaneo++
 		}
 		for _, c := range creditos.DebitosExtemporaneos.Debitos {
 			insertOne("extemporaneo", c)
-			totalExtemporaneo++
 		}
 	}
 	for _, c := range creditos.Creditos {
 		insertOne("corrente", c)
-		totalFlat++
 	}
 	for _, c := range creditos.Debitos {
 		insertOne("corrente", c)
-		totalFlat++
 	}
 
-	totalCreditos := totalCorrente + totalAjuste + totalExtemporaneo + totalFlat
-	log.Printf("[RFB Creditos Reprocess] Totais: %d créditos | CBS R$ %.2f | período: %s",
+	// Agregação SQL (linhas com chave_dfe, já deduplicadas via UPSERT) + acumulador em
+	// memória das linhas sem chave desta chamada — mesma lógica de
+	// ProcessarDownloadCreditosRFB. Roda dentro da mesma tx que fez o DELETE+reinsert
+	// acima, antes do commit.
+	sqlCorrente, sqlAjuste, aggErr := aggregateRfbCreditosSQL(tx, companyID, dataApuracao)
+	if aggErr != nil {
+		tx.Rollback()
+		updateRequestError(db, requestID, "DB_ERROR", "Falha ao agregar resumo de créditos: "+aggErr.Error())
+		return fmt.Errorf("failed to aggregate rfb_creditos summary: %w", aggErr)
+	}
+	totalCorrente = sqlCorrente.Count + semChaveCorrente.Count
+	totalAjuste = sqlAjuste.Count + semChaveAjuste.Count
+	valorTotal = sqlCorrente.ValorTotal + sqlAjuste.ValorTotal + semChaveCorrente.ValorTotal + semChaveAjuste.ValorTotal
+	valorExtinto = sqlCorrente.ValorExtinto + sqlAjuste.ValorExtinto + semChaveCorrente.ValorExtinto + semChaveAjuste.ValorExtinto
+	valorNaoExtinto = sqlCorrente.ValorNaoExtinto + sqlAjuste.ValorNaoExtinto + semChaveCorrente.ValorNaoExtinto + semChaveAjuste.ValorNaoExtinto
+	totalCreditos := totalCorrente + totalAjuste
+
+	log.Printf("[RFB Creditos Reprocess] Totais (SQL+memória): %d créditos | CBS R$ %.2f | período: %s",
 		totalCreditos, valorTotal, dataApuracao)
 
 	if totalCreditos > 0 {

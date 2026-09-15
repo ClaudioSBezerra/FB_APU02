@@ -1,5 +1,38 @@
 # Deferred Work
 
+## Deferred from: 2ª rodada de code review of spec-rfb-resumo-agregacao-sql (2026-09-15)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: **`rfb_creditos_resumo.request_id` muda de semântica** — antes refletia sempre a request que efetivamente gerou os créditos daquela chamada; agora, como `totalCreditos` (usado no gate `if totalCreditos > 0`) passou a ser o total cumulativo via SQL, uma chamada de débitos sem nenhum crédito embutido pode disparar o UPSERT e sobrescrever `request_id` para apontar para uma request que não produziu nenhum crédito. Como a FK é `ON DELETE CASCADE` para `rfb_requests`, se a request "errada" referenciada for um dia deletada, o resumo de créditos cai junto mesmo com as linhas de `rfb_creditos` reais intactas.
+  evidence: Achado por revisor adversarial (2ª rodada), consequência direta de `totalCreditos` ter virado cumulativo. Impacto prático depende de `rfb_requests` ser deletado em algum fluxo — não identificado como caminho ativo hoje. Revisitar se rastreabilidade por `request_id` virar requisito, ou antes de implementar qualquer rotina de limpeza/retenção de `rfb_requests`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: **Linhas sem `chave_dfe` continuam sem acumular entre chamadas diferentes** (não só entre chamadas repetidas do mesmo item) — a soma em memória para linhas sem chave é só da chamada atual; um item sem chave presente na chamada N e ausente na chamada N+1 tem sua contribuição perdida do resumo após N+1, para esse subconjunto específico.
+  evidence: **Não é achado novo** — é exatamente o trade-off já decidido explicitamente pelo humano na 1ª rodada de loopback desta mesma spec ("Excluir da agregação nova... Deixa esse subconjunto ainda vulnerável ao bug original... mas é um recorte bem menor de casos"). Revisor rediscobriu sem contexto da decisão anterior. Revisitar junto com a spec técnica exata do incremental da RFB (ver [[project_rfb_cbs_api_incremental_2026]]) — se linhas sem chave se provarem comuns na prática, vale reavaliar a chave sintética via migration (opção B recusada nesta rodada).
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: Não há teste cobrindo os caminhos de erro dos novos helpers de agregação SQL (`aggregateRfbDebitosSQL`/`aggregateRfbCreditosSQL`) — um typo na query manuscrita (nome de coluna, GROUP BY) só seria pego em runtime contra Postgres real, não por `go build`/`go vet`.
+  evidence: Consistente com o padrão já aceito no projeto (cobertura só do caminho feliz). Revisitar se erros de agregação SQL se mostrarem recorrentes em produção.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: Log de diagnóstico ("Totais (SQL+memória): ...") não separa a contribuição da agregação SQL da soma em memória (linhas sem chave) — dificulta monitorar em produção se o subconjunto sem chave está crescendo (relevante justamente pelo item acima, sobre acumulação entre chamadas).
+  evidence: Achado de observabilidade, baixo custo de implementar quando o item de "sem chave" acima for revisitado. Revisitar junto.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: `waitAsyncSAPSync()` nos novos testes usa um `time.Sleep(100ms)` fixo para esperar a goroutine `TriggerSAPSync` antes de fechar o DB, em vez de uma sincronização real (channel/WaitGroup) — pode ficar flaky sob carga de CI.
+  evidence: Mitigação parcial já aplicada (era ausente antes); correção completa exigiria tornar o disparo da goroutine testável/injetável em `rfb_processor.go`/`rfb_creditos_processor.go`, fora do escopo desta spec pontual. Revisitar se os novos testes se mostrarem flaky em CI.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: Se um `chave_dfe` já existente for reclassificado entre `tipo_apuracao` (ex: de "ajuste" para "corrente") numa chamada posterior, a agregação SQL só reflete a reclassificação corretamente se o `ON CONFLICT ... DO UPDATE SET` de `insertDebito`/`insertCredito` atualizar a coluna `tipo_apuracao` — não confirmado nesta revisão.
+  evidence: Achado por revisor adversarial (2ª rodada), cenário de baixa probabilidade (reclassificação de documento já visto). Revisitar confirmando o `DO UPDATE SET` de `insertDebito`/`insertCredito` inclui `tipo_apuracao`.
+
+## Deferred from: code review of spec-rfb-resumo-agregacao-sql (2026-09-15)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: **Sem lock entre chamadas concorrentes para o mesmo `(company_id, data_apuracao)`** — a nova agregação SQL lê o estado da tabela dentro da própria transação, mas sem `SELECT ... FOR UPDATE`/advisory lock; duas chamadas simultâneas (webhook duplicado + retrigger manual, ou dois containers rogue como no incidente de 05/08) podem interlear delete+reinsert e leitura de agregação, deixando o resumo undercounted ou sobrescrito por um snapshot desatualizado — reintroduzindo o bug original por um caminho diferente (corrida em vez de payload parcial).
+  evidence: Confirmado por 2 revisores adversariais independentes. Risco reduzido no curto prazo porque a proteção contra 2ª chamada manual no mesmo dia já foi endurecida no deploy `ea32a36`, mas não elimina duplicação por webhook redisparado pela RFB nem por acesso indevido externo (ver [[project_erp_bridge_containers_intrusos_incidente]]). Corrigir exigiria `pg_advisory_xact_lock(hashtext(company_id||data_apuracao))` ou equivalente em torno da agregação — fora do escopo desta correção pontual. Revisitar se duplicidade de resumo for observada em produção.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: A agregação SQL só cresce — se a RFB parar de reportar um débito/crédito que já foi persistido (cancelamento, correção, DFe anulada), não há mecanismo para remover/zerar a linha correspondente em `rfb_debitos`/`rfb_creditos`, então o resumo nunca reflete a remoção, só a soma acumulada do que já foi visto.
+  evidence: Achado real da revisão adversarial, mas mitigado na prática se a RFB comunica cancelamento via mudança de `situacao_debito`/`situacao_credito` na MESMA chave (que já dispara UPSERT corretamente) em vez de remover o documento da resposta — comportamento real da API não confirmado nesta sessão. Revisitar quando a spec técnica exata do incremental for obtida da RFB (ver [[project_rfb_cbs_api_incremental_2026]]).
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`
+  summary: Requests malformados sem `data_apuracao` extraído (fica `""`) fazem a agregação de débitos somar sob a chave `(company_id, '')` de forma cumulativa entre requests malformados sucessivos — diferente do design antigo, onde cada resposta malformada só sobrescrevia com seus próprios (tipicamente zero) valores.
+  evidence: Edge case de baixa probabilidade (requer múltiplas respostas malformadas da RFB para a mesma empresa); achado da revisão adversarial, não observado em produção. Revisitar se `rfb_resumo` mostrar uma linha de período vazio com totais inesperadamente altos.
+
 ## Deferred from: code review of spec-malha-fina-fix-fonte-creditos (2026-07-20)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-malha-fina-fix-fonte-creditos.md`

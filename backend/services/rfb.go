@@ -14,6 +14,11 @@ import (
 	"time"
 )
 
+// rfbAPIVersion is the RFB CBS API path version segment, shared by all endpoints
+// (apuracao-cbs, creditos-cbs, download). Centralized here instead of hardcoded
+// per-endpoint so a future version bump touches a single line.
+const rfbAPIVersion = "v1"
+
 // rfbTokenCache caches OAuth2 tokens per client_id across goroutines.
 // The RFB API associates tiqueteDownload with the access_token that made
 // the assessment request — reusing the same token ensures the download succeeds.
@@ -212,7 +217,7 @@ func (c *RFBClient) GetToken(clientID, clientSecret string) (string, error) {
 // cnpjBase must be 8 digits (company root CNPJ).
 // Returns the tiquete (ticket) for later download.
 func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
-	endpoint := fmt.Sprintf("%s/%s/apuracao-cbs/v1/%s", c.baseURL, c.pathPrefix, cnpjBase)
+	endpoint := fmt.Sprintf("%s/%s/apuracao-cbs/%s/%s", c.baseURL, c.pathPrefix, rfbAPIVersion, cnpjBase)
 	log.Printf("[RFB] Requesting CBS assessment: POST %s (webhook: %s, prefix: %s)", endpoint, c.webhookURL, c.pathPrefix)
 
 	payload := map[string]string{
@@ -290,7 +295,7 @@ func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
 // SolicitarCredito sends a CBS credits request to the RFB API using /creditos-cbs/v1/.
 // cnpjBase must be 8 digits. Returns the tiquete for later download.
 func (c *RFBClient) SolicitarCredito(token, cnpjBase string) (string, error) {
-	endpoint := fmt.Sprintf("%s/%s/creditos-cbs/v1/%s", c.baseURL, c.pathPrefix, cnpjBase)
+	endpoint := fmt.Sprintf("%s/%s/creditos-cbs/%s/%s", c.baseURL, c.pathPrefix, rfbAPIVersion, cnpjBase)
 	log.Printf("[RFB] Requesting CBS credits: POST %s (webhook: %s, prefix: %s)", endpoint, c.webhookURL, c.pathPrefix)
 
 	payload := map[string]string{"urlRetorno": c.webhookURL}
@@ -350,7 +355,7 @@ func (c *RFBClient) SolicitarCredito(token, cnpjBase string) (string, error) {
 // DownloadArquivo downloads the CBS assessment JSON file using the ticket.
 // Returns the raw JSON bytes. Note: each ticket can only be downloaded ONCE.
 func (c *RFBClient) DownloadArquivo(token, tiquete string) ([]byte, error) {
-	endpoint := fmt.Sprintf("%s/%s/download/v1/%s", c.baseURL, c.pathPrefix, tiquete)
+	endpoint := fmt.Sprintf("%s/%s/download/%s/%s", c.baseURL, c.pathPrefix, rfbAPIVersion, tiquete)
 	log.Printf("[RFB] Downloading assessment file: GET %s (prefix: %s)", endpoint, c.pathPrefix)
 
 	req, err := http.NewRequest("GET", endpoint, nil)
