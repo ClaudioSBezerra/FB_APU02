@@ -108,7 +108,7 @@ func TestRFBSolicitarApuracao_GravaAmbienteDaCredencial(t *testing.T) {
 	defer cleanup()
 	insertRFBCredential(t, db, companyID, "producao_restrita")
 
-	if err := SolicitarApuracaoParaEmpresa(db, companyID, LimiteDebitosDiaRFB); err != nil {
+	if err := SolicitarApuracaoParaEmpresa(db, companyID, LimiteDebitosDiaRFBv1); err != nil {
 		t.Fatalf("SolicitarApuracaoParaEmpresa: %v", err)
 	}
 	waitCreditoRows(t, db, companyID, 1)
@@ -141,13 +141,20 @@ func TestRFBSolicitarApuracao_GravaAmbienteDaCredencial(t *testing.T) {
 	}
 }
 
-func TestRFBSolicitarApuracao_LimiteDiario(t *testing.T) {
+// v1 (default): teto manual de 2/dia — a 3ª solicitação do dia é recusada sem chamar a RFB.
+func TestRFBSolicitarApuracao_LimiteDiario_V1(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
+	t.Setenv("RFB_API_VERSION", "")
+	t.Setenv("RFB_API_VERSION_RESTRITA", "")
 	fake := newFakeRFB(t)
 	companyID, cleanup := setupTestCompany(t, db)
 	defer cleanup()
 	insertRFBCredential(t, db, companyID, "producao")
+	limite := LimiteDebitosDiaRFBEmpresa(db, companyID)
+	if limite != 2 {
+		t.Fatalf("v1: teto efetivo esperado 2, veio %d", limite)
+	}
 
 	// Coleta automática do dia já feita (terminou em erro — ainda conta como slot usado).
 	if _, err := db.Exec(`
@@ -166,22 +173,82 @@ func TestRFBSolicitarApuracao_LimiteDiario(t *testing.T) {
 		t.Fatalf("agendamento recusado não deveria chamar a RFB, fez: %v", fake.snapshot())
 	}
 
-	// Manual: a 2ª chamada do dia passa (o bug era cair no limite de 1 do agendamento).
-	if err := SolicitarApuracaoParaEmpresa(db, companyID, LimiteDebitosDiaRFB); err != nil {
+	// Manual: a 2ª chamada do dia passa (bug original: cair no limite de 1 do agendamento).
+	if err := SolicitarApuracaoParaEmpresa(db, companyID, limite); err != nil {
 		t.Fatalf("manual com 1 débito no dia: esperava sucesso, veio %v", err)
 	}
 	waitCreditoRows(t, db, companyID, 1)
-	if got := fake.count("POST /rtc/apuracao-cbs/v1/"); got != 1 {
-		t.Fatalf("esperava 1 POST em /rtc/apuracao-cbs/v1/, chamadas: %v", fake.snapshot())
-	}
 
-	// Teto da RFB: a 3ª chamada é recusada sem chamar a RFB.
-	err = SolicitarApuracaoParaEmpresa(db, companyID, LimiteDebitosDiaRFB)
+	// v1 bloqueia a 3ª.
+	err = SolicitarApuracaoParaEmpresa(db, companyID, limite)
 	if err == nil || !strings.HasPrefix(err.Error(), "DAILY_LIMIT") {
-		t.Fatalf("manual com 2 débitos no dia: esperava DAILY_LIMIT, veio %v", err)
+		t.Fatalf("v1 com 2 débitos no dia: esperava DAILY_LIMIT, veio %v", err)
 	}
 	if got := fake.count("POST /rtc/apuracao-cbs/v1/"); got != 1 {
-		t.Fatalf("teto atingido não deveria chamar a RFB de novo, chamadas: %v", fake.snapshot())
+		t.Fatalf("esperava 1 POST em /rtc/apuracao-cbs/v1/ (a 3ª é recusada localmente), chamadas: %v", fake.snapshot())
+	}
+}
+
+// v2: teto manual de 4/dia — a 5ª solicitação do dia é recusada sem chamar a RFB.
+func TestRFBSolicitarApuracao_LimiteDiario_V2(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	t.Setenv("RFB_API_VERSION", "v2")
+	t.Setenv("RFB_API_VERSION_RESTRITA", "")
+	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		fmt.Fprint(w, `{"tiqueteSolicitacao":"tiq-lim-v2"}`)
+	})
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+	limite := LimiteDebitosDiaRFBEmpresa(db, companyID)
+	if limite != 4 {
+		t.Fatalf("v2: teto efetivo esperado 4, veio %d", limite)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := db.Exec(`INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code) VALUES ($1, '00000000', 'error', 'debito', 'TIMEOUT')`, companyID); err != nil {
+			t.Fatalf("falha ao criar solicitação do dia: %v", err)
+		}
+	}
+	// 4ª passa
+	if err := SolicitarApuracaoParaEmpresa(db, companyID, limite); err != nil {
+		t.Fatalf("v2 com 3 débitos no dia: esperava sucesso, veio %v", err)
+	}
+	waitCreditoRows(t, db, companyID, 1)
+	// 5ª barrada
+	err := SolicitarApuracaoParaEmpresa(db, companyID, limite)
+	if err == nil || !strings.HasPrefix(err.Error(), "DAILY_LIMIT") {
+		t.Fatalf("v2 com 4 débitos no dia: esperava DAILY_LIMIT, veio %v", err)
+	}
+	if got := fake.count("POST /apuracao-cbs/v2/debitos/"); got != 1 {
+		t.Fatalf("esperava 1 POST de débitos v2 (a 5ª é recusada localmente), chamadas: %v", fake.snapshot())
+	}
+}
+
+// O teto depende da versão resolvida para o ambiente da credencial ativa (RESTRITA sobrescreve).
+func TestRFBLimiteDebitosPorVersao(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	t.Setenv("RFB_API_VERSION", "")
+	t.Setenv("RFB_API_VERSION_RESTRITA", "v2")
+	if got := LimiteDebitosDiaRFBPara("producao"); got != 2 {
+		t.Errorf("producao v1: esperava 2, veio %d", got)
+	}
+	if got := LimiteDebitosDiaRFBPara("producao_restrita"); got != 4 {
+		t.Errorf("restrita v2: esperava 4, veio %d", got)
+	}
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	if got := LimiteDebitosDiaRFBEmpresa(db, companyID); got != 2 {
+		t.Errorf("sem credencial usa producao (v1): esperava 2, veio %d", got)
+	}
+	insertRFBCredential(t, db, companyID, "producao_restrita")
+	if got := LimiteDebitosDiaRFBEmpresa(db, companyID); got != 4 {
+		t.Errorf("credencial restrita com RESTRITA=v2: esperava 4, veio %d", got)
+	}
+	if LimiteDebitosDiaAgendamento != 1 || LimiteCreditosDiaRFB != 2 {
+		t.Errorf("agendamento deve seguir 1 e créditos 2, vieram %d / %d", LimiteDebitosDiaAgendamento, LimiteCreditosDiaRFB)
 	}
 }
 

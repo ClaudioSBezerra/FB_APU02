@@ -10,7 +10,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -70,7 +72,7 @@ type RFBDebitoRow struct {
 	SituacaoDebito     string   `json:"situacao_debito"`
 }
 
-// SolicitarApuracaoHandler triggers a new CBS assessment request to the RFB API (manual — uses up to 2 slots/day)
+// SolicitarApuracaoHandler triggers a new CBS assessment request to the RFB API (manual — teto diário por versão da API: v1 = 2, v2 = 4)
 func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -93,6 +95,9 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Teto efetivo pela versão da API da credencial ativa (v1 = 2, v2 = 4).
+		limiteDia := services.LimiteDebitosDiaRFBEmpresa(db, companyID)
+
 		// Manual requests: count débito attempts today (scheduler + manual, including errors)
 		var todayCount int
 		db.QueryRow(`
@@ -101,18 +106,18 @@ func SolicitarApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			  AND tipo = 'debito'
 			  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 		`, companyID).Scan(&todayCount)
-		if todayCount >= 2 {
-			http.Error(w, "Limite diário atingido (máximo 2 solicitações de débitos por dia — inclui tentativas automáticas com erro)", http.StatusTooManyRequests)
+		if todayCount >= limiteDia {
+			http.Error(w, fmt.Sprintf("Limite diário atingido (máximo %d solicitações de débitos por dia — inclui tentativas automáticas com erro)", limiteDia), http.StatusTooManyRequests)
 			return
 		}
 
-		if err := services.SolicitarApuracaoParaEmpresa(db, companyID, services.LimiteDebitosDiaRFB); err != nil {
+		if err := services.SolicitarApuracaoParaEmpresa(db, companyID, limiteDia); err != nil {
 			msg := err.Error()
 			switch {
 			case strings.Contains(msg, "credenciais RFB não encontradas"):
 				http.Error(w, "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.", http.StatusBadRequest)
 			case strings.HasPrefix(msg, "DAILY_LIMIT"):
-				http.Error(w, fmt.Sprintf("Limite diário atingido (máximo %d solicitações de débitos por dia)", services.LimiteDebitosDiaRFB), http.StatusTooManyRequests)
+				http.Error(w, fmt.Sprintf("Limite diário atingido (máximo %d solicitações de débitos por dia)", limiteDia), http.StatusTooManyRequests)
 			case strings.Contains(msg, "RATE_LIMIT"):
 				http.Error(w, msg, http.StatusTooManyRequests)
 			case strings.Contains(msg, "TOKEN_ERROR"):
@@ -187,8 +192,8 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Sem tiqueteDownload (webhook nunca chegou): tenta mesmo assim com o
-		// tiqueteSolicitacao original — ProcessarDownloadRFB já sabe cair pra esse
-		// fallback (rfb_processor.go:115-122). A RFB pode ter concluído o
+		// tiqueteSolicitacao original — ProcessarDownloadRFB/BaixarArquivoRFB já sabem
+		// cair pra esse fallback (v1) ou consultar a situação/urlAssinada (v2). A RFB pode ter concluído o
 		// processamento e só falhado em avisar via webhook; se não tiver nada
 		// pronto, a RFB responde com erro claro e a linha volta pra 'error'.
 		usandoFallback := tiqueteDownload == nil || *tiqueteDownload == ""
@@ -348,6 +353,9 @@ func AbortRequestHandler(db *sql.DB) http.HandlerFunc {
 // nunca fica presa em 'pending' (achado de revisão: a versão anterior só resetava o status
 // e nunca rechamava a RFB de fato, deixando a linha órfã até o watchdog de 5h abortá-la com
 // timeout falso); se a reversão para 'error' em si falhar (DB indisponível), o erro é logado.
+// A linha antiga NUNCA é reaproveitada com novo tíquete: o service faz INSERT de uma linha nova
+// com a api_versao/ambiente da NOVA solicitação (ResolveRFBAPIVersion no momento do reenvio) e
+// a antiga é descartada — então não há api_versao "velha" grudada numa solicitação nova.
 func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -381,6 +389,7 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			UPDATE rfb_requests
 			SET status = 'pending', error_code = NULL, error_message = NULL,
 			    tiquete = NULL, tiquete_download = NULL, raw_json = NULL,
+			    url_assinada = NULL, url_assinada_expira_em = NULL,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE id = $1 AND company_id = $2
 			  AND status = 'error' AND raw_json IS NULL
@@ -436,8 +445,14 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			  AND COALESCE(error_code, '') != 'ENDPOINT_INDISPONIVEL'
 			  AND created_at >= CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo'
 		`, companyID, tipo).Scan(&todayCount)
-		if todayCount >= 2 {
-			fail(http.StatusTooManyRequests, "DAILY_LIMIT", fmt.Sprintf("Limite diário atingido (máximo 2 solicitações de %s por dia)", tipoLabel))
+		// Débitos: teto da RFB pela versão da API da credencial ativa (v1 = 2, v2 = 4);
+		// créditos: LimiteCreditosDiaRFB (2/dia, sem limite da RFB conhecido).
+		limiteDia := services.LimiteCreditosDiaRFB
+		if tipo != "credito" {
+			limiteDia = services.LimiteDebitosDiaRFBEmpresa(db, companyID)
+		}
+		if todayCount >= limiteDia {
+			fail(http.StatusTooManyRequests, "DAILY_LIMIT", fmt.Sprintf("Limite diário atingido (máximo %d solicitações de %s por dia)", limiteDia, tipoLabel))
 			return
 		}
 
@@ -445,7 +460,7 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 		if tipo == "credito" {
 			solicitarErr = services.SolicitarCreditoParaEmpresa(db, companyID)
 		} else {
-			solicitarErr = services.SolicitarApuracaoParaEmpresa(db, companyID, services.LimiteDebitosDiaRFB)
+			solicitarErr = services.SolicitarApuracaoParaEmpresa(db, companyID, limiteDia)
 		}
 		if solicitarErr != nil {
 			msg := solicitarErr.Error()
@@ -454,10 +469,10 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 				// Falha antes de qualquer chamada à RFB — nenhuma linha nova foi criada.
 				fail(http.StatusBadRequest, "NO_CREDENTIALS", "Credenciais RFB não configuradas. Configure em Conectar Receita Federal > Credenciais API.")
 			case strings.HasPrefix(msg, "DAILY_LIMIT"):
-				// Teto diário rechecado dentro de SolicitarApuracaoParaEmpresa (mesmo limite de
-				// 2/dia acima; só dispara numa corrida entre duas solicitações simultâneas).
+				// Teto diário rechecado dentro de SolicitarApuracaoParaEmpresa (mesmo limite efetivo
+				// limiteDia acima; só dispara numa corrida entre duas solicitações simultâneas).
 				// Falha antes de qualquer INSERT — nenhuma linha nova foi criada.
-				fail(http.StatusTooManyRequests, "DAILY_LIMIT", fmt.Sprintf("Limite diário atingido (máximo %d solicitações de débitos por dia)", services.LimiteDebitosDiaRFB))
+				fail(http.StatusTooManyRequests, "DAILY_LIMIT", fmt.Sprintf("Limite diário atingido (máximo %d solicitações de débitos por dia)", limiteDia))
 			case strings.Contains(msg, "RATE_LIMIT"):
 				// service já fez INSERT de uma linha nova com este erro — descarta a antiga.
 				discard(http.StatusTooManyRequests, msg)
@@ -466,7 +481,7 @@ func RessolicitarHandler(db *sql.DB) http.HandlerFunc {
 			case strings.Contains(msg, "REQUEST_ERROR"):
 				discard(http.StatusBadGateway, "Erro ao resolicitar: "+msg)
 			case strings.Contains(msg, "endpoint não disponível"):
-				// Condição conhecida e temporária (RFB ainda não ativou /creditos-cbs/v1/ neste
+				// Condição conhecida e temporária (RFB ainda não ativou o endpoint de créditos neste
 				// ambiente), não uma falha real — service já criou a linha nova com
 				// error_code=ENDPOINT_INDISPONIVEL (frontend estiliza como Alerta, não Erro).
 				discard(http.StatusServiceUnavailable, "A Receita Federal ainda não liberou o endpoint de créditos CBS para este ambiente. Tente novamente mais tarde.")
@@ -599,7 +614,7 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(io.LimitReader(r.Body, webhookMaxBodyBytes))
 		if err != nil {
 			log.Printf("[RFB Webhook] Error reading body: %v", err)
 			http.Error(w, "Error reading body", http.StatusBadRequest)
@@ -616,41 +631,99 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 
 		log.Printf("[RFB Webhook] ===== CALLBACK RECEIVED =====")
 		log.Printf("[RFB Webhook] Method: %s | RemoteAddr: %s", r.Method, r.RemoteAddr)
-		log.Printf("[RFB Webhook] Headers: %v", r.Header)
-		log.Printf("[RFB Webhook] Body: %s", string(body))
-		log.Printf("[RFB Webhook] ==============================")
+		// Headers e corpo NÃO são logados crus: headers carregam Authorization/assinatura/cookie
+		// e o corpo v2 traz a urlAssinada (credencial temporária). Abaixo loga-se o payload
+		// redigido (qualquer valor http(s):// reduzido ao host).
 
 		// Parse webhook payload - try to extract tiquete
 		var payload map[string]interface{}
 		if err := json.Unmarshal(body, &payload); err != nil {
-			log.Printf("[RFB Webhook] Error parsing JSON: %v", err)
+			log.Printf("[RFB Webhook] Error parsing JSON: %v (body: %d bytes, prefixo: %q)", err, len(body), redactURLsInText(services.TruncateRunes(string(body), 200)))
 			// Return 200 even on parse error so RFB doesn't retry indefinitely
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "invalid JSON"})
 			return
 		}
+		log.Printf("[RFB Webhook] Body: %s", redactedWebhookBody(payload))
 
-		log.Printf("[RFB Webhook] Parsed fields: %v", func() []string {
-			keys := make([]string, 0, len(payload))
-			for k := range payload {
-				keys = append(keys, k)
+		// v1: tiqueteSolicitacao + tiqueteDownload (baixa por /download/v1/{tiqueteDownload}).
+		// v2 sucesso: tiqueteSolicitacao + urlAssinada + urlAssinadaExpiraEm (sem tiqueteDownload).
+		// v2 erro: codigoErro + mensagemErro (tiqueteSolicitacao NÃO é garantido).
+		tiqueteSolicitacao := webhookStringField(payload, "tiqueteSolicitacao")
+		tiqueteDownload := webhookStringField(payload, "tiqueteDownload")
+		urlAssinada := webhookStringField(payload, "urlAssinada")
+		urlExpiraStr := webhookStringField(payload, "urlAssinadaExpiraEm")
+		codigoErro := webhookStringField(payload, "codigoErro")
+		mensagemErro := webhookStringField(payload, "mensagemErro")
+
+		// Precedência explícita: SUCESSO vence erro. Se o payload trouxer codigoErro/mensagemErro
+		// junto de urlAssinada/tiqueteDownload, trata-se como sucesso (há o que baixar) e loga aviso.
+		temErro := codigoErro != "" || mensagemErro != ""
+		temDownload := urlAssinada != "" || tiqueteDownload != ""
+		if temErro && temDownload {
+			log.Printf("[RFB Webhook] AVISO: payload com codigoErro/mensagemErro E urlAssinada/tiqueteDownload (tiquete %s, codigoErro=%q) — tratado como SUCESSO",
+				tiqueteSolicitacao, services.TruncateRunes(codigoErro, 50))
+		}
+
+		// ── Ramo de erro (RFB avisa falha de processamento) ──
+		if temErro && !temDownload {
+			if tiqueteSolicitacao == "" {
+				log.Printf("[RFB Webhook] AVISO: erro da RFB sem tiqueteSolicitacao (não correlacionável): codigoErro=%q mensagemErro=%q",
+					services.TruncateRunes(codigoErro, 50), services.TruncateRunes(mensagemErro, 300))
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "error payload without tiqueteSolicitacao"})
+				return
 			}
-			return keys
-		}())
-
-		// RFB sends two distinct tíquetes:
-		//   tiqueteSolicitacao = identifies the original request (stored in rfb_requests.tiquete)
-		//   tiqueteDownload    = the tíquete to use when calling the download endpoint
-		tiqueteSolicitacao, _ := payload["tiqueteSolicitacao"].(string)
-		tiqueteDownload, _ := payload["tiqueteDownload"].(string)
-
-		log.Printf("[RFB Webhook] tiqueteSolicitacao: %s | tiqueteDownload: %s",
-			tiqueteSolicitacao, tiqueteDownload)
-
-		if tiqueteSolicitacao == "" || tiqueteDownload == "" {
-			log.Printf("[RFB Webhook] Missing required tíquetes in payload — fields: %v", payload)
+			if codigoErro == "" {
+				codigoErro = "RFB_ERRO"
+			}
+			codigoErro = services.TruncateRunes(codigoErro, 50)
+			mensagemErro = services.TruncateRunes(mensagemErro, 1000)
+			// webhook_received fica de fora: já recebeu o resultado bom (url/tíquete) e um erro
+			// duplicado/tardio não pode derrubá-lo enquanto o download é despachado.
+			rows, err := db.Query(`
+				UPDATE rfb_requests
+				SET status = 'error', error_code = $1, error_message = $2,
+				    url_assinada = NULL, url_assinada_expira_em = NULL, updated_at = CURRENT_TIMESTAMP
+				WHERE tiquete = $3 AND status NOT IN ('completed', 'downloading', 'reprocessing', 'webhook_received')
+				RETURNING id, COALESCE(tipo, 'debito')
+			`, codigoErro, mensagemErro, tiqueteSolicitacao)
+			n := 0
+			if err != nil {
+				log.Printf("[RFB Webhook] Error marking request as error: %v", err)
+			} else {
+				var tipos []string
+				for rows.Next() {
+					var id, tp string
+					if rows.Scan(&id, &tp) == nil {
+						n++
+						tipos = append(tipos, tp)
+					}
+				}
+				rows.Close()
+				if n > 1 {
+					log.Printf("[RFB Webhook] AVISO: tiquete %s casou %d solicitações (tipos %v) — todas marcadas como error", tiqueteSolicitacao, n, tipos)
+				}
+			}
+			switch {
+			case err != nil:
+			case n == 0:
+				log.Printf("[RFB Webhook] Erro da RFB para tiquete %s sem solicitação elegível (já concluída/em andamento ou desconhecida)", tiqueteSolicitacao)
+			default:
+				log.Printf("[RFB Webhook] Solicitação do tiquete %s marcada como error (%s)", tiqueteSolicitacao, codigoErro)
+			}
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "missing tiqueteSolicitacao or tiqueteDownload"})
+			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "rfb error recorded"})
+			return
+		}
+
+		log.Printf("[RFB Webhook] tiqueteSolicitacao: %s | tiqueteDownload: %s | urlAssinada: %t",
+			tiqueteSolicitacao, tiqueteDownload, urlAssinada != "")
+
+		if tiqueteSolicitacao == "" || (tiqueteDownload == "" && urlAssinada == "") {
+			log.Printf("[RFB Webhook] Missing required fields in payload: %s", redactedWebhookBody(payload))
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "missing tiqueteSolicitacao and (tiqueteDownload or urlAssinada)"})
 			return
 		}
 
@@ -660,11 +733,11 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 		// sido setados; sem isso o webhook tardio era descartado silenciosamente ("request
 		// not found"), perdendo um resultado que a RFB efetivamente entregou. Exclui só os
 		// estados que já processaram ou estão processando o resultado.
-		var requestID, reqTipo string
+		var requestID, reqTipo, reqApiVersao, reqStatus string
 		err = db.QueryRow(`
-			SELECT id, COALESCE(tipo, 'debito') FROM rfb_requests
+			SELECT id, COALESCE(tipo, 'debito'), COALESCE(api_versao, 'v1'), status FROM rfb_requests
 			WHERE tiquete = $1 AND status NOT IN ('completed', 'downloading', 'reprocessing')
-		`, tiqueteSolicitacao).Scan(&requestID, &reqTipo)
+		`, tiqueteSolicitacao).Scan(&requestID, &reqTipo, &reqApiVersao, &reqStatus)
 		if err != nil {
 			log.Printf("[RFB Webhook] Request not found for tiqueteSolicitacao %s: %v", tiqueteSolicitacao, err)
 			w.WriteHeader(http.StatusOK)
@@ -672,20 +745,88 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Save tiqueteDownload and update status. Limpa error_code/error_message — se a linha
-		// estava em 'error' (webhook atrasado, ver comentário acima), o erro antigo (ex:
-		// TIMEOUT) não deve continuar aparecendo junto do novo status na tela.
-		_, err = db.Exec(`
-			UPDATE rfb_requests
-			SET status = 'webhook_received', tiquete_download = $1,
-			    error_code = NULL, error_message = NULL, updated_at = CURRENT_TIMESTAMP
-			WHERE id = $2
-		`, tiqueteDownload, requestID)
-		if err != nil {
-			log.Printf("[RFB Webhook] Error updating status/tiqueteDownload: %v", err)
+		// urlAssinada só existe na API v2 e vem de um endpoint público: aceita apenas para linhas
+		// api_versao='v2', só https/443 e host fora de faixas internas (SSRF). Sem DNS aqui; a
+		// resolução é revalidada no dial do download. URL inválida descarta SÓ a URL — um
+		// tiqueteDownload válido no mesmo payload continua sendo usado.
+		urlRejeitada := ""
+		if urlAssinada != "" {
+			switch {
+			case reqApiVersao != services.RFBAPIVersaoV2:
+				log.Printf("[RFB Webhook] urlAssinada IGNORADA: solicitação %s é api_versao=%s (só v2 usa urlAssinada) — host %s",
+					requestID, reqApiVersao, urlHostForLog(urlAssinada))
+				urlRejeitada = "urlAssinada em solicitação " + reqApiVersao + " (só v2)"
+				urlAssinada = ""
+			default:
+				if verr := services.ValidarURLAssinada(urlAssinada); verr != nil {
+					log.Printf("[RFB Webhook] urlAssinada rejeitada (%v) — host %s", verr, urlHostForLog(urlAssinada))
+					urlRejeitada = verr.Error()
+					urlAssinada = ""
+				}
+			}
+		}
+		if urlAssinada != "" && strings.TrimSpace(os.Getenv("RFB_WEBHOOK_SECRET")) == "" {
+			log.Printf("[RFB Webhook] ALERTA DE SEGURANÇA: urlAssinada aceita com RFB_WEBHOOK_SECRET VAZIO — webhook sem HMAC + URL externa permite envenenamento de dados (qualquer um pode apontar o download para um arquivo próprio). Configure RFB_WEBHOOK_SECRET.")
 		}
 
-		log.Printf("[RFB Webhook] Request %s updated — tiqueteDownload saved, triggering download", requestID)
+		if tiqueteDownload == "" && urlAssinada == "" {
+			// Nada utilizável: só urlAssinada e ela foi descartada.
+			if reqStatus == "requested" || reqStatus == "error" {
+				res, uerr := db.Exec(`
+					UPDATE rfb_requests
+					SET status = 'error', error_code = $1, error_message = $2,
+					    url_assinada = NULL, url_assinada_expira_em = NULL, updated_at = CURRENT_TIMESTAMP
+					WHERE id = $3 AND status IN ('requested', 'error')
+				`, services.RFBErrURLInvalida, services.TruncateRunes("urlAssinada do webhook descartada: "+urlRejeitada, 1000), requestID)
+				if uerr != nil {
+					log.Printf("[RFB Webhook] Error marking URL_INVALIDA: %v", uerr)
+				} else if n, _ := res.RowsAffected(); n > 0 {
+					log.Printf("[RFB Webhook] Solicitação %s marcada como error (URL_INVALIDA)", requestID)
+				}
+			}
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "invalid urlAssinada"})
+			return
+		}
+
+		// Expiração: ausente → NULL (COALESCE preserva o já gravado); presente mas ilegível →
+		// TTL conservador (ParseURLExpiraEm), nunca NULL.
+		var urlExpiraEm sql.NullTime
+		if urlAssinada != "" {
+			if t := services.ParseURLExpiraEm(urlExpiraStr); t != nil {
+				urlExpiraEm = sql.NullTime{Time: *t, Valid: true}
+			}
+		}
+
+		// Save tiqueteDownload/urlAssinada and update status. Limpa error_code/error_message — se a
+		// linha estava em 'error' (webhook atrasado, ver comentário acima), o erro antigo (ex:
+		// TIMEOUT) não deve continuar aparecendo junto do novo status na tela. Campos ausentes no
+		// payload preservam o valor já gravado (webhook duplicado/parcial não apaga nada; a
+		// expiração nunca é sobrescrita por NULL). A guarda de status + RowsAffected impede que um
+		// webhook duplicado, chegando com a linha já baixando/concluída, dispare um 2º download.
+		res, err := db.Exec(`
+			UPDATE rfb_requests
+			SET status = 'webhook_received',
+			    tiquete_download = COALESCE(NULLIF($1::text, ''), tiquete_download),
+			    url_assinada = CASE WHEN $2::text <> '' THEN $2::text ELSE url_assinada END,
+			    url_assinada_expira_em = CASE WHEN $2::text <> '' THEN COALESCE($3::timestamptz, url_assinada_expira_em) ELSE url_assinada_expira_em END,
+			    error_code = NULL, error_message = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = $4 AND status NOT IN ('completed', 'downloading', 'reprocessing')
+		`, tiqueteDownload, urlAssinada, urlExpiraEm, requestID)
+		if err != nil {
+			// 500 para a RFB reenviar: sem persistir url/tíquete não há o que baixar.
+			log.Printf("[RFB Webhook] Error updating status/download info: %v", err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			log.Printf("[RFB Webhook] Request %s já concluída/em download/reprocesso — webhook duplicado, download NÃO redisparado", requestID)
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "request already processing or completed"})
+			return
+		}
+
+		log.Printf("[RFB Webhook] Request %s updated — download info saved, triggering download", requestID)
 
 		// Dispatch to the correct processor based on tipo
 		reqID := requestID
@@ -713,6 +854,25 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "processing"})
 	}
+}
+
+// webhookMaxBodyBytes limita o corpo do webhook (endpoint público).
+const webhookMaxBodyBytes = 1 << 20
+
+// webhookStringField lê um campo string do payload. Campo presente com tipo errado
+// (número, objeto, lista, bool) é LOGADO e tratado como ausente — não some em silêncio.
+// null é tratado como ausente sem aviso.
+func webhookStringField(payload map[string]interface{}, key string) string {
+	v, ok := payload[key]
+	if !ok || v == nil {
+		return ""
+	}
+	sv, ok := v.(string)
+	if !ok {
+		log.Printf("[RFB Webhook] AVISO: campo %q com tipo inesperado %T (esperado string) — ignorado", key, v)
+		return ""
+	}
+	return strings.TrimSpace(sv)
 }
 
 // StatusApuracaoHandler returns the list of RFB requests for the company
@@ -1014,4 +1174,51 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			},
 		})
 	}
+}
+
+// redactedWebhookBody serializa o payload do webhook redigindo, recursivamente, qualquer
+// valor string que comece com http(s):// (não só a chave urlAssinada): vira "<url redigida host=...>".
+// Nunca logar a URL completa (credencial temporária).
+func redactedWebhookBody(payload map[string]interface{}) string {
+	b, _ := json.Marshal(redactWebhookValue(payload))
+	return string(b)
+}
+
+func redactWebhookValue(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, val := range t {
+			out[k] = redactWebhookValue(val)
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, len(t))
+		for i, val := range t {
+			out[i] = redactWebhookValue(val)
+		}
+		return out
+	case string:
+		l := strings.ToLower(strings.TrimSpace(t))
+		if strings.HasPrefix(l, "http://") || strings.HasPrefix(l, "https://") {
+			return "<url redigida host=" + urlHostForLog(strings.TrimSpace(t)) + ">"
+		}
+		return t
+	}
+	return v
+}
+
+var urlInTextRe = regexp.MustCompile(`(?i)https?://[^\s"'<>]*`)
+
+// redactURLsInText troca URLs em texto livre (ex.: JSON inválido) por um marcador.
+func redactURLsInText(s string) string {
+	return urlInTextRe.ReplaceAllString(s, "<url redigida>")
+}
+
+// urlHostForLog devolve só o host de uma URL (para logs), ou "?" se ilegível.
+func urlHostForLog(raw string) string {
+	if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return "?"
 }

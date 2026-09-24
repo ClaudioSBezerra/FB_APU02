@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// RFBCreditosJSON espelha RFBApuracaoJSON para o endpoint /creditos-cbs/v1/.
+// RFBCreditosJSON espelha RFBApuracaoJSON para os endpoints de créditos (v1 /creditos-cbs/v1/, v2 /v2/creditos/).
 // Aceita tanto o campo "creditos" quanto "debitos" em cada grupo, pois a RFB
 // pode retornar as NF-e de entrada do comprador em qualquer um dos dois campos.
 type RFBCreditosJSON struct {
@@ -258,7 +258,7 @@ func processV2Creditos(tx *sql.Tx, requestID, companyID string, apuracao RFBCred
 	return insertErrors, nil
 }
 
-// ProcessarDownloadCreditosRFB baixa e processa o JSON de créditos CBS do endpoint /creditos-cbs/v1/.
+// ProcessarDownloadCreditosRFB baixa e processa o JSON de créditos CBS (v1 ou v2, conforme a solicitação).
 // Espelha ProcessarDownloadRFB: mesma estrutura de grupos, mesma lógica transacional, mesmos logs.
 // Suporta shape v1 (blocos fixos) e v2 (lista plana por período, multi-período) — ver detectRFBShape.
 func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID string) error {
@@ -267,11 +267,14 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 	log.Printf("[RFB Creditos] ============================================================")
 
 	var companyID, tiquete, cnpjBase, ambiente string
-	var tiqueteDownload *string
+	var tiqueteDownload, urlAssinada sql.NullString
+	var urlExpiraEm sql.NullTime
+	var apiVersao string
 	err := db.QueryRow(`
-		SELECT r.company_id, r.tiquete, r.cnpj_base, r.tiquete_download, COALESCE(r.ambiente, 'producao')
+		SELECT r.company_id, r.tiquete, r.cnpj_base, r.tiquete_download, COALESCE(r.ambiente, 'producao'),
+		       COALESCE(r.api_versao, 'v1'), r.url_assinada, r.url_assinada_expira_em
 		FROM rfb_requests r WHERE r.id = $1
-	`, requestID).Scan(&companyID, &tiquete, &cnpjBase, &tiqueteDownload, &ambiente)
+	`, requestID).Scan(&companyID, &tiquete, &cnpjBase, &tiqueteDownload, &ambiente, &apiVersao, &urlAssinada, &urlExpiraEm)
 	if err != nil {
 		log.Printf("[RFB Creditos] ERRO ao buscar request: %v", err)
 		return fmt.Errorf("failed to fetch request: %w", err)
@@ -290,14 +293,12 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 	// Ambiente da SOLICITAÇÃO, não do cadastro da credencial (ver ProcessarDownloadRFB).
 	log.Printf("[RFB Creditos] Request %s — ambiente da solicitação: %s", requestID, ambiente)
 	rfbClient.SetAmbiente(ambiente)
-
-	tiqueteParaDownload := tiquete
-	if tiqueteDownload != nil && *tiqueteDownload != "" {
-		tiqueteParaDownload = *tiqueteDownload
-		log.Printf("[RFB Creditos] Usando tiqueteDownload '%s'", tiqueteParaDownload)
-	} else {
-		log.Printf("[RFB Creditos] AVISO: tiqueteDownload não definido, usando tiqueteSolicitacao '%s'", tiquete)
-	}
+	// Versão da API da SOLICITAÇÃO (não a config atual): v2 baixa por urlAssinada/situacao.
+	rfbClient.SetAPIVersao(apiVersao)
+	dlInput := newRFBDownloadInput(tiquete, apiVersao, tiqueteDownload, urlAssinada, urlExpiraEm)
+	dlInput.OnURLRenovada = persistURLRenovada(db, requestID)
+	log.Printf("[RFB Creditos] api_versao: %s | urlAssinada: %t | tiqueteDownload: %t",
+		apiVersao, dlInput.URLAssinada != "", dlInput.TiqueteDownload != "")
 
 	res, err := db.Exec(`
 		UPDATE rfb_requests SET status = 'downloading', updated_at = CURRENT_TIMESTAMP
@@ -320,11 +321,11 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 		return fmt.Errorf("failed to get token: %w", err)
 	}
 
-	log.Printf("[RFB Creditos] Etapa 2/4: Baixando arquivo JSON (tiquete: %s)...", tiqueteParaDownload)
-	rawJSON, err := rfbClient.DownloadArquivo(token, tiqueteParaDownload)
+	log.Printf("[RFB Creditos] Etapa 2/4: Baixando arquivo JSON (tiquete: %s)...", tiquete)
+	rawJSON, err := BaixarArquivoRFB(rfbClient, token, dlInput)
 	if err != nil {
 		log.Printf("[RFB Creditos] ERRO no download: %v", err)
-		updateRequestError(db, requestID, "DOWNLOAD_ERROR", err.Error())
+		updateRequestError(db, requestID, downloadErrCode(err), err.Error())
 		return fmt.Errorf("failed to download: %w", err)
 	}
 	log.Printf("[RFB Creditos] JSON baixado (%.2f MB)", float64(len(rawJSON))/1024/1024)

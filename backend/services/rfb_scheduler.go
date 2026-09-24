@@ -58,21 +58,48 @@ func applyTokenRateLimit(cnpjBase string, err error) {
 	}
 }
 
-// Limites diários de solicitações de débito CBS por empresa. A RFB aceita no máximo
-// 2 chamadas/dia no endpoint de apuração; o agendamento usa só 1 para sempre sobrar
-// um slot para a chamada manual. Antes o limite de 1 ficava fixo dentro de
-// SolicitarApuracaoParaEmpresa e bloqueava também o botão manual — depois da coleta
-// automática, a 2ª chamada do dia nunca era possível.
+// Limites diários de solicitações por empresa.
+//
+// Débitos manuais dependem da VERSÃO da API RFB usada na solicitação: a v1 documentava 2
+// chamadas/dia; a v2 documenta 4. Subir para 4 antes de a empresa realmente usar a v2
+// causaria 429 reais da RFB, então o teto efetivo vem de LimiteDebitosDiaRFBPara (versão
+// resolvida por ResolveRFBAPIVersion) — nunca de uma constante única.
+// O agendamento usa só 1 para sempre sobrar um slot para a chamada manual. Créditos ficam
+// em 2/dia (sem limite RFB conhecido; aplicado pelo handler).
 const (
 	LimiteDebitosDiaAgendamento = 1
-	LimiteDebitosDiaRFB         = 2
+	LimiteDebitosDiaRFBv1       = 2
+	LimiteDebitosDiaRFBv2       = 4
+	LimiteCreditosDiaRFB        = 2
 )
+
+// LimiteDebitosDiaRFBPara devolve o teto diário de débitos manuais para o ambiente, segundo
+// a versão da API resolvida (v1 = 2, v2 = 4).
+func LimiteDebitosDiaRFBPara(ambiente string) int {
+	if ResolveRFBAPIVersion(ambiente) == RFBAPIVersaoV2 {
+		return LimiteDebitosDiaRFBv2
+	}
+	return LimiteDebitosDiaRFBv1
+}
+
+// LimiteDebitosDiaRFBEmpresa carrega o ambiente da credencial ativa da empresa e devolve o
+// teto diário efetivo. Sem credencial ativa (ou erro de leitura) usa o ambiente "producao".
+func LimiteDebitosDiaRFBEmpresa(db *sql.DB, companyID string) int {
+	ambiente := "producao"
+	var amb sql.NullString
+	if err := db.QueryRow(`
+		SELECT COALESCE(ambiente, 'producao') FROM rfb_credentials WHERE company_id = $1 AND ativo = true
+	`, companyID).Scan(&amb); err == nil && amb.Valid && amb.String != "" {
+		ambiente = amb.String
+	}
+	return LimiteDebitosDiaRFBPara(ambiente)
+}
 
 // SolicitarApuracaoParaEmpresa executa uma solicitação de apuração CBS para a empresa.
 // limiteDiario é o total de solicitações de débito já feitas hoje (scheduler + manual,
 // incluindo erros) a partir do qual a chamada é recusada com erro DAILY_LIMIT, sem
 // chamar a RFB: o scheduler passa LimiteDebitosDiaAgendamento, os handlers manuais
-// passam LimiteDebitosDiaRFB.
+// passam LimiteDebitosDiaRFBEmpresa (teto por versão da API).
 func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int) error {
 	// 1. Carregar credenciais ativas
 	var clientID, clientSecret, cnpjMatriz, ambiente string
@@ -102,7 +129,7 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int
 			cnpjBase, until.In(brtLoc).Format("02/01 15:04"))
 	}
 
-	// 4. Verificar limite diário de débitos (ver LimiteDebitosDia*)
+	// 4. Verificar limite diário de débitos (ver LimiteDebitosDia*; o teto vem do chamador)
 	// status != 'pending' exclui a própria linha que o Ressolicitar está reenviando agora
 	// (claim atômico deixa a linha em 'pending' sem alterar created_at) — sem isso, uma linha
 	// sendo re-enviada hoje sempre se autocontava e bloqueava seu próprio reenvio (achado de revisão).
@@ -121,6 +148,8 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int
 	// 5. Obter token OAuth2
 	rfbClient := NewRFBClient()
 	rfbClient.SetAmbiente(ambiente)
+	apiVersao := ResolveRFBAPIVersion(ambiente)
+	rfbClient.SetAPIVersao(apiVersao)
 	token, err := rfbClient.GetToken(clientID, clientSecret)
 	if err != nil {
 		applyTokenRateLimit(cnpjBase, err)
@@ -129,9 +158,9 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message, ambiente)
-			VALUES ($1, $2, 'error', $3, $4, $5)
-		`, companyID, cnpjBase, errorCode, err.Error(), ambiente)
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message, ambiente, api_versao)
+			VALUES ($1, $2, 'error', $3, $4, $5, $6)
+		`, companyID, cnpjBase, errorCode, err.Error(), ambiente, apiVersao)
 		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
@@ -144,19 +173,19 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message, ambiente)
-			VALUES ($1, $2, 'error', $3, $4, $5)
-		`, companyID, cnpjBase, errorCode, errMsg, ambiente)
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, error_code, error_message, ambiente, api_versao)
+			VALUES ($1, $2, 'error', $3, $4, $5, $6)
+		`, companyID, cnpjBase, errorCode, errMsg, ambiente, apiVersao)
 		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
 	// 7. Persistir registro da solicitação
 	var requestID string
 	err = db.QueryRow(`
-		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, ambiente)
-		VALUES ($1, $2, $3, 'requested', $4)
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, ambiente, api_versao)
+		VALUES ($1, $2, $3, 'requested', $4, $5)
 		RETURNING id
-	`, companyID, cnpjBase, tiquete, ambiente).Scan(&requestID)
+	`, companyID, cnpjBase, tiquete, ambiente, apiVersao).Scan(&requestID)
 	if err != nil {
 		return fmt.Errorf("erro ao salvar solicitação: %w", err)
 	}
@@ -177,7 +206,7 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int
 }
 
 // SolicitarCreditoParaEmpresa executa uma solicitação de créditos CBS para a empresa.
-// Usada pelo handler HTTP manual (limite: 2/dia separados dos débitos).
+// Usada pelo handler HTTP manual (limite: 2/dia separados dos débitos, aplicado pelo handler).
 func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 	var clientID, clientSecret, cnpjMatriz, ambiente string
 	err := db.QueryRow(`
@@ -206,6 +235,8 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 
 	rfbClient := NewRFBClient()
 	rfbClient.SetAmbiente(ambiente)
+	apiVersao := ResolveRFBAPIVersion(ambiente)
+	rfbClient.SetAPIVersao(apiVersao)
 	token, err := rfbClient.GetToken(clientID, clientSecret)
 	if err != nil {
 		applyTokenRateLimit(cnpjBase, err)
@@ -214,9 +245,9 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message, ambiente)
-			VALUES ($1, $2, 'error', 'credito', $3, $4, $5)
-		`, companyID, cnpjBase, errorCode, err.Error(), ambiente)
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message, ambiente, api_versao)
+			VALUES ($1, $2, 'error', 'credito', $3, $4, $5, $6)
+		`, companyID, cnpjBase, errorCode, err.Error(), ambiente, apiVersao)
 		return fmt.Errorf("%s: %w", errorCode, err)
 	}
 
@@ -229,17 +260,18 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 			// Gateway 404: endpoint ainda não liberado pela RFB para este ambiente — condição
 			// conhecida e temporária, não uma falha real. Persiste a linha (antes: "skip DB
 			// record") para a UI poder exibi-la como Alerta em vez de silêncio total; sem risco
-			// de acúmulo: a goroutine de SolicitarApuracaoParaEmpresa roda no máximo 2x/dia (teto
-			// LimiteDebitosDiaRFB), e o reenvio manual de créditos também é limitado a 2/dia.
-			log.Printf("[RFB Creditos] Endpoint /creditos-cbs/v1/ indisponível no gateway (HTTP 404) — aguardando liberação pela RFB")
+			// de acúmulo: a goroutine de SolicitarApuracaoParaEmpresa roda no máximo
+			// (no máximo o teto diário de débitos por dia), e o reenvio manual de créditos também
+			// é limitado a LimiteCreditosDiaRFB/dia.
+			log.Printf("[RFB Creditos] Endpoint de créditos (API %s) indisponível no gateway (HTTP 404) — aguardando liberação pela RFB", apiVersao)
 			errorCode = "ENDPOINT_INDISPONIVEL"
 		case strings.HasPrefix(errMsg, "RATE_LIMIT_429|"):
 			errorCode = "RATE_LIMIT"
 		}
 		db.Exec(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message, ambiente)
-			VALUES ($1, $2, 'error', 'credito', $3, $4, $5)
-		`, companyID, cnpjBase, errorCode, errMsg, ambiente)
+			INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo, error_code, error_message, ambiente, api_versao)
+			VALUES ($1, $2, 'error', 'credito', $3, $4, $5, $6)
+		`, companyID, cnpjBase, errorCode, errMsg, ambiente, apiVersao)
 		if errorCode == "ENDPOINT_INDISPONIVEL" {
 			return fmt.Errorf("endpoint não disponível: %w", err)
 		}
@@ -248,10 +280,10 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 
 	var requestID string
 	err = db.QueryRow(`
-		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo, ambiente)
-		VALUES ($1, $2, $3, 'requested', 'credito', $4)
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo, ambiente, api_versao)
+		VALUES ($1, $2, $3, 'requested', 'credito', $4, $5)
 		RETURNING id
-	`, companyID, cnpjBase, tiquete, ambiente).Scan(&requestID)
+	`, companyID, cnpjBase, tiquete, ambiente, apiVersao).Scan(&requestID)
 	if err != nil {
 		return fmt.Errorf("erro ao salvar solicitação de créditos: %w", err)
 	}

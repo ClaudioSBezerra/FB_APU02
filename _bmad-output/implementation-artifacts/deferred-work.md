@@ -1,5 +1,20 @@
 # Deferred Work
 
+## Deferred from: code review of spec-rfb-cbs-v2-urls-download-webhook (2026-09-24)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-urls-download-webhook.md`
+  summary: **Formatos v2 são inferidos da documentação, não validados contra a API real** — paths `apuracao-cbs[-prr]/v2/...`, resposta `tiqueteSolicitacao`, endpoint `situacao` (estados PENDENTE/EM_PROCESSAMENTO/CONCLUIDA/ERRO) e o download SEM Authorization na `urlAssinada`. Os testes usam um gateway fake montado sobre as mesmas suposições. Antes de virar produção: ativar `RFB_API_VERSION_RESTRITA=v2` no ambiente restrita e confirmar um ciclo completo (solicitar → webhook → download → resumo). O limite diário é por versão (v1=2, v2=4).
+  evidence: Consenso dos 2 revisores; único jeito de fechar é observar a API real.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-urls-download-webhook.md`
+  summary: **Sem polling ativo nem retry de `NOT_READY`** — o estado é gravado como `error` (recuperável) e depende de novo webhook ou clique manual em "Tentar Recuperar"; `tEASegundos` (tempo estimado) é lido e ignorado. Webhook de erro SEM `tiqueteSolicitacao` não é correlacionável (só log; o watchdog de 5h é a rede de segurança) e não há métrica/alerta para isso.
+  evidence: Escopo explícito da spec (polling fora). Revisitar se webhooks se perderem em produção.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-urls-download-webhook.md`
+  summary: Resposta 2xx da RFB com corpo não parseável (tíquete ausente/não-string) não cria linha em `rfb_requests` — a cota diária pode ser consumida sem registro. Download manual de crédito v2 aceita linha ainda `requested` e a converte em `error/NOT_READY` (recuperável por novo webhook). Testes: `waitProcessorSettled` baseado em polling de 5s assumindo `CRED_NOT_FOUND`, e-mail fixo em `setupOwner`, `rows, _ :=` sem checar erro.
+  evidence: Baixa probabilidade/impacto; achados de revisão. Revisitar junto com observabilidade de `rfb_requests`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-urls-download-webhook.md`
+  summary: Webhook sem HMAC (`RFB_WEBHOOK_SECRET` vazio) + `urlAssinada` externa permite, a quem conhecer um `tiqueteSolicitacao` em `requested`, injetar um arquivo (envenenamento de dados fiscais). Mitigações entregues: só linhas v2 aceitam URL, https/porta 443/sem IP interno, allow-list opcional `RFB_URL_ASSINADA_HOSTS`, aviso alto nos logs. **Ação de ops recomendada:** definir `RFB_WEBHOOK_SECRET` (se a RFB assinar) e `RFB_URL_ASSINADA_HOSTS` com o domínio de storage real da RFB assim que for conhecido.
+  evidence: Reforça o item de `.env` de produção vazio já visto no deploy do SSO (24/08).
+
 ## Deferred from: code review of spec-rfb-cbs-v2-schema (2026-09-24)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-schema.md`

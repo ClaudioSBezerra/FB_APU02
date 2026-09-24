@@ -47,8 +47,8 @@ context: []
 - [x] Resolver as 7 decisões "Ask First" com o usuário -- respostas registradas acima (2026-09-24).
 - [x] `spec-rfb-cbs-v2-schema.md` -- 1ª tentativa (só migration) revertida via loopback intent_gap: revisão adversarial (2x) achou que o backfill de `data_apuracao` sozinho quebra 5+ pontos de leitura (`rfb_debitos_lista.go` periodo/ano/dropdown, `rfb_creditos.go` periodo, frontend `RFBDebitos.tsx`) e, mais fundamental, o parser continuaria escrevendo `"AAAAMM"` até a sub-spec seguinte, recriando a coexistência de formatos. **Decisão do humano:** manter "migrar colunas" (não normalizar no parse), mas fundir schema+leituras+parser num ÚNICO deploy -- ver `spec-rfb-cbs-v2-schema.md` (escopo ampliado, mesmo arquivo).
 - [x] `spec-rfb-cbs-v2-schema.md` (implementação, escopo ampliado) -- migration (widen+backfill `data_apuracao`, colunas novas débitos/créditos) + os 5+ pontos de leitura afetados + parser v1/v2 dual-support com bucketing por data -- tudo num só deploy, não pode ser splitado (é exatamente o que causou o loopback).
-- [ ] `spec-rfb-cbs-v2-urls-download.md` (implementação) -- migrar `rfb.go` para paths v2, implementar fallback `urlAssinada`→`GET download` (decisão 3), elevar limite diário para 4 (decisão 7).
-- [ ] `spec-rfb-cbs-v2-webhook.md` (implementação) -- tratar `codigoErro`/`mensagemErro` no webhook (decisão 4).
+- [x] `spec-rfb-cbs-v2-urls-download.md` (entregue junto com webhook em `spec-rfb-cbs-v2-urls-download-webhook.md`) (implementação) -- migrar `rfb.go` para paths v2, implementar fallback `urlAssinada`→`GET download` (decisão 3), elevar limite diário para 4 (decisão 7).
+- [x] `spec-rfb-cbs-v2-webhook.md` (idem) (implementação) -- tratar `codigoErro`/`mensagemErro` no webhook (decisão 4).
 
 **Acceptance Criteria:**
 - Given `spec-rfb-cbs-v2-schema.md` (escopo ampliado), when implementada, then é um único deploy atômico -- nunca migration/backfill sem o parser correspondente no mesmo release.

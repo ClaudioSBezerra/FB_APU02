@@ -163,13 +163,13 @@ func DownloadManualCreditosHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		var requestID, tiquete, status string
-		var tiqueteDownload *string
+		var requestID, tiquete, status, apiVersao string
+		var tiqueteDownload, urlAssinada *string
 		err = db.QueryRow(`
-			SELECT id, COALESCE(tiquete, ''), status, tiquete_download
+			SELECT id, COALESCE(tiquete, ''), status, tiquete_download, COALESCE(api_versao, 'v1'), url_assinada
 			FROM rfb_requests
 			WHERE id = $1 AND company_id = $2 AND tipo = 'credito'
-		`, req.RequestID, companyID).Scan(&requestID, &tiquete, &status, &tiqueteDownload)
+		`, req.RequestID, companyID).Scan(&requestID, &tiquete, &status, &tiqueteDownload, &apiVersao, &urlAssinada)
 		if err == sql.ErrNoRows {
 			http.Error(w, "Solicitação não encontrada", http.StatusNotFound)
 			return
@@ -179,7 +179,11 @@ func DownloadManualCreditosHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if tiqueteDownload == nil || *tiqueteDownload == "" {
+		// v1 exige o tiqueteDownload do webhook; v2 baixa por urlAssinada ou, sem ela, consulta
+		// a situação pelo tiquete da solicitação — basta ter o tiquete.
+		temTiqueteDownload := tiqueteDownload != nil && *tiqueteDownload != ""
+		temURLAssinada := urlAssinada != nil && *urlAssinada != ""
+		if !temTiqueteDownload && !temURLAssinada && !(apiVersao == "v2" && tiquete != "") {
 			http.Error(w, "Tíquete de download ainda não recebido — aguarde o webhook", http.StatusBadRequest)
 			return
 		}

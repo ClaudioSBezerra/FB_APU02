@@ -514,12 +514,15 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 
 	// 1. Fetch request details and company credentials
 	var companyID, tiquete, cnpjBase, ambiente string
-	var tiqueteDownload *string
+	var tiqueteDownload, urlAssinada sql.NullString
+	var urlExpiraEm sql.NullTime
+	var apiVersao string
 	err := db.QueryRow(`
-		SELECT r.company_id, r.tiquete, r.cnpj_base, r.tiquete_download, COALESCE(r.ambiente, 'producao')
+		SELECT r.company_id, r.tiquete, r.cnpj_base, r.tiquete_download, COALESCE(r.ambiente, 'producao'),
+		       COALESCE(r.api_versao, 'v1'), r.url_assinada, r.url_assinada_expira_em
 		FROM rfb_requests r
 		WHERE r.id = $1
-	`, requestID).Scan(&companyID, &tiquete, &cnpjBase, &tiqueteDownload, &ambiente)
+	`, requestID).Scan(&companyID, &tiquete, &cnpjBase, &tiqueteDownload, &ambiente, &apiVersao, &urlAssinada, &urlExpiraEm)
 	if err != nil {
 		return fmt.Errorf("failed to fetch request: %w", err)
 	}
@@ -538,15 +541,12 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	// solicitar e baixar, o download precisa ir no mesmo prefixo (rtc/prr-rtc) do tíquete.
 	log.Printf("[RFB Processor] Request %s — ambiente da solicitação: %s", requestID, ambiente)
 	rfbClient.SetAmbiente(ambiente)
-
-	// Use tiqueteDownload if provided by the webhook
-	tiqueteParaDownload := tiquete
-	if tiqueteDownload != nil && *tiqueteDownload != "" {
-		tiqueteParaDownload = *tiqueteDownload
-		log.Printf("[RFB Processor] Using tiqueteDownload '%s' (solicitacao: '%s')", tiqueteParaDownload, tiquete)
-	} else {
-		log.Printf("[RFB Processor] WARNING: tiqueteDownload not set, falling back to tiqueteSolicitacao '%s'", tiquete)
-	}
+	// Versão da API da SOLICITAÇÃO (não a config atual): v2 baixa por urlAssinada/situacao.
+	rfbClient.SetAPIVersao(apiVersao)
+	dlInput := newRFBDownloadInput(tiquete, apiVersao, tiqueteDownload, urlAssinada, urlExpiraEm)
+	dlInput.OnURLRenovada = persistURLRenovada(db, requestID)
+	log.Printf("[RFB Processor] Request %s — api_versao: %s | urlAssinada: %t | tiqueteDownload: %t",
+		requestID, apiVersao, dlInput.URLAssinada != "", dlInput.TiqueteDownload != "")
 
 	// 2. Atomic status claim — prevents concurrent webhook + manual download races.
 	// Only proceeds if status is not already 'downloading', 'completed', or 'reprocessing'.
@@ -569,10 +569,10 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 		return fmt.Errorf("failed to get token: %w", err)
 	}
 
-	// 4. Download the JSON file (single-use ticket!)
-	rawJSON, err := rfbClient.DownloadArquivo(token, tiqueteParaDownload)
+	// 4. Download the JSON file (single-use ticket!) — helper compartilhado com fallback em camadas
+	rawJSON, err := BaixarArquivoRFB(rfbClient, token, dlInput)
 	if err != nil {
-		updateRequestError(db, requestID, "DOWNLOAD_ERROR", err.Error())
+		updateRequestError(db, requestID, downloadErrCode(err), err.Error())
 		return fmt.Errorf("failed to download: %w", err)
 	}
 
@@ -1402,19 +1402,27 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 }
 
 func updateRequestStatus(db *sql.DB, requestID, status string) {
-	_, err := db.Exec(`
-		UPDATE rfb_requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2
-	`, status, requestID)
+	query := `UPDATE rfb_requests SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`
+	if status == "completed" {
+		// urlAssinada é credencial temporária: não fica guardada depois do download concluir.
+		query = `UPDATE rfb_requests SET status = $1, url_assinada = NULL, url_assinada_expira_em = NULL,
+			updated_at = CURRENT_TIMESTAMP WHERE id = $2`
+	}
+	_, err := db.Exec(query, status, requestID)
 	if err != nil {
 		log.Printf("[RFB Processor] Error updating request %s status to %s: %v", requestID, status, err)
 	}
 }
 
+// updateRequestError é o ponto único de erro terminal do processamento: grava code/message
+// (truncados por runes, UTF-8-safe) e zera url_assinada* — urlAssinada é credencial
+// temporária e não deve sobrar numa linha em erro (o retry renova via situacao).
 func updateRequestError(db *sql.DB, requestID, code, message string) {
 	_, err := db.Exec(`
-		UPDATE rfb_requests SET status = 'error', error_code = $1, error_message = $2, updated_at = CURRENT_TIMESTAMP
+		UPDATE rfb_requests SET status = 'error', error_code = $1, error_message = $2,
+			url_assinada = NULL, url_assinada_expira_em = NULL, updated_at = CURRENT_TIMESTAMP
 		WHERE id = $3
-	`, code, message, requestID)
+	`, TruncateRunes(code, 50), TruncateRunes(message, 4000), requestID)
 	if err != nil {
 		log.Printf("[RFB Processor] Error updating request %s error: %v", requestID, err)
 	}
