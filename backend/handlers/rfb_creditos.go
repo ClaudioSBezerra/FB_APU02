@@ -268,7 +268,7 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 
 		q := r.URL.Query()
 		situacao := q.Get("situacao")
-		periodo := q.Get("periodo")
+		periodo := normalizePeriodoFiltro(q.Get("periodo"))
 		niEmitente := q.Get("ni_emitente")
 		pageStr := q.Get("page")
 		page := 1
@@ -288,7 +288,11 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 			idx++
 		}
 		if periodo != "" {
-			where = append(where, "data_apuracao = $"+strconv.Itoa(idx))
+			// data_apuracao é armazenado como "mm/aaaa" (migration 129); o filtro
+			// "periodo" continua no contrato externo AAAAMM (input do frontend, maxLength
+			// 6) — traduz via TO_DATE/TO_CHAR antes de comparar, sem mudar o contrato.
+			where = append(where, "CASE WHEN data_apuracao ~ '^(0[1-9]|1[0-2])/[0-9]{4}$' "+
+				"THEN TO_CHAR(TO_DATE(data_apuracao, 'MM/YYYY'), 'YYYYMM') END = $"+strconv.Itoa(idx))
 			args = append(args, periodo)
 			idx++
 		}

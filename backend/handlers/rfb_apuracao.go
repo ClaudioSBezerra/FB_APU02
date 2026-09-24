@@ -972,7 +972,8 @@ func DetalheApuracaoHandler(db *sql.DB) http.HandlerFunc {
 			FROM rfb_debitos d
 			LEFT JOIN nfe_saidas n ON n.chave_nfe = d.chave_dfe AND n.company_id = d.company_id
 			` + where + fmt.Sprintf(`
-			ORDER BY d.tipo_apuracao, d.data_apuracao
+			ORDER BY d.tipo_apuracao,
+				CASE WHEN d.data_apuracao ~ '^(0[1-9]|1[0-2])/[0-9]{4}$' THEN TO_DATE(d.data_apuracao, 'MM/YYYY') END
 			LIMIT $%d OFFSET $%d`, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
 		debitRows, err := db.Query(selectQ, pageArgs...)

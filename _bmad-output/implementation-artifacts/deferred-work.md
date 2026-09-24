@@ -1,5 +1,26 @@
 # Deferred Work
 
+## Deferred from: code review of spec-rfb-cbs-v2-schema (2026-09-24)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-schema.md`
+  summary: **Deploy não é seguro para rolling/rollback** — a migration 129 reescreve `data_apuracao` in-place no boot; uma instância antiga ainda viva durante o rollout (ou rollback do binário) volta a gravar `AAAAMM`, recriando formato misto (leituras traduzidas ignoram essas linhas — viram NULL no guard). A migration é idempotente e roda a cada boot, então o próximo boot reconverte. Antes do deploy real: rodar contra cópia/staging do banco PRD medindo tempo do backfill (4 UPDATEs sem batch, no boot), e garantir que só uma instância roda durante a troca.
+  evidence: Achado dos 2 revisores; sem down-path. No servidor AWS há 1 empresa/1 instância (ver memória de deploy), risco prático baixo. Nunca aplicar a 129 em bancos que tenham a versão da 1ª tentativa (revertida) registrada em `schema_migrations` sem antes dropar as colunas antigas `valor_apropriacao_*`/`valor_utilizacao_*`/`valor_nao_utilizado_*` (só o dev local teve isso).
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-schema.md`
+  summary: **`insertDebito`/`insertCredito` continuam com "insertErrors++; continue" dentro de `sql.Tx`** — após qualquer statement falho o Postgres aborta a transação (25P02) e tudo depois falha; sem SAVEPOINT a tolerância a erro parcial é ilusória e o request termina `completed` mesmo com falhas (`finalStatus` é constante). Padrão pré-existente do v1, replicado no v2.
+  evidence: Confirmado por 2 revisores. Corrigir exigiria SAVEPOINT por insert ou status `completed_with_errors`. Revisitar junto com qualquer mudança de status/observabilidade de `rfb_requests`.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-schema.md`
+  summary: Uma chave re-reportada pela RFB sob outro período (`ON CONFLICT` move `data_apuracao`/`tipo_apuracao`) deixa o `rfb_resumo`/`rfb_creditos_resumo` do período antigo desatualizado — só os períodos presentes no payload atual são reagregados. Relevante no incremental v2 (correções entre períodos).
+  evidence: Revisor adversarial; cenário plausível mas raro. Revisitar se resumos divergirem de `SUM` direto da tabela.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-schema.md`
+  summary: Linhas v2 de débito não têm `situacao_debito`/`formas_extincao`/`eventos` (o payload v2 não traz esses campos) — telas/filtros por situação em `rfb_debitos_lista.go` ficam vazios para linhas só-v2. O patch preserva o valor v1 quando a chave já existia, mas não deriva situação para chaves novas.
+  evidence: Decisão de produto pendente (derivar situação de `saldoDevedor`/`extinto`? qual vocabulário?). Revisitar quando houver volume v2 real em PRD.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-schema.md`
+  summary: Heurística de bucketing v2 usa o timezone do próprio `registro` parseado (`RFBTime` aceita timestamp sem TZ) — `registro` perto da virada de mês pode cair no mês errado; `ajuste` deixa de existir no v2 (chave v1 `ajuste` reclassificada por upsert v2 para corrente/extemporâneo). `Origem`/`Documento`/valores monetários v2 são `int`/`float64` estritos (um campo string derruba o payload inteiro com PARSE_ERROR); somas monetárias seguem em float64 (pré-existente).
+  evidence: Achados de revisão, especulativos/baixa probabilidade sem amostra real do v2. Revisitar ao receber payload v2 real.
+- source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-schema.md`
+  summary: Filtros/ORDER BY traduzidos (`CASE ... TO_DATE(...)`) não usam índice em `(company_id, data_apuracao)`; sem índice de expressão. Testes: `waitAsyncSAPSync` com `time.Sleep(100ms)` (flaky por construção), helpers de teste normalizam a entrada (não detectam regressão para AAAAMM armazenado), cleanup de `setupRFBLeituraTest` não limpa `rfb_creditos`/`rfb_resumo`/`rfb_creditos_resumo`. Duplicação de blocos `sql.NullFloat64` em `insertDebito/insertCredito` (helper `nullFloat` reduziria ~80 linhas).
+  evidence: Manutenibilidade/performance, sem impacto funcional hoje. Revisitar se `rfb_debitos` crescer a ponto de a listagem ficar lenta.
+
 ## Deferred from: 2ª rodada de code review of spec-rfb-resumo-agregacao-sql (2026-09-15)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-rfb-resumo-agregacao-sql.md`

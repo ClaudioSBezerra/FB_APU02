@@ -1,6 +1,7 @@
 package services
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -114,7 +115,7 @@ func TestProcessarDownloadCreditosRFB_ItemSemChaveNaoDuplica(t *testing.T) {
 	if err := db.QueryRow(`
 		SELECT COUNT(*) FROM rfb_creditos
 		WHERE company_id = $1 AND data_apuracao = $2 AND (chave_dfe IS NULL OR chave_dfe = '')
-	`, companyID, periodo).Scan(&rowsSemChave); err != nil {
+	`, companyID, normalizeDataApuracao(periodo)).Scan(&rowsSemChave); err != nil {
 		t.Fatalf("falha ao contar rfb_creditos sem chave: %v", err)
 	}
 	if rowsSemChave != 2 {
@@ -217,5 +218,144 @@ func TestProcessarDownloadCreditosRFB_ApenasExtemporaneo_PeriodoReal(t *testing.
 	_, _, _, _, foundVazio := readRfbCreditosResumo(t, db, companyID, "")
 	if foundVazio {
 		t.Fatalf("payload só-extemporâneo não pode gravar rfb_creditos_resumo sob período vazio (bug do Patch 2)")
+	}
+}
+
+// creditoV2JSON monta um crédito v2 completo (árvore cbs.apropriacao.utilizacao.naoUtilizado).
+func creditoV2JSON(chave, registro string, apurado float64) string {
+	return fmt.Sprintf(`{"origem":2,"documento":57,"chave":"%s","emissao":"2026-01-10T10:00:00","registro":"%s","atualizacao":"2026-02-01T00:00:00",
+		"cbs":{"apurado":%.2f,"excedentes":1.5,"apropriacao":{"inapropriavel":2.5,"suspenso":3.5,"prescrito":4.5,"aApropriar":5.5,"apropriado":6.5,
+		"utilizacao":{"inutilizavel":7.5,"utilizado":8.5,"restabelecido":9.5,"naoUtilizado":{"saldoCredor":10.5,"pedidoRessarcimento":11.5}}}}}`,
+		chave, registro, apurado)
+}
+
+// (f) + multi-período: créditos v2 gravam a árvore nas colunas novas e geram um resumo por pa.
+func TestProcessarDownloadCreditosRFB_V2_ArvoreEMultiPeriodo(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	body := `{"apuracao":[` +
+		`{"pa":"12/2025","creditos":[` + creditoV2JSON("CV2-A", "2025-12-10T00:00:00", 100) + `]},` +
+		`{"pa":"01/2026","creditos":[` + creditoV2JSON("CV2-B", "2026-01-10T00:00:00", 200) + `,` + creditoV2JSON("CV2-C", "2026-04-01T00:00:00", 50) + `]}]}`
+	req := insertRFBRequest(t, db, companyID, "tiq-credv2", "credito", "producao")
+	if err := ProcessarDownloadCreditosRFB(db, newFakeRFBDownload(t, body), req); err != nil {
+		t.Fatalf("créditos v2: %v", err)
+	}
+	waitAsyncSAPSync()
+
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM rfb_creditos_resumo WHERE company_id = $1`, companyID).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("esperava 2 linhas em rfb_creditos_resumo (uma por pa), veio %d (err=%v)", n, err)
+	}
+	if tc, vt, _, _, found := readRfbCreditosResumo(t, db, companyID, "12/2025"); !found || tc != 1 || vt != 100 {
+		t.Fatalf("12/2025: esperava 1/100, veio found=%v %d/%.2f", found, tc, vt)
+	}
+	// bucketing v2 em créditos: CV2-C (registro em abril) é extemporaneo, que conta em total_corrente
+	// (aggregateRfbCreditosSQL: tipo <> 'ajuste').
+	if tc, vt, corrente, _, found := readRfbCreditosResumo(t, db, companyID, "01/2026"); !found || tc != 2 || vt != 250 || corrente != 2 {
+		t.Fatalf("01/2026: esperava 2/250/corrente=2, veio found=%v %d/%.2f/%d", found, tc, vt, corrente)
+	}
+
+	// (v) extinto = utilizacao.utilizado (8.5), nao_extinto = naoUtilizado.saldoCredor (10.5)
+	var ext, naoExt float64
+	if err := db.QueryRow(`SELECT valor_cbs_extinto, valor_cbs_nao_extinto FROM rfb_creditos WHERE company_id = $1 AND chave_dfe = 'CV2-C'`, companyID).Scan(&ext, &naoExt); err != nil {
+		t.Fatalf("ler extinto/nao_extinto: %v", err)
+	}
+	if ext != 8.5 || naoExt != 10.5 {
+		t.Fatalf("créditos v2: esperava extinto=8.5 nao_extinto=10.5, veio %.2f/%.2f", ext, naoExt)
+	}
+
+	var da, tipo string
+	var v [11]sql.NullFloat64
+	var origem, documento sql.NullInt64
+	var reg, atu sql.NullTime
+	if err := db.QueryRow(`
+		SELECT data_apuracao, tipo_apuracao, origem, documento, data_registro, data_atualizacao,
+		       valor_cbs_excedentes, valor_cbs_apropriacao_inapropriavel, valor_cbs_apropriacao_suspenso,
+		       valor_cbs_apropriacao_prescrito, valor_cbs_apropriacao_a_apropriar, valor_cbs_apropriacao_apropriado,
+		       valor_cbs_utilizacao_inutilizavel, valor_cbs_utilizacao_utilizado, valor_cbs_utilizacao_restabelecido,
+		       valor_cbs_nao_utilizado_saldo_credor, valor_cbs_nao_utilizado_pedido_ressarcimento
+		FROM rfb_creditos WHERE company_id = $1 AND chave_dfe = 'CV2-C'
+	`, companyID).Scan(&da, &tipo, &origem, &documento, &reg, &atu,
+		&v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9], &v[10]); err != nil {
+		t.Fatalf("ler rfb_creditos: %v", err)
+	}
+	if da != "01/2026" || tipo != "extemporaneo" {
+		t.Fatalf("data_apuracao/tipo: esperava 01/2026/extemporaneo, veio %s/%s", da, tipo)
+	}
+	if origem.Int64 != 2 || documento.Int64 != 57 || !reg.Valid || !atu.Valid {
+		t.Fatalf("origem/documento/registro/atualizacao: %+v %+v %+v %+v", origem, documento, reg, atu)
+	}
+	for i, want := range []float64{1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5, 11.5} {
+		if !v[i].Valid || v[i].Float64 != want {
+			t.Fatalf("coluna da árvore #%d: esperava %.1f, veio %+v", i, want, v[i])
+		}
+	}
+
+	// Reprocessar o raw_json v2 mantém o resultado.
+	if err := ReprocessarRawJSONCreditosRFB(db, req); err != nil {
+		t.Fatalf("reprocessar créditos v2: %v", err)
+	}
+	waitAsyncSAPSync()
+	if tc, vt, _, _, found := readRfbCreditosResumo(t, db, companyID, "01/2026"); !found || tc != 2 || vt != 250 {
+		t.Fatalf("após reprocessar: esperava 2/250, veio found=%v %d/%.2f", found, tc, vt)
+	}
+}
+
+// v1 de créditos normaliza "AAAAMM" → "mm/aaaa" na persistência e colunas v2 ficam NULL.
+func TestProcessarDownloadCreditosRFB_V1GravaMMAAAAEColunasV2Nulas(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	req := insertRFBRequest(t, db, companyID, "tiq-credv1-norm", "credito", "producao")
+	if err := ProcessarDownloadCreditosRFB(db, newFakeRFBDownload(t, creditosJSON("202602", []testDFe{{Chave: "CV1-A", Valor: 12}}, nil)), req); err != nil {
+		t.Fatalf("v1: %v", err)
+	}
+	waitAsyncSAPSync()
+
+	var da string
+	var origem sql.NullInt64
+	var apropriado sql.NullFloat64
+	if err := db.QueryRow(`SELECT data_apuracao, origem, valor_cbs_apropriacao_apropriado FROM rfb_creditos WHERE company_id = $1 AND chave_dfe = 'CV1-A'`, companyID).Scan(&da, &origem, &apropriado); err != nil {
+		t.Fatal(err)
+	}
+	if da != "02/2026" || origem.Valid || apropriado.Valid {
+		t.Fatalf("esperava 02/2026 com colunas v2 NULL, veio %s origem=%+v apropriado=%+v", da, origem, apropriado)
+	}
+}
+
+// período inválido em créditos v2 é descartado sem gravar linhas/resumo; os demais processam.
+func TestProcessarDownloadCreditosRFB_V2_PeriodoInvalidoIgnorado(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	body := `{"apuracao":[` +
+		`{"pa":"13/2026","creditos":[` + creditoV2JSON("CINV-A", "2026-01-10T00:00:00", 10) + `]},` +
+		`{"pa":"01/2026","creditos":[` + creditoV2JSON("COK-A", "2026-01-10T00:00:00", 200) + `]}]}`
+	req := insertRFBRequest(t, db, companyID, "tiq-credv2-inv", "credito", "producao")
+	if err := ProcessarDownloadCreditosRFB(db, newFakeRFBDownload(t, body), req); err != nil {
+		t.Fatalf("créditos v2: %v", err)
+	}
+	waitAsyncSAPSync()
+
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM rfb_creditos WHERE company_id = $1 AND chave_dfe = 'CINV-A'`, companyID).Scan(&n)
+	if n != 0 {
+		t.Fatalf("crédito de período inválido não pode ser gravado, veio %d", n)
+	}
+	if _, _, _, _, found := readRfbCreditosResumo(t, db, companyID, "13/2026"); found {
+		t.Fatalf("resumo de período inválido não pode existir")
+	}
+	if tc, vt, _, _, found := readRfbCreditosResumo(t, db, companyID, "01/2026"); !found || tc != 1 || vt != 200 {
+		t.Fatalf("01/2026: esperava 1/200, veio found=%v %d/%.2f", found, tc, vt)
 	}
 }

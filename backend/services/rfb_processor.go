@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -51,7 +52,7 @@ func (rt *RFBTime) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// RFB JSON structures matching the API response layout
+// RFB JSON structures matching the v1 API response layout
 type RFBApuracaoJSON struct {
 	ApuracaoCorrente     *RFBGrupoDebitos `json:"apuracaoCorrente"`
 	ApuracaoAjuste       *RFBGrupoDebitos `json:"apuracaoAjuste"`
@@ -63,6 +64,11 @@ type RFBGrupoDebitos struct {
 	Creditos []RFBCredito `json:"creditos"`
 }
 
+// RFBDebito é a struct canônica de um débito — usada tanto como alvo direto do
+// Unmarshal do shape v1 (tags json abaixo) quanto como formato de saída do
+// adapter v2 (adaptDebitoV2), que preenche os campos manualmente. Os campos
+// "Campos v2" só são populados quando o item vem do shape v2 (migration 129);
+// ficam nil para linhas v1, gravando NULL em rfb_debitos.
 type RFBDebito struct {
 	ModeloDfe          FlexString      `json:"modeloDfe"`
 	NumeroDfe          FlexString      `json:"numeroDfe"`
@@ -79,6 +85,325 @@ type RFBDebito struct {
 	SituacaoDebito     FlexString      `json:"situacao"`
 	FormasExtincao     json.RawMessage `json:"formasExtincao"`
 	Eventos            json.RawMessage `json:"eventos"`
+
+	// Campos v2 (rfb_debitos, migration 129) — nil quando o item vem do shape v1.
+	Origem               *int       `json:"-"`
+	Documento            *int       `json:"-"`
+	DataRegistro         *time.Time `json:"-"`
+	DataAtualizacao      *time.Time `json:"-"`
+	ValorCBSExcedente    *float64   `json:"-"`
+	ValorCBSInexigivel   *float64   `json:"-"`
+	ValorCBSSuspenso     *float64   `json:"-"`
+	ValorCBSSaldoDevedor *float64   `json:"-"`
+}
+
+// ── Shape detection (v1 vs v2) ──────────────────────────────────────────────
+//
+// A RFB republicou a API de apuração CBS como v2 (corte anunciado para out/2026,
+// ver spec-rfb-cbs-v2-migracao.md): o shape de resposta muda de 3 blocos fixos
+// (apuracaoCorrente/apuracaoAjuste/debitosExtemporaneos) para uma lista plana
+// agrupada por período (apuracao[].pa), podendo trazer MÚLTIPLOS períodos numa
+// única resposta. O parser precisa suportar os dois formatos simultaneamente —
+// inclusive para ReprocessarRawJSON(CreditosRFB), que relê raw_json histórico
+// que pode ter sido salvo em qualquer um dos dois shapes.
+
+// rfbShapeProbe é um probe leve do JSON bruto — só as chaves de topo relevantes
+// para decidir o shape, via json.RawMessage (evita dois Unmarshal completos).
+type rfbShapeProbe struct {
+	ApuracaoCorrente     json.RawMessage `json:"apuracaoCorrente"`
+	ApuracaoAjuste       json.RawMessage `json:"apuracaoAjuste"`
+	DebitosExtemporaneos json.RawMessage `json:"debitosExtemporaneos"`
+	Apuracao             json.RawMessage `json:"apuracao"`
+}
+
+// detectRFBShape decide entre os parsers v1 e v2 a partir das chaves de topo
+// presentes no JSON bruto, sem fazer o Unmarshal completo em nenhuma das duas
+// structs canônicas. Default "v1" quando nenhuma chave reconhecida aparece
+// (ex.: payload vazio "{}") — preserva o comportamento pré-v2 desse caso de
+// borda (ver TestProcessarDownloadRFB_PeriodoVazioZeros).
+func detectRFBShape(raw []byte) string {
+	var probe rfbShapeProbe
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return "v1"
+	}
+	if probe.ApuracaoCorrente != nil || probe.ApuracaoAjuste != nil || probe.DebitosExtemporaneos != nil {
+		if probe.Apuracao != nil {
+			log.Printf("[RFB Processor] AVISO: payload híbrido (chaves v1 + 'apuracao' v2) — usando v1, bloco 'apuracao' v2 ignorado")
+		}
+		return "v1"
+	}
+	if probe.Apuracao != nil {
+		if string(probe.Apuracao) == "null" {
+			log.Printf("[RFB Processor] resposta v2 sem períodos ('apuracao': null) — tratada como v2 vazio")
+		}
+		return "v2"
+	}
+	return "v1"
+}
+
+// normalizeDataApuracao converte o formato v1 "AAAAMM" (6 dígitos) para o
+// formato canônico de armazenamento "mm/aaaa" (migration 129). Valores que já
+// estão em "mm/aaaa" (v2, ou reprocessamento de dado já migrado) e qualquer
+// valor que não seja exatamente 6 dígitos passam sem alteração.
+func normalizeDataApuracao(raw string) string {
+	if len(raw) != 6 {
+		return raw
+	}
+	for _, r := range raw {
+		if r < '0' || r > '9' {
+			return raw
+		}
+	}
+	// mês inválido (ex.: "202613"): devolve o original sem converter — o
+	// chamador detecta via periodoValido e não grava sob período inválido.
+	if m, _ := strconv.Atoi(raw[4:6]); m < 1 || m > 12 {
+		return raw
+	}
+	return raw[4:6] + "/" + raw[0:4]
+}
+
+// periodoValido informa se p está no formato canônico "mm/aaaa" com mês 01-12.
+func periodoValido(p string) bool {
+	if len(p) != 7 || p[2] != '/' {
+		return false
+	}
+	for i, r := range p {
+		if i == 2 {
+			continue
+		}
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	m, _ := strconv.Atoi(p[0:2])
+	return m >= 1 && m <= 12
+}
+
+// normalizeApuracaoV1DataApuracao normaliza DataApuracao (in place) de todos os
+// débitos/créditos embutidos nos 3 blocos do shape v1, logo após o Unmarshal —
+// garante que rfb_debitos/rfb_resumo (e rfb_creditos/rfb_creditos_resumo, via
+// créditos embutidos) sempre gravem "mm/aaaa", nunca mais "AAAAMM", fechando a
+// coexistência de formatos que causou o revert da 1ª tentativa desta spec.
+func normalizeApuracaoV1DataApuracao(apuracao *RFBApuracaoJSON) {
+	for _, g := range []*RFBGrupoDebitos{apuracao.ApuracaoCorrente, apuracao.ApuracaoAjuste, apuracao.DebitosExtemporaneos} {
+		if g == nil {
+			continue
+		}
+		for i := range g.Debitos {
+			g.Debitos[i].DataApuracao = normalizeDataApuracao(g.Debitos[i].DataApuracao)
+		}
+		for i := range g.Creditos {
+			g.Creditos[i].DataApuracao = normalizeDataApuracao(g.Creditos[i].DataApuracao)
+		}
+	}
+}
+
+// parsePeriodoMMYYYY interpreta uma string "mm/aaaa" (formato canônico de
+// data_apuracao pós-migration 129) e retorna mês e ano. ok=false se o formato
+// não bater.
+func parsePeriodoMMYYYY(p string) (month, year int, ok bool) {
+	parts := strings.Split(p, "/")
+	if len(parts) != 2 || len(parts[0]) != 2 || len(parts[1]) != 4 {
+		return 0, 0, false
+	}
+	m, errM := strconv.Atoi(parts[0])
+	y, errY := strconv.Atoi(parts[1])
+	if errM != nil || errY != nil || m < 1 || m > 12 {
+		return 0, 0, false
+	}
+	return m, y, true
+}
+
+// bucketTipoApuracaoV2 aplica a heurística de bucketing por data aprovada para
+// o shape v2 (que não tem os blocos estruturais apuracaoCorrente/apuracaoAjuste/
+// debitosExtemporaneos de onde o v1 deriva tipo_apuracao): compara mês/ano do
+// período (pa) com mês/ano de registro do item. Mesmo mês → "corrente". Registro
+// em mês posterior ao período → "extemporaneo" — funde o que no v1 era
+// ajuste+extemporaneo, já que não dá pra distinguir os dois só pela data
+// (decisão registrada em spec-rfb-cbs-v2-migracao.md, decisão 2). Sem data de
+// registro ou não parseável, assume "corrente" como default conservador.
+func bucketTipoApuracaoV2(pa string, registro *time.Time) string {
+	paMonth, paYear, ok := parsePeriodoMMYYYY(pa)
+	if !ok || registro == nil {
+		return "corrente"
+	}
+	paSeq := paYear*12 + paMonth
+	regSeq := registro.Year()*12 + int(registro.Month())
+	if regSeq > paSeq {
+		return "extemporaneo"
+	}
+	return "corrente"
+}
+
+// ── RFB v2 (débitos) ────────────────────────────────────────────────────────
+
+// RFBApuracaoV2JSON é o shape v2 do endpoint apuracao-cbs/v2/debitos: lista
+// plana agrupada por período (pa), podendo conter MÚLTIPLOS períodos numa única
+// resposta — diferente do v1, que assume 1 dataApuracao por chamada.
+type RFBApuracaoV2JSON struct {
+	Apuracao []RFBGrupoApuracaoV2 `json:"apuracao"`
+}
+
+type RFBGrupoApuracaoV2 struct {
+	PA      string        `json:"pa"`
+	Debitos []RFBDebitoV2 `json:"debitos"`
+}
+
+// RFBDebitoV2 é o item de débito no shape v2 — schema mais enxuto que o v1, sem
+// modeloDfe/numeroDfe/niEmitente/niAdquirente/situacao explícitos (as queries de
+// leitura já derivam modelo/número/série de chave_dfe quando a coluna vem vazia,
+// ver rfb_debitos_lista.go).
+type RFBDebitoV2 struct {
+	Origem      int            `json:"origem"`
+	Documento   int            `json:"documento"`
+	Chave       string         `json:"chave"`
+	Emissao     *RFBTime       `json:"emissao"`
+	Registro    *RFBTime       `json:"registro"`
+	Atualizacao *RFBTime       `json:"atualizacao"`
+	CBS         RFBCBSV2Debito `json:"cbs"`
+}
+
+type RFBCBSV2Debito struct {
+	Apurado      float64 `json:"apurado"`
+	Excedente    float64 `json:"excedente"`
+	Inexigivel   float64 `json:"inexigivel"`
+	Suspenso     float64 `json:"suspenso"`
+	Extinto      float64 `json:"extinto"`
+	SaldoDevedor float64 `json:"saldoDevedor"`
+}
+
+// adaptDebitoV2 converte um item v2 para a struct canônica RFBDebito, para
+// reaproveitar insertDebito sem duplicar a lógica de gravação. Campos sem
+// contraparte direta em v2 ficam zerados (ModeloDfe, NumeroDfe, NiEmitente,
+// NiAdquirente, SituacaoDebito, FormasExtincao, Eventos).
+//
+// Mapeamento monetário (aproximação documentada na spec — Design Notes — a
+// validar com volume real de produção v2):
+//   - valor_cbs_total       = cbs.apurado
+//   - valor_cbs_extinto     = cbs.extinto
+//   - valor_cbs_nao_extinto = cbs.saldoDevedor
+func adaptDebitoV2(pa string, item RFBDebitoV2) RFBDebito {
+	origem := item.Origem
+	documento := item.Documento
+	var dataRegistro, dataAtualizacao *time.Time
+	if item.Registro != nil {
+		dataRegistro = item.Registro.T
+	}
+	if item.Atualizacao != nil {
+		dataAtualizacao = item.Atualizacao.T
+	}
+	excedente := item.CBS.Excedente
+	inexigivel := item.CBS.Inexigivel
+	suspenso := item.CBS.Suspenso
+	saldoDevedor := item.CBS.SaldoDevedor
+
+	return RFBDebito{
+		ChaveDfe:             FlexString(item.Chave),
+		DataDfeEmissao:       item.Emissao,
+		DataApuracao:         pa,
+		ValorCBSTotal:        item.CBS.Apurado,
+		ValorCBSExtinto:      item.CBS.Extinto,
+		ValorCBSNaoExtinto:   saldoDevedor,
+		Origem:               &origem,
+		Documento:            &documento,
+		DataRegistro:         dataRegistro,
+		DataAtualizacao:      dataAtualizacao,
+		ValorCBSExcedente:    &excedente,
+		ValorCBSInexigivel:   &inexigivel,
+		ValorCBSSuspenso:     &suspenso,
+		ValorCBSSaldoDevedor: &saldoDevedor,
+	}
+}
+
+// processV2Debitos insere os itens de débito do shape v2 (já parseado) e roda a
+// agregação SQL + UPSERT de rfb_resumo UMA VEZ POR PERÍODO (pa) distinto
+// encontrado em apuracao[] — diferente do caminho v1, que assume um único
+// dataApuracao para toda a resposta (ver Boundaries da spec). Não faz rollback
+// nem updateRequestError — o chamador decide isso a partir do erro retornado,
+// mesmo padrão dos demais pontos de falha em ProcessarDownloadRFB/
+// ReprocessarRawJSON.
+func processV2Debitos(tx *sql.Tx, requestID, companyID string, apuracao RFBApuracaoV2JSON) (insertErrors int, err error) {
+	type periodAgg struct {
+		semChaveCorrente, semChaveExtemporaneo rfbAggBucket
+	}
+	var periodOrder []string
+	periods := map[string]*periodAgg{}
+
+	for _, grupo := range apuracao.Apuracao {
+		// defensivo: v2 já traz "mm/aaaa", mas normaliza caso venha "AAAAMM".
+		pa := normalizeDataApuracao(grupo.PA)
+		if !periodoValido(pa) {
+			insertErrors += len(grupo.Debitos)
+			log.Printf("[RFB Processor v2] período inválido %q (request %s): %d débitos descartados", grupo.PA, requestID, len(grupo.Debitos))
+			continue
+		}
+		agg, seen := periods[pa]
+		if !seen {
+			agg = &periodAgg{}
+			periods[pa] = agg
+			periodOrder = append(periodOrder, pa)
+		}
+		for _, item := range grupo.Debitos {
+			var registro *time.Time
+			if item.Registro != nil {
+				registro = item.Registro.T
+			}
+			tipo := bucketTipoApuracaoV2(pa, registro)
+			canonical := adaptDebitoV2(pa, item)
+			if insErr := insertDebito(tx, requestID, companyID, tipo, canonical); insErr != nil {
+				log.Printf("[RFB Processor v2] Error inserting %s debit (chave=%s, pa=%s): %v", tipo, item.Chave, pa, insErr)
+				insertErrors++
+				continue
+			}
+			if item.Chave == "" {
+				bucket := &agg.semChaveCorrente
+				if tipo == "extemporaneo" {
+					bucket = &agg.semChaveExtemporaneo
+				}
+				bucket.Count++
+				bucket.ValorTotal += canonical.ValorCBSTotal
+				bucket.ValorExtinto += canonical.ValorCBSExtinto
+				bucket.ValorNaoExtinto += canonical.ValorCBSNaoExtinto
+			}
+		}
+	}
+
+	for _, pa := range periodOrder {
+		agg := periods[pa]
+		sqlCorrente, sqlAjuste, sqlExtemporaneo, aggErr := aggregateRfbDebitosSQL(tx, companyID, pa)
+		if aggErr != nil {
+			return insertErrors, fmt.Errorf("aggregate rfb_debitos (pa=%s): %w", pa, aggErr)
+		}
+		totalCorrente := sqlCorrente.Count + agg.semChaveCorrente.Count
+		totalAjuste := sqlAjuste.Count
+		totalExtemporaneo := sqlExtemporaneo.Count + agg.semChaveExtemporaneo.Count
+		valorTotal := sqlCorrente.ValorTotal + sqlAjuste.ValorTotal + sqlExtemporaneo.ValorTotal +
+			agg.semChaveCorrente.ValorTotal + agg.semChaveExtemporaneo.ValorTotal
+		valorExtinto := sqlCorrente.ValorExtinto + sqlAjuste.ValorExtinto + sqlExtemporaneo.ValorExtinto +
+			agg.semChaveCorrente.ValorExtinto + agg.semChaveExtemporaneo.ValorExtinto
+		valorNaoExtinto := sqlCorrente.ValorNaoExtinto + sqlAjuste.ValorNaoExtinto + sqlExtemporaneo.ValorNaoExtinto +
+			agg.semChaveCorrente.ValorNaoExtinto + agg.semChaveExtemporaneo.ValorNaoExtinto
+		totalDebitos := totalCorrente + totalAjuste + totalExtemporaneo
+
+		if _, upErr := tx.Exec(`
+			INSERT INTO rfb_resumo (request_id, company_id, data_apuracao, total_debitos,
+				valor_cbs_total, valor_cbs_extinto, valor_cbs_nao_extinto,
+				total_corrente, total_ajuste, total_extemporaneo)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (company_id, data_apuracao)
+			DO UPDATE SET request_id = $1, total_debitos = $4,
+				valor_cbs_total = $5, valor_cbs_extinto = $6, valor_cbs_nao_extinto = $7,
+				total_corrente = $8, total_ajuste = $9, total_extemporaneo = $10
+		`, requestID, companyID, pa, totalDebitos,
+			valorTotal, valorExtinto, valorNaoExtinto,
+			totalCorrente, totalAjuste, totalExtemporaneo); upErr != nil {
+			return insertErrors, fmt.Errorf("upsert rfb_resumo (pa=%s): %w", pa, upErr)
+		}
+		log.Printf("[RFB Processor v2] Resumo período %s: %d débitos (%d corrente, %d ajuste, %d extemporaneo), CBS R$ %.2f",
+			pa, totalDebitos, totalCorrente, totalAjuste, totalExtemporaneo, valorTotal)
+	}
+
+	return insertErrors, nil
 }
 
 // rfbAggBucket holds aggregated totals for one tipo_apuracao bucket (count + monetary sums).
@@ -265,12 +590,60 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 		log.Printf("[RFB Processor] Raw JSON saved successfully for request %s", requestID)
 	}
 
-	// 6. Parse JSON
+	// 6. Detect shape (v1 blocos fixos vs v2 lista plana por período) e parse de
+	// acordo — ver detectRFBShape.
+	shape := detectRFBShape(rawJSON)
+	log.Printf("[RFB Processor] Shape detectado para request %s: %s", requestID, shape)
+
+	if shape == "v2" {
+		var apuracaoV2 RFBApuracaoV2JSON
+		if err := json.Unmarshal(rawJSON, &apuracaoV2); err != nil {
+			updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao interpretar JSON v2 da RFB: "+err.Error())
+			return fmt.Errorf("failed to parse v2 JSON: %w", err)
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			updateRequestError(db, requestID, "DB_ERROR", "Falha ao iniciar transação: "+err.Error())
+			return fmt.Errorf("failed to begin transaction: %w", err)
+		}
+
+		insertErrors, procErr := processV2Debitos(tx, requestID, companyID, apuracaoV2)
+		if procErr != nil {
+			tx.Rollback()
+			updateRequestError(db, requestID, "DB_ERROR", "Falha ao processar apuração v2: "+procErr.Error())
+			return fmt.Errorf("failed to process v2 apuracao: %w", procErr)
+		}
+
+		if err := tx.Commit(); err != nil {
+			updateRequestError(db, requestID, "DB_ERROR", "Falha no commit da transação: "+err.Error())
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		finalStatus := "completed"
+		if insertErrors > 0 {
+			log.Printf("[RFB Processor] WARN: %d debits (v2) failed to insert (raw_json preserved — use reprocess to retry)", insertErrors)
+		}
+		updateRequestStatus(db, requestID, finalStatus)
+		log.Printf("[RFB Processor] Request %s %s (v2): %d períodos processados, %d erros de inserção",
+			requestID, finalStatus, len(apuracaoV2.Apuracao), insertErrors)
+
+		if finalStatus == "completed" {
+			go TriggerSAPSync(db, requestID)
+		}
+		return nil
+	}
+
 	var apuracao RFBApuracaoJSON
 	if err := json.Unmarshal(rawJSON, &apuracao); err != nil {
 		updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao interpretar JSON da RFB: "+err.Error())
 		return fmt.Errorf("failed to parse JSON: %w", err)
 	}
+	// Normaliza dataApuracao "AAAAMM" (v1) → "mm/aaaa" (formato canônico de
+	// armazenamento, migration 129) logo após o parse — o resto da lógica v1
+	// abaixo (derivação estrutural de tipo_apuracao, agregação, upsert) fica
+	// inalterada, só passa a operar sobre o valor já normalizado.
+	normalizeApuracaoV1DataApuracao(&apuracao)
 
 	// 7. Insert debits and summary inside a single transaction.
 	// If any step fails the whole import is rolled back — no partial data.
@@ -407,7 +780,7 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	// Fallback: se nenhum débito de nenhum bloco (corrente/ajuste/extemporaneo) forneceu
 	// dataApuracao, tenta extrair de qualquer crédito embutido (mesmos três blocos) —
 	// cobre o caso de resposta só com itens extemporâneos, que antes deixava dataApuracao
-	// vazio e fazia a agregação SQL filtrar por data_apuracao='' (período errado).
+	// vazio e fazia a agregação SQL filtrar por período errado.
 	if dataApuracao == "" && apuracao.ApuracaoCorrente != nil {
 		for _, c := range apuracao.ApuracaoCorrente.Creditos {
 			if c.DataApuracao != "" {
@@ -558,36 +931,76 @@ func insertDebito(exec dbExecutor, requestID, companyID, tipoApuracao string, d 
 		dataEmissao = d.DataDfeEmissao.T
 	}
 
+	origem := sql.NullInt64{}
+	if d.Origem != nil {
+		origem = sql.NullInt64{Int64: int64(*d.Origem), Valid: true}
+	}
+	documento := sql.NullInt64{}
+	if d.Documento != nil {
+		documento = sql.NullInt64{Int64: int64(*d.Documento), Valid: true}
+	}
+	valorExcedente := sql.NullFloat64{}
+	if d.ValorCBSExcedente != nil {
+		valorExcedente = sql.NullFloat64{Float64: *d.ValorCBSExcedente, Valid: true}
+	}
+	valorInexigivel := sql.NullFloat64{}
+	if d.ValorCBSInexigivel != nil {
+		valorInexigivel = sql.NullFloat64{Float64: *d.ValorCBSInexigivel, Valid: true}
+	}
+	valorSuspenso := sql.NullFloat64{}
+	if d.ValorCBSSuspenso != nil {
+		valorSuspenso = sql.NullFloat64{Float64: *d.ValorCBSSuspenso, Valid: true}
+	}
+	valorSaldoDevedor := sql.NullFloat64{}
+	if d.ValorCBSSaldoDevedor != nil {
+		valorSaldoDevedor = sql.NullFloat64{Float64: *d.ValorCBSSaldoDevedor, Valid: true}
+	}
+
 	_, err := exec.Exec(`
 		INSERT INTO rfb_debitos (request_id, company_id, tipo_apuracao,
 			modelo_dfe, numero_dfe, chave_dfe, data_dfe_emissao, data_apuracao,
 			ni_emitente, ni_adquirente,
 			valor_cbs_total, valor_cbs_extinto, valor_cbs_nao_extinto,
-			situacao_debito, formas_extincao, eventos)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			situacao_debito, formas_extincao, eventos,
+			origem, documento, data_registro, data_atualizacao,
+			valor_cbs_excedente, valor_cbs_inexigivel, valor_cbs_suspenso, valor_cbs_saldo_devedor)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+			$17, $18, $19, $20, $21, $22, $23, $24)
 		ON CONFLICT (company_id, chave_dfe) WHERE chave_dfe IS NOT NULL AND chave_dfe != ''
 		DO UPDATE SET
-			request_id            = EXCLUDED.request_id,
-			tipo_apuracao         = EXCLUDED.tipo_apuracao,
-			data_dfe_emissao      = EXCLUDED.data_dfe_emissao,
-			data_apuracao         = EXCLUDED.data_apuracao,
-			valor_cbs_total       = EXCLUDED.valor_cbs_total,
-			valor_cbs_extinto     = EXCLUDED.valor_cbs_extinto,
-			valor_cbs_nao_extinto = EXCLUDED.valor_cbs_nao_extinto,
-			situacao_debito       = EXCLUDED.situacao_debito,
-			formas_extincao       = EXCLUDED.formas_extincao,
-			eventos               = EXCLUDED.eventos
+			request_id              = EXCLUDED.request_id,
+			tipo_apuracao           = EXCLUDED.tipo_apuracao,
+			data_dfe_emissao        = EXCLUDED.data_dfe_emissao,
+			data_apuracao           = EXCLUDED.data_apuracao,
+			valor_cbs_total         = EXCLUDED.valor_cbs_total,
+			valor_cbs_extinto       = EXCLUDED.valor_cbs_extinto,
+			valor_cbs_nao_extinto   = EXCLUDED.valor_cbs_nao_extinto,
+			situacao_debito         = COALESCE(NULLIF(EXCLUDED.situacao_debito, ''), rfb_debitos.situacao_debito),
+			formas_extincao         = COALESCE(EXCLUDED.formas_extincao, rfb_debitos.formas_extincao),
+			eventos                 = COALESCE(EXCLUDED.eventos, rfb_debitos.eventos),
+			origem                  = EXCLUDED.origem,
+			documento               = EXCLUDED.documento,
+			data_registro           = EXCLUDED.data_registro,
+			data_atualizacao        = EXCLUDED.data_atualizacao,
+			valor_cbs_excedente     = EXCLUDED.valor_cbs_excedente,
+			valor_cbs_inexigivel    = EXCLUDED.valor_cbs_inexigivel,
+			valor_cbs_suspenso      = EXCLUDED.valor_cbs_suspenso,
+			valor_cbs_saldo_devedor = EXCLUDED.valor_cbs_saldo_devedor
 	`, requestID, companyID, tipoApuracao,
 		string(d.ModeloDfe), string(d.NumeroDfe), string(d.ChaveDfe), dataEmissao, d.DataApuracao,
 		string(d.NiEmitente), string(d.NiAdquirente),
 		d.ValorCBSTotal, d.ValorCBSExtinto, d.ValorCBSNaoExtinto,
-		string(d.SituacaoDebito), formasExtincao, eventos)
+		string(d.SituacaoDebito), formasExtincao, eventos,
+		origem, documento, d.DataRegistro, d.DataAtualizacao,
+		valorExcedente, valorInexigivel, valorSuspenso, valorSaldoDevedor)
 	return err
 }
 
 // ReprocessarRawJSON re-parses the raw JSON already stored in the DB without calling the RFB API.
 // Safe pattern: parse JSON FIRST, then atomically delete old debits and insert new ones in a transaction.
-// If parse or any insert fails, old data is never deleted — no data loss.
+// If parse or any insert fails, old data is never deleted — no data loss. Suporta tanto raw_json
+// histórico em shape v1 quanto v2 (detectRFBShape) — necessário porque um mesmo request salvo antes
+// do cutover pode ser reprocessado depois dele, e vice-versa.
 func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	log.Printf("[RFB Reprocess] ============================================================")
 	log.Printf("[RFB Reprocess] Iniciando reprocessamento | request: %s", requestID)
@@ -624,31 +1037,45 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	}
 	log.Printf("[RFB Reprocess] Status → reprocessing")
 
-	// 2. Parse JSON FIRST — before touching any existing data.
-	log.Printf("[RFB Reprocess] Etapa 1/4: Interpretando JSON...")
-	var apuracao RFBApuracaoJSON
-	if err := json.Unmarshal([]byte(*rawJSON), &apuracao); err != nil {
-		log.Printf("[RFB Reprocess] ERRO no parse do JSON: %v", err)
-		updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao reprocessar JSON: "+err.Error())
-		return fmt.Errorf("failed to parse JSON: %w", err)
-	}
+	// 2. Detect shape + parse JSON FIRST — before touching any existing data.
+	log.Printf("[RFB Reprocess] Etapa 1/4: Detectando shape e interpretando JSON...")
+	shape := detectRFBShape([]byte(*rawJSON))
+	log.Printf("[RFB Reprocess] Shape detectado: %s", shape)
 
-	grupos := 0
-	if apuracao.ApuracaoCorrente != nil {
-		grupos++
+	var apuracaoV2 RFBApuracaoV2JSON
+	var apuracao RFBApuracaoJSON
+	if shape == "v2" {
+		if err := json.Unmarshal([]byte(*rawJSON), &apuracaoV2); err != nil {
+			log.Printf("[RFB Reprocess] ERRO no parse do JSON v2: %v", err)
+			updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao reprocessar JSON v2: "+err.Error())
+			return fmt.Errorf("failed to parse v2 JSON: %w", err)
+		}
+		log.Printf("[RFB Reprocess] JSON v2 interpretado | períodos encontrados: %d", len(apuracaoV2.Apuracao))
+	} else {
+		if err := json.Unmarshal([]byte(*rawJSON), &apuracao); err != nil {
+			log.Printf("[RFB Reprocess] ERRO no parse do JSON: %v", err)
+			updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao reprocessar JSON: "+err.Error())
+			return fmt.Errorf("failed to parse JSON: %w", err)
+		}
+		normalizeApuracaoV1DataApuracao(&apuracao)
+
+		grupos := 0
+		if apuracao.ApuracaoCorrente != nil {
+			grupos++
+		}
+		if apuracao.ApuracaoAjuste != nil {
+			grupos++
+		}
+		if apuracao.DebitosExtemporaneos != nil {
+			grupos++
+		}
+		log.Printf("[RFB Reprocess] JSON interpretado com sucesso | grupos encontrados: %d (corrente=%v, ajuste=%v, extemporaneo=%v)",
+			grupos,
+			apuracao.ApuracaoCorrente != nil,
+			apuracao.ApuracaoAjuste != nil,
+			apuracao.DebitosExtemporaneos != nil,
+		)
 	}
-	if apuracao.ApuracaoAjuste != nil {
-		grupos++
-	}
-	if apuracao.DebitosExtemporaneos != nil {
-		grupos++
-	}
-	log.Printf("[RFB Reprocess] JSON interpretado com sucesso | grupos encontrados: %d (corrente=%v, ajuste=%v, extemporaneo=%v)",
-		grupos,
-		apuracao.ApuracaoCorrente != nil,
-		apuracao.ApuracaoAjuste != nil,
-		apuracao.DebitosExtemporaneos != nil,
-	)
 
 	// 3. Transaction: delete old debits then insert new ones atomically.
 	log.Printf("[RFB Reprocess] Etapa 2/4: Limpando dados anteriores...")
@@ -675,6 +1102,29 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	}
 	deletedCreditos, _ = resC.RowsAffected()
 	log.Printf("[RFB Reprocess] Removidos: %d débitos e %d créditos anteriores", deletedDebitos, deletedCreditos)
+
+	if shape == "v2" {
+		log.Printf("[RFB Reprocess] Etapa 3/4: Inserindo registros (v2)...")
+		insertErrors, procErr := processV2Debitos(tx, requestID, companyID, apuracaoV2)
+		if procErr != nil {
+			tx.Rollback()
+			updateRequestError(db, requestID, "DB_ERROR", "Falha ao reprocessar apuração v2: "+procErr.Error())
+			return fmt.Errorf("failed to process v2 apuracao: %w", procErr)
+		}
+		if err := tx.Commit(); err != nil {
+			updateRequestError(db, requestID, "DB_ERROR", "Falha no commit: "+err.Error())
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+		updateRequestStatus(db, requestID, "completed")
+		go TriggerSAPSync(db, requestID)
+		log.Printf("[RFB Reprocess] ============================================================")
+		if insertErrors > 0 {
+			log.Printf("[RFB Reprocess] AVISO: %d débitos (v2) falharam na inserção", insertErrors)
+		}
+		log.Printf("[RFB Reprocess] CONCLUÍDO (v2) | request: %s | %d períodos | status → completed", requestID, len(apuracaoV2.Apuracao))
+		log.Printf("[RFB Reprocess] ============================================================")
+		return nil
+	}
 
 	var totalCorrente, totalAjuste, totalExtemporaneo, insertErrors int
 	var valorTotal, valorExtinto, valorNaoExtinto float64

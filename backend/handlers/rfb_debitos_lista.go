@@ -45,8 +45,8 @@ func ListarDebitosHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		qp := r.URL.Query()
-		periodo := qp.Get("periodo") // YYYYMM — mês específico
-		ano := qp.Get("ano")         // YYYY — todo o ano
+		periodo := normalizePeriodoFiltro(qp.Get("periodo")) // YYYYMM — mês específico (aceita "2026-01")
+		ano := qp.Get("ano")                                 // YYYY — todo o ano
 
 		page := 1
 		pageSize := 100
@@ -68,15 +68,21 @@ func ListarDebitosHandler(db *sql.DB) http.HandlerFunc {
 		idx := 2
 		where := "WHERE d.company_id = $1"
 
-		// Filtro de período — normaliza tanto YYYYMM quanto YYYY-MM
+		// Filtro de período — d.data_apuracao é armazenado como "mm/aaaa" (migration
+		// 129); o contrato externo da API continua "periodo" em AAAAMM e "ano" em AAAA
+		// (zero mudança de frontend), então traduzimos aqui: TO_DATE + TO_CHAR de volta
+		// para "YYYYMM" antes de comparar. O CASE garante NULL (não erro) para qualquer
+		// valor que não bata no formato esperado, em vez de abortar a query inteira.
+		const periodoAsYYYYMM = "CASE WHEN d.data_apuracao ~ '^(0[1-9]|1[0-2])/[0-9]{4}$' " +
+			"THEN TO_CHAR(TO_DATE(d.data_apuracao, 'MM/YYYY'), 'YYYYMM') END"
 		if periodo != "" {
 			where += fmt.Sprintf(
-				" AND REGEXP_REPLACE(d.data_apuracao, '[^0-9]', '', 'g') = $%d", idx)
+				" AND "+periodoAsYYYYMM+" = $%d", idx)
 			args = append(args, periodo)
 			idx++
 		} else if ano != "" {
 			where += fmt.Sprintf(
-				" AND REGEXP_REPLACE(d.data_apuracao, '[^0-9]', '', 'g') LIKE $%d", idx)
+				" AND "+periodoAsYYYYMM+" LIKE $%d", idx)
 			args = append(args, ano+"%")
 			idx++
 		}
@@ -236,7 +242,9 @@ func ListarDebitosHandler(db *sql.DB) http.HandlerFunc {
 			FROM rfb_debitos d
 			LEFT JOIN nfe_saidas n ON n.chave_nfe = d.chave_dfe AND n.company_id = d.company_id
 			` + where + fmt.Sprintf(`
-			ORDER BY d.data_apuracao DESC, d.tipo_apuracao, d.data_dfe_emissao DESC NULLS LAST
+			ORDER BY
+				CASE WHEN d.data_apuracao ~ '^(0[1-9]|1[0-2])/[0-9]{4}$' THEN TO_DATE(d.data_apuracao, 'MM/YYYY') END DESC NULLS LAST,
+				d.tipo_apuracao, d.data_dfe_emissao DESC NULLS LAST
 			LIMIT $%d OFFSET $%d`, idx, idx+1)
 
 		pageArgs := append(args, pageSize, offset)
@@ -297,9 +305,13 @@ func PeriodosDebitosHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		rows, err := db.Query(`
-			SELECT DISTINCT REGEXP_REPLACE(data_apuracao, '[^0-9]', '', 'g') AS periodo
-			FROM rfb_debitos
-			WHERE company_id = $1 AND data_apuracao IS NOT NULL AND data_apuracao != ''
+			SELECT periodo FROM (
+				SELECT DISTINCT CASE WHEN data_apuracao ~ '^(0[1-9]|1[0-2])/[0-9]{4}$'
+					THEN TO_CHAR(TO_DATE(data_apuracao, 'MM/YYYY'), 'YYYYMM') END AS periodo
+				FROM rfb_debitos
+				WHERE company_id = $1
+			) p
+			WHERE periodo IS NOT NULL
 			ORDER BY periodo DESC
 		`, companyID)
 		if err != nil {
@@ -318,4 +330,20 @@ func PeriodosDebitosHandler(db *sql.DB) http.HandlerFunc {
 
 		json.NewEncoder(w).Encode(map[string]interface{}{"periodos": periodos})
 	}
+}
+
+// normalizePeriodoFiltro remove tudo que não for dígito do filtro "periodo"
+// ("2026-01" → "202601"). Entrada não vazia sem nenhum dígito vira "!" (nunca
+// casa com AAAAMM), para não descartar silenciosamente o filtro.
+func normalizePeriodoFiltro(s string) string {
+	out := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			out = append(out, s[i])
+		}
+	}
+	if len(out) == 0 && s != "" {
+		return "!"
+	}
+	return string(out)
 }
