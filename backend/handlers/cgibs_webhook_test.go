@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // setupCGIBSWebhookTest cria uma company + cgibs_credentials ativa E habilitada (cnpj_matriz
@@ -79,6 +80,13 @@ func webhookPayload(cnpj string, idSolicitacao int64, situacao string, arquivos 
 func TestCGIBSWebhook_TokenECNPJCorretos_FazUpsert(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
+	// CGIBS_OBTER_ARQUIVO_URL propositalmente não configurada: o handler agora dispara
+	// services.ProcessarArquivoCGIBS em goroutine para cada arquivo novo (spec-cgibs-obter-
+	// arquivo-parser.md) — sem a URL, ObterArquivo falha rápido (sem tentar rede), então a
+	// goroutine termina cedo em status='erro'. Mesmo padrão de espera usado nos testes do
+	// webhook RFB (waitProcessorSettled/time.Sleep em rfb_v2_webhook_test.go) para não colidir
+	// com a asserção abaixo (a gravação de status/error_message é assíncrona ao handler).
+	t.Setenv("CGIBS_OBTER_ARQUIVO_URL", "")
 	const token = "token-webhook-teste-1"
 	companyID, cleanup := setupCGIBSWebhookTest(t, db, "98765432000188", token)
 	defer cleanup()
@@ -107,6 +115,11 @@ func TestCGIBSWebhook_TokenECNPJCorretos_FazUpsert(t *testing.T) {
 	if situacao != "gerada" {
 		t.Errorf("esperava situacao_solicitacao=gerada, veio %q", situacao)
 	}
+	// As goroutines despachadas pelo handler (dispatchCGIBSArquivosPendentes) gravam de forma
+	// assíncrona — espera curta para deixá-las terminar (sem rede, erro imediato) antes de ler
+	// o resultado final.
+	time.Sleep(100 * time.Millisecond)
+
 	rows, err := db.Query(`
 		SELECT status FROM cgibs_arquivos a JOIN cgibs_solicitacoes s ON s.id=a.solicitacao_id
 		WHERE s.company_id=$1 AND s.id_solicitacao_externo=5001 ORDER BY numero_sequencial
@@ -121,8 +134,10 @@ func TestCGIBSWebhook_TokenECNPJCorretos_FazUpsert(t *testing.T) {
 		rows.Scan(&s)
 		statuses = append(statuses, s)
 	}
-	if len(statuses) != 2 || statuses[0] != "pendente" || statuses[1] != "pendente" {
-		t.Errorf("esperava 2 arquivos com status=pendente, veio %v", statuses)
+	// status='erro' (não mais 'pendente') confirma que o dispatch em goroutine
+	// (services.ProcessarArquivoCGIBS) de fato rodou para os 2 arquivos novos.
+	if len(statuses) != 2 || statuses[0] != "erro" || statuses[1] != "erro" {
+		t.Errorf("esperava 2 arquivos com status=erro (dispatch sem CGIBS_OBTER_ARQUIVO_URL configurada), veio %v", statuses)
 	}
 }
 
@@ -371,5 +386,43 @@ func TestCGIBSWebhook_EmpresaNaoEncontrada_DescartaSemErro(t *testing.T) {
 	}
 	if got := countCGIBSSolicitacoes(t, db, companyID, 5010); got != 0 {
 		t.Fatalf("empresa inexistente: esperava 0 linhas gravadas, obteve %d", got)
+	}
+}
+
+// TestCGIBSWebhook_SituacaoNaoIndicaArquivoPronto_NaoDispara cobre o item 13 da revisão
+// adversarial: dispatchCGIBSArquivosPendentes só deve baixar quando situacao_solicitacao
+// indicar arquivo realmente pronto ('gerada'/'enviada') — 'solicitada' (solicitação aceita, mas
+// arquivo ainda não gerado) não deve disparar services.ProcessarArquivoCGIBS, mesmo com um item
+// em Arquivos[] já persistido como 'pendente'.
+func TestCGIBSWebhook_SituacaoNaoIndicaArquivoPronto_NaoDispara(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	t.Setenv("CGIBS_OBTER_ARQUIVO_URL", "")
+	const token = "token-webhook-teste-13"
+	companyID, cleanup := setupCGIBSWebhookTest(t, db, "98765432000188", token)
+	defer cleanup()
+
+	payload := webhookPayload("98765432000188", 5011, "solicitada", []map[string]interface{}{
+		{"NumeroSequencial": 1, "NomeArquivo": "extrato_cc_001.json"},
+	})
+
+	rec := postCGIBSWebhook(db, token, payload)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperava 200, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// Espera curta (mesmo padrão usado nos demais testes deste arquivo) para dar tempo de
+	// qualquer dispatch indevido rodar antes de checar o status.
+	time.Sleep(100 * time.Millisecond)
+
+	var status string
+	if err := db.QueryRow(`
+		SELECT status FROM cgibs_arquivos a JOIN cgibs_solicitacoes s ON s.id=a.solicitacao_id
+		WHERE s.company_id=$1 AND s.id_solicitacao_externo=5011
+	`, companyID).Scan(&status); err != nil {
+		t.Fatalf("erro ao ler status do arquivo: %v", err)
+	}
+	if status != "pendente" {
+		t.Errorf("esperava status=pendente (dispatch não deveria disparar para situacao='solicitada'), veio %q", status)
 	}
 }

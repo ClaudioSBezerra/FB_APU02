@@ -10,9 +10,11 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"fb_apu02/crypto"
+	"fb_apu02/services"
 )
 
 // errCGIBSCompanyNotFound sinaliza que company_id (resolvido a partir de uma linha de
@@ -178,12 +180,12 @@ func matchCGIBSCredential(db *sql.DB, cnpjBase, token string) (companyID string,
 
 // upsertCGIBSSolicitacao grava a solicitação (upsert por company_id+id_solicitacao_externo)
 // e cada item de Arquivos[] (upsert por solicitacao_id+numero_sequencial), status 'pendente'
-// para arquivos novos. NÃO dispara download — isso é a sub-spec seguinte
-// (spec-cgibs-obter-arquivo-parser.md).
-func upsertCGIBSSolicitacao(db *sql.DB, companyID, cnpjBase string, payload CGIBSWebhookPayload) error {
+// para arquivos novos. Devolve o id da solicitação para o chamador disparar o download dos
+// arquivos pendentes (dispatchCGIBSArquivosPendentes) — esta função só persiste, não baixa nada.
+func upsertCGIBSSolicitacao(db *sql.DB, companyID, cnpjBase string, payload CGIBSWebhookPayload) (solicitacaoID string, err error) {
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return "", fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -193,10 +195,10 @@ func upsertCGIBSSolicitacao(db *sql.DB, companyID, cnpjBase string, payload CGIB
 	// antes e descartamos o webhook silenciosamente (o chamador loga e responde 200).
 	var companyExists bool
 	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1)`, companyID).Scan(&companyExists); err != nil {
-		return fmt.Errorf("verificar existência da empresa: %w", err)
+		return "", fmt.Errorf("verificar existência da empresa: %w", err)
 	}
 	if !companyExists {
-		return errCGIBSCompanyNotFound
+		return "", errCGIBSCompanyNotFound
 	}
 
 	// tipoSolicitacao/situacao: valor a gravar numa 1ª INSERT (default seguro se não
@@ -250,7 +252,6 @@ func upsertCGIBSSolicitacao(db *sql.DB, companyID, cnpjBase string, payload CGIB
 		qtdArqVinculados = 0
 	}
 
-	var solicitacaoID string
 	err = tx.QueryRow(`
 		INSERT INTO cgibs_solicitacoes (
 			company_id, cnpj_base, id_solicitacao_externo, tipo_solicitacao, situacao_solicitacao,
@@ -274,7 +275,7 @@ func upsertCGIBSSolicitacao(db *sql.DB, companyID, cnpjBase string, payload CGIB
 		tipoUpdateParam, situacaoUpdateParam,
 	).Scan(&solicitacaoID)
 	if err != nil {
-		return fmt.Errorf("upsert cgibs_solicitacoes: %w", err)
+		return "", fmt.Errorf("upsert cgibs_solicitacoes: %w", err)
 	}
 
 	for _, arq := range payload.Arquivos {
@@ -293,11 +294,82 @@ func upsertCGIBSSolicitacao(db *sql.DB, companyID, cnpjBase string, payload CGIB
 				nome_arquivo = EXCLUDED.nome_arquivo
 		`, companyID, solicitacaoID, arq.NumeroSequencial, arq.NomeArquivo)
 		if err != nil {
-			return fmt.Errorf("upsert cgibs_arquivos (seq %d): %w", arq.NumeroSequencial, err)
+			return "", fmt.Errorf("upsert cgibs_arquivos (seq %d): %w", arq.NumeroSequencial, err)
 		}
 	}
 
-	return tx.Commit()
+	return solicitacaoID, tx.Commit()
+}
+
+// cgibsDispatchMaxConcurrent limita quantos downloads (services.ProcessarArquivoCGIBS) rodam
+// simultaneamente por chamada de dispatchCGIBSArquivosPendentes — item 19 da revisão
+// adversarial: sem limite, uma solicitação com muitos arquivos pendentes disparava uma
+// goroutine por arquivo de uma vez só, sem teto.
+const cgibsDispatchMaxConcurrent = 5
+
+// dispatchCGIBSArquivosPendentes dispara o download+parse (services.ProcessarArquivoCGIBS) para
+// cada cgibs_arquivos ainda 'pendente' vinculado à solicitação — mesmo padrão de dispatch em
+// goroutine usado por RFBWebhookHandler (rfb_apuracao.go) para o download da RFB, mas com 2
+// ajustes da revisão adversarial:
+//
+//   - Item 13: só considera arquivos cuja solicitação está com situacao_solicitacao IN
+//     ('gerada','enviada') — 'solicitada' (ainda não gerou arquivo), 'cancelada' e 'expirada'
+//     não indicam arquivo pronto pra baixar.
+//   - Item 19: no máximo cgibsDispatchMaxConcurrent downloads simultâneos, via semáforo. O
+//     disparo roda numa goroutine supervisora própria para não bloquear o handler HTTP chamador
+//     quando o semáforo estiver cheio.
+//
+// O claim atômico que evita processar o MESMO arquivo 2x (webhook reentregue disparando 2
+// chamadas concorrentes) não está mais aqui — está dentro de services.ProcessarArquivoCGIBS via
+// `SELECT ... FOR UPDATE` (item 2), então múltiplos arquivos 'pendente' continuam sendo
+// disparados livremente aqui; a serialização por arquivo acontece do lado de lá.
+func dispatchCGIBSArquivosPendentes(db *sql.DB, solicitacaoID string) {
+	rows, err := db.Query(`
+		SELECT a.id
+		FROM cgibs_arquivos a
+		JOIN cgibs_solicitacoes s ON s.id = a.solicitacao_id
+		WHERE a.solicitacao_id = $1 AND a.status = 'pendente'
+		  AND s.situacao_solicitacao IN ('gerada', 'enviada')
+	`, solicitacaoID)
+	if err != nil {
+		log.Printf("[CGIBS Webhook] AVISO: erro ao buscar arquivos pendentes da solicitação %s: %v", solicitacaoID, err)
+		return
+	}
+	var arquivoIDs []string
+	for rows.Next() {
+		var id string
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			log.Printf("[CGIBS Webhook] AVISO: erro ao ler id de cgibs_arquivos pendente (solicitação %s): %v", solicitacaoID, scanErr)
+			continue
+		}
+		arquivoIDs = append(arquivoIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[CGIBS Webhook] AVISO: erro ao iterar arquivos pendentes da solicitação %s: %v", solicitacaoID, err)
+	}
+	rows.Close()
+
+	if len(arquivoIDs) == 0 {
+		return
+	}
+
+	go func() {
+		sem := make(chan struct{}, cgibsDispatchMaxConcurrent)
+		var wg sync.WaitGroup
+		for _, id := range arquivoIDs {
+			arquivoID := id
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				if err := services.ProcessarArquivoCGIBS(db, arquivoID); err != nil {
+					log.Printf("[CGIBS Webhook] Erro ao processar arquivo %s: %v", arquivoID, err)
+				}
+			}()
+		}
+		wg.Wait()
+	}()
 }
 
 // CGIBSWebhookHandler recebe notificações de arquivo disponível da CGIBS (PUBLIC — sem JWT,
@@ -313,8 +385,10 @@ func upsertCGIBSSolicitacao(db *sql.DB, companyID, cnpjBase string, payload CGIB
 // rejeita com 200 genérico (evita retry indefinido da CGIBS) + log de aviso, sem vazar
 // detalhe e SEM gravar nada.
 //
-// Esta sub-spec só persiste (upsert cgibs_solicitacoes + cgibs_arquivos, status 'pendente')
-// — não dispara nenhum download (fica para spec-cgibs-obter-arquivo-parser.md).
+// Persiste (upsert cgibs_solicitacoes + cgibs_arquivos, status 'pendente') e, para cada
+// cgibs_arquivos que ficou 'pendente' desta chamada, dispara o download+parse
+// (services.ProcessarArquivoCGIBS) em goroutine — dispatchCGIBSArquivosPendentes, mesmo padrão
+// de dispatch em goroutine já usado por RFBWebhookHandler (rfb_apuracao.go).
 func CGIBSWebhookHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -370,7 +444,8 @@ func CGIBSWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := upsertCGIBSSolicitacao(db, companyID, cnpjBase, payload); err != nil {
+		solicitacaoID, err := upsertCGIBSSolicitacao(db, companyID, cnpjBase, payload)
+		if err != nil {
 			if errors.Is(err, errCGIBSCompanyNotFound) {
 				// Item 10: empresa não encontrada — descarte claro e silencioso, sem tentar o
 				// INSERT (que falharia com erro de FK confuso).
@@ -384,6 +459,8 @@ func CGIBSWebhookHandler(db *sql.DB) http.HandlerFunc {
 			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "erro ao persistir"})
 			return
 		}
+
+		dispatchCGIBSArquivosPendentes(db, solicitacaoID)
 
 		log.Printf("[CGIBS Webhook] Solicitação %d (companyID=%s) processada: situacao=%s tipo=%s qtdArquivos=%d",
 			payload.IDSolicitacao, companyID, payload.SituacaoSolicitacao, payload.TipoSolicitacao, len(payload.Arquivos))

@@ -1,5 +1,17 @@
 # Deferred Work
 
+## Deferred from: code review of spec-cgibs-obter-arquivo-parser (2026-09-28)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-obter-arquivo-parser.md`
+  summary: Valores monetários do extrato (`FlexFloat`) passam por `float64` de ponta a ponta antes de gravar em `NUMERIC(15,2)` — round-trip exato pra 2 casas decimais funciona na prática mas não é garantido pelo tipo. Mesmo padrão já aceito na RFB (`ValorTotal += ...` em float64).
+  evidence: Achado de 2 revisores. Corrigir de verdade exigiria trocar `FlexFloat` por um tipo decimal/string-passthrough até o bind SQL — refactor maior, mesmo risco/prioridade já aceito pro código RFB equivalente. Revisitar se algum valor real vier com mais de ~13-14 dígitos significativos ou se houver disputa de centavos.
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-obter-arquivo-parser.md`
+  summary: Sem ordenação/precedência entre arquivos concorrentes atualizando a mesma `cgibs_operacoes` (mesma `chave_acesso`) — o claim via `FOR UPDATE` (patch aplicado) serializa processamento por ARQUIVO, mas não impede que um arquivo mais antigo processado depois sobrescreva campos descritivos de um arquivo mais novo já processado (o COALESCE protege contra NULL sobrescrever valor bom, mas não resolve "qual é o dado mais atual" se os dois vierem preenchidos e diferentes).
+  evidence: Achado de 2 revisores, risco baixo na prática (um mesmo documento fiscal normalmente não muda `dth_emissao`/CNPJs entre arquivos). Revisitar se volume real mostrar operações reprocessadas fora de ordem — solução seria rastrear `datageracao` do arquivo e só aceitar update se for mais recente que o já gravado.
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-obter-arquivo-parser.md`
+  summary: Testes que dependem de goroutines fire-and-forget usam `time.Sleep` fixo pra sincronizar, e as goroutines não são atreladas ao ciclo de vida do teste (mesmo padrão já aceito em `rfb_v2_webhook_test.go`).
+  evidence: Anti-padrão já documentado/aceito no projeto. Revisitar se os testes de CGIBS ficarem flaky em CI.
+
 ## Deferred from: code review of spec-cgibs-habilitacao-webhook (2026-09-28)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-habilitacao-webhook.md`
@@ -569,3 +581,6 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-gh-5-rfb-limite-manual-ambiente-solicitacao.md`
   summary: **AÇÃO OPERACIONAL** — as solicitações feitas em `prr-rtc` entre 08/09 e 11/09/2026 no servidor AWS estão gravadas com `ambiente='producao'` (o INSERT não gravava a coluna), e os débitos de teste que elas trouxeram estão em `rfb_debitos` misturados com o resto.
   evidence: Consequência do bug corrigido nesta spec; o código novo só corrige solicitações futuras. Correção de dados (UPDATE do ambiente + remoção dos débitos de teste, com backup) depende de VPN e de autorização explícita do usuário.
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-obter-arquivo-parser.md`
+  summary: O claim via `SELECT ... FOR UPDATE` em `ProcessarArquivoCGIBS` segura a linha de `cgibs_arquivos` (e uma conexão do pool) durante toda a chamada de rede a `ObterArquivo` — não dá pra liberar o lock antes sem perder a proteção contra processamento duplicado. Mitigado por um semáforo de concorrência (máx 5 simultâneos) no dispatch.
+  evidence: Trade-off consciente do próprio agente de implementação, aceito dado o volume esperado (arquivo diferencial diário, poucos arquivos por solicitação). Revisitar se o volume de arquivos por solicitação crescer muito ou se sintomas de esgotamento de pool aparecerem em produção.

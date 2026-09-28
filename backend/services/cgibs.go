@@ -139,3 +139,83 @@ func Habilitar(clientID, clientSecret, webhookURL, tokenContrib string) (habilit
 	log.Printf("[CGIBS] Habilitação processada: Habilitado=%q DataHabilitacao=%q", habilitado, parsed.DataHabilitacao)
 	return habilitado, dataHabilitacao, nil
 }
+
+// ErrCGIBSObterArquivoNaoConfigurado é devolvido por ObterArquivo quando
+// CGIBS_OBTER_ARQUIVO_URL não está configurada — mesmo padrão de ErrCGIBSNaoConfigurado
+// (Habilitar). Nenhuma chamada de rede é tentada quando este erro é retornado.
+var ErrCGIBSObterArquivoNaoConfigurado = errors.New("CGIBS_NAO_CONFIGURADO: CGIBS_OBTER_ARQUIVO_URL não configurada")
+
+// cgibsObterArquivoMaxBodyBytes limita o corpo de resposta da API Obter Arquivo (MOC 5.3) —
+// o arquivo devolvido (extrato_cc de um lote de operações) pode ser maior que a resposta de
+// Habilitação; teto generoso (16 MB) sobre um arquivo individual de conta corrente fiscal.
+const cgibsObterArquivoMaxBodyBytes = 16 << 20
+
+// cgibsObterArquivoRequest é o corpo enviado à API Obter Arquivo (MOC 5.3). Mesma suposição de
+// autenticação documentada em cgibsHabilitacaoRequest (ClientID/ClientSecret no corpo, não
+// Bearer) — a seção 5.3 do MOC não extraiu como texto (ver spec-cgibs-conta-corrente-plano.md).
+type cgibsObterArquivoRequest struct {
+	ClientID         string `json:"ClientID"`
+	ClientSecret     string `json:"ClientSecret"`
+	IDSolicitacao    int64  `json:"IDSolicitacao"`
+	NumeroSequencial int64  `json:"NumeroSequencial"`
+}
+
+// ObterArquivo chama a API Obter Arquivo da CGIBS (MOC 5.3) para baixar um arquivo específico
+// (numeroSequencial) de uma solicitação (idSolicitacao). Lê CGIBS_OBTER_ARQUIVO_URL do
+// ambiente; se vazia, retorna ErrCGIBSObterArquivoNaoConfigurado SEM tentar nenhuma chamada de
+// rede — mesmo padrão de Habilitar.
+//
+// A resposta HTTP 200 É o próprio arquivo (JSON cru do ANEXO I — header/parametrosgeracao/
+// operacoes/extrato_cc), sem envelope — devolvida como bytes crus, sem nenhuma tentativa de
+// decodificar aqui; quem faz o parse é ProcessarArquivoCGIBS (cgibs_parser.go).
+func ObterArquivo(clientID, clientSecret string, idSolicitacao, numeroSequencial int64) ([]byte, error) {
+	endpoint := strings.TrimSpace(os.Getenv("CGIBS_OBTER_ARQUIVO_URL"))
+	if endpoint == "" {
+		return nil, ErrCGIBSObterArquivoNaoConfigurado
+	}
+
+	payload := cgibsObterArquivoRequest{
+		ClientID:         clientID,
+		ClientSecret:     clientSecret,
+		IDSolicitacao:    idSolicitacao,
+		NumeroSequencial: numeroSequencial,
+	}
+	payloadJSON, merr := json.Marshal(payload)
+	if merr != nil {
+		return nil, fmt.Errorf("cgibs obter arquivo: erro ao montar corpo: %w", merr)
+	}
+
+	log.Printf("[CGIBS] Obtendo arquivo: POST %s (idSolicitacao=%d numeroSequencial=%d)", endpoint, idSolicitacao, numeroSequencial)
+
+	req, rerr := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(payloadJSON)))
+	if rerr != nil {
+		return nil, fmt.Errorf("cgibs obter arquivo: erro ao criar requisição: %w", rerr)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, derr := cgibsHTTPClient.Do(req)
+	if derr != nil {
+		return nil, fmt.Errorf("cgibs obter arquivo: requisição falhou: %w", derr)
+	}
+	defer resp.Body.Close()
+
+	// Lê 1 byte a mais do que o limite: se o corpo real for maior que
+	// cgibsObterArquivoMaxBodyBytes (inclusive exatamente no limite, caso em que não dá pra
+	// distinguir "corpo de tamanho exato" de "corpo maior truncado" sem essa checagem), devolve
+	// erro explícito em vez de passar um JSON silenciosamente truncado pro parser (item 12 da
+	// revisão adversarial).
+	respBody, berr := io.ReadAll(io.LimitReader(resp.Body, cgibsObterArquivoMaxBodyBytes+1))
+	if berr != nil {
+		return nil, fmt.Errorf("cgibs obter arquivo: erro ao ler corpo da resposta: %w", berr)
+	}
+	if len(respBody) > cgibsObterArquivoMaxBodyBytes {
+		return nil, fmt.Errorf("cgibs obter arquivo: corpo da resposta atingiu o limite de %d bytes (possível truncamento) — arquivo não processado", cgibsObterArquivoMaxBodyBytes)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("cgibs obter arquivo: HTTP %d: %s", resp.StatusCode, TruncateRunes(string(respBody), 500))
+	}
+
+	log.Printf("[CGIBS] Arquivo obtido (idSolicitacao=%d numeroSequencial=%d): %d bytes", idSolicitacao, numeroSequencial, len(respBody))
+	return respBody, nil
+}

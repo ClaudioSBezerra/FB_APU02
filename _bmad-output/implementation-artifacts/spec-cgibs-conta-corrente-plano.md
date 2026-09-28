@@ -47,7 +47,7 @@ context: []
 - [ ] Resolver as 4 decisões "Ask First" com o usuário -- registrar respostas nesta spec.
 - [x] `spec-cgibs-schema.md` (implementação) -- **loopback 1:** 1ª tentativa dropava `cgibs_requests`/`cgibs_debitos`/`cgibs_resumo` na mesma migration; revisão adversarial (2x) achou que `cgibs_apuracao.go`/`limpeza_total.go` ainda leem essas tabelas — dropar quebraria no deploy. Emenda: tabelas novas criadas AO LADO das antigas, sem nenhum DROP; o drop fica pra `spec-cgibs-solicitacao-ui.md` (abaixo), quando esses 2 arquivos forem reescritos. Rodada também incorporou FKs `ON DELETE SET NULL`, CHECKs de enum/consistência, `company_id` direto nas tabelas filhas, `BIGINT` nos IDs externos.
 - [x] `spec-cgibs-habilitacao-webhook.md` (implementação) -- cliente HTTP de Habilitação do Contribuinte + endpoint webhook receptor (payload de notificação de arquivo), depende do schema.
-- [ ] `spec-cgibs-obter-arquivo-parser.md` (implementação) -- Obter Arquivo + parser do `extrato_cc` (header/operacoes/lançamentos) gravando no schema novo; ponto de validação dos riscos técnicos documentados acima.
+- [x] `spec-cgibs-obter-arquivo-parser.md` (implementação) -- Obter Arquivo + parser do `extrato_cc` (header/operacoes/lançamentos) gravando no schema novo; ponto de validação dos riscos técnicos documentados acima.
 - [ ] `spec-cgibs-solicitacao-ui.md` (implementação) -- Nova Solicitação, Listagem, Cancelamento + atualizar `CGIBSApuracao.tsx` (tirar o 503 fixo) e decisão de UI da pergunta 4 -- **também** reescreve `cgibs_apuracao.go`/`limpeza_total.go` para parar de referenciar `cgibs_requests`/`cgibs_debitos`/`cgibs_resumo`, e SÓ ENTÃO uma migration nova (aditiva) dropa essas 3 tabelas.
 
 **Acceptance Criteria:**
