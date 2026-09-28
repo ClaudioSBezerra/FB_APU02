@@ -39,7 +39,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Apuração IBS',        path: '/cgibs/apuracao-ibs' },
       { label: 'Importar Movimento',  path: '/cgibs/apuracao' },
       { label: 'Débitos IBS',         path: '/cgibs/debitos' },
-      { label: 'Créditos IBS',        path: '#', disabled: true },
+      { label: 'Extrato IBS',         path: '/cgibs/extrato' },
       { label: 'Pagamentos IBS',      path: '#', disabled: true },
       { label: 'Pgtos Fornecedores',  path: '#', disabled: true },
       { label: 'Concluir Apuração',   path: '#', disabled: true },
@@ -105,7 +105,7 @@ export function getActiveModule(pathname: string): string {
 
   if (pathname.startsWith('/dfes')) return 'dfes'
 
-  const cgibsPaths = ['/cgibs/apuracao-ibs', '/cgibs/apuracao', '/cgibs/debitos']
+  const cgibsPaths = ['/cgibs/apuracao-ibs', '/cgibs/apuracao', '/cgibs/debitos', '/cgibs/extrato']
   if (cgibsPaths.some(p => pathname.startsWith(p))) return 'cgibs'
 
   if (pathname.startsWith('/rfb/') && pathname !== '/rfb/credenciais') return 'rfb'

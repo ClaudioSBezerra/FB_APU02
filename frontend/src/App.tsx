@@ -40,6 +40,7 @@ import CGIBSPainel from './pages/CGIBSPainel'
 import CGIBSApuracao from './pages/CGIBSApuracao'
 import CGIBSCredentials from './pages/CGIBSCredentials'
 import CGIBSDebitos from './pages/CGIBSDebitos'
+import CGIBSExtrato from './pages/CGIBSExtrato'
 import DashboardResumo from './pages/DashboardResumo'
 import Login from './pages/Login'
 import AuthCallback from './pages/AuthCallback'
@@ -310,6 +311,7 @@ function AppLayout() {
       <Route path="/cgibs/apuracao-ibs"   element={<CGIBSPainel />} />
       <Route path="/cgibs/apuracao"        element={<CGIBSApuracao />} />
       <Route path="/cgibs/debitos"         element={<CGIBSDebitos />} />
+      <Route path="/cgibs/extrato"         element={<CGIBSExtrato />} />
       <Route path="/cgibs/credenciais"     element={<AdminRoute><CGIBSCredentials /></AdminRoute>} />
 
       {/* Receita Federal */}
