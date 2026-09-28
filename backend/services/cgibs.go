@@ -219,3 +219,222 @@ func ObterArquivo(clientID, clientSecret string, idSolicitacao, numeroSequencial
 	log.Printf("[CGIBS] Arquivo obtido (idSolicitacao=%d numeroSequencial=%d): %d bytes", idSolicitacao, numeroSequencial, len(respBody))
 	return respBody, nil
 }
+
+// ErrCGIBSNovaSolicitacaoNaoConfigurada é devolvido por NovaSolicitacao quando
+// CGIBS_NOVA_SOLICITACAO_URL não está configurada — mesmo padrão de ErrCGIBSNaoConfigurado
+// (Habilitar) e ErrCGIBSObterArquivoNaoConfigurado (ObterArquivo). Nenhuma chamada de rede é
+// tentada quando este erro é retornado.
+var ErrCGIBSNovaSolicitacaoNaoConfigurada = errors.New("CGIBS_NAO_CONFIGURADO: CGIBS_NOVA_SOLICITACAO_URL não configurada")
+
+// ErrCGIBSCancelamentoNaoConfigurado é devolvido por CancelarSolicitacao quando
+// CGIBS_CANCELAMENTO_URL não está configurada — mesmo padrão acima.
+var ErrCGIBSCancelamentoNaoConfigurado = errors.New("CGIBS_NAO_CONFIGURADO: CGIBS_CANCELAMENTO_URL não configurada")
+
+// cgibsSolicitacaoDateLayouts são os formatos tentados, em ordem, para DataTransacaoIni/
+// DataTransacaoFim na resposta de Nova Solicitação. AAAA-MM-DD (data pura) é o formato que NÓS
+// enviamos no corpo do request (mesmo padrão de outros campos de data já visto no MOC — ver
+// cgibsDataHabilitacaoLayouts) — os demais são fallback caso a CGIBS ecoe com hora/timezone.
+var cgibsSolicitacaoDateLayouts = []string{
+	"2006-01-02",
+	time.RFC3339,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"02/01/2006",
+}
+
+// parseCGIBSSolicitacaoDate tenta parsear DataTransacaoIni/DataTransacaoFim nos formatos
+// conhecidos. Best-effort: não bloqueia NovaSolicitacao em caso de falha — mesmo padrão de
+// parseCGIBSDataHabilitacao.
+func parseCGIBSSolicitacaoDate(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range cgibsSolicitacaoDateLayouts {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// cgibsNovaSolicitacaoRequest é o corpo enviado à API de Nova Solicitação (MOC 5.5). Mesma
+// suposição de autenticação documentada em cgibsHabilitacaoRequest (ClientID/ClientSecret no
+// corpo, não Bearer).
+type cgibsNovaSolicitacaoRequest struct {
+	ClientID         string `json:"ClientID"`
+	ClientSecret     string `json:"ClientSecret"`
+	CNPJ             string `json:"CNPJ"`
+	DataTransacaoIni string `json:"DataTransacaoIni"`
+	DataTransacaoFim string `json:"DataTransacaoFim"`
+}
+
+// cgibsNovaSolicitacaoResponse é a resposta bruta esperada da API de Nova Solicitação — os
+// campos de data chegam como string (formato não 100% confirmado pela CGIBS, ver
+// cgibsSolicitacaoDateLayouts) e são parseados em NovaSolicitacao antes de devolver
+// CGIBSNovaSolicitacaoResp ao chamador.
+type cgibsNovaSolicitacaoResponse struct {
+	TokenContrib        string `json:"TokenContrib"`
+	TipoSolicitacao     string `json:"TipoSolicitacao"`
+	SituacaoSolicitacao string `json:"SituacaoSolicitacao"`
+	IDSolicitacao       int64  `json:"IDSolicitacao"`
+	DataTransacaoIni    string `json:"DataTransacaoIni"`
+	DataTransacaoFim    string `json:"DataTransacaoFim"`
+	Resultado           string `json:"Resultado"`
+}
+
+// CGIBSNovaSolicitacaoResp é o resultado exportado de NovaSolicitacao, já com as datas
+// parseadas (zero, sem erro, se a CGIBS devolver um formato não reconhecido — o chamador
+// decide o fallback, mesmo princípio de Habilitar/dataHabilitacao).
+type CGIBSNovaSolicitacaoResp struct {
+	TokenContrib        string
+	TipoSolicitacao     string
+	SituacaoSolicitacao string
+	IDSolicitacao       int64
+	DataTransacaoIni    time.Time
+	DataTransacaoFim    time.Time
+	Resultado           string
+}
+
+// NovaSolicitacao chama a API de Nova Solicitação da CGIBS (MOC 5.5) para solicitar o extrato
+// de conta corrente fiscal (diferencial ou manual) de um período. Lê CGIBS_NOVA_SOLICITACAO_URL
+// do ambiente; se vazia, retorna ErrCGIBSNovaSolicitacaoNaoConfigurada SEM tentar nenhuma
+// chamada de rede — mesmo padrão de Habilitar/ObterArquivo.
+//
+// dataIni/dataFim são formatadas como AAAA-MM-DD no corpo do request (mesmo padrão de outros
+// campos de data já visto no MOC).
+//
+// SUPOSIÇÃO: cnpj é a raiz de 8 dígitos (CNPJ8), não o CNPJ completo de 14 dígitos — a seção 5.5
+// do MOC não confirma o formato exato deste campo, mesma limitação de extração documentada em
+// spec-cgibs-conta-corrente-plano.md. Se a CGIBS exigir os 14 dígitos, é aqui (e no chamador,
+// SolicitarCGIBSApuracaoHandler) que ajustar.
+func NovaSolicitacao(clientID, clientSecret, cnpj string, dataIni, dataFim time.Time) (resp CGIBSNovaSolicitacaoResp, err error) {
+	endpoint := strings.TrimSpace(os.Getenv("CGIBS_NOVA_SOLICITACAO_URL"))
+	if endpoint == "" {
+		return CGIBSNovaSolicitacaoResp{}, ErrCGIBSNovaSolicitacaoNaoConfigurada
+	}
+
+	payload := cgibsNovaSolicitacaoRequest{
+		ClientID:         clientID,
+		ClientSecret:     clientSecret,
+		CNPJ:             cnpj,
+		DataTransacaoIni: dataIni.Format("2006-01-02"),
+		DataTransacaoFim: dataFim.Format("2006-01-02"),
+	}
+	payloadJSON, merr := json.Marshal(payload)
+	if merr != nil {
+		return CGIBSNovaSolicitacaoResp{}, fmt.Errorf("cgibs nova solicitacao: erro ao montar corpo: %w", merr)
+	}
+
+	log.Printf("[CGIBS] Nova Solicitação: POST %s (cnpj=%s periodo=%s a %s)", endpoint, cnpj, payload.DataTransacaoIni, payload.DataTransacaoFim)
+
+	req, rerr := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(payloadJSON)))
+	if rerr != nil {
+		return CGIBSNovaSolicitacaoResp{}, fmt.Errorf("cgibs nova solicitacao: erro ao criar requisição: %w", rerr)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	httpResp, derr := cgibsHTTPClient.Do(req)
+	if derr != nil {
+		return CGIBSNovaSolicitacaoResp{}, fmt.Errorf("cgibs nova solicitacao: requisição falhou: %w", derr)
+	}
+	defer httpResp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, cgibsMaxJSONBodyBytes))
+	log.Printf("[CGIBS] Resposta da Nova Solicitação (HTTP %d): %s", httpResp.StatusCode, TruncateRunes(string(respBody), 500))
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return CGIBSNovaSolicitacaoResp{}, fmt.Errorf("cgibs nova solicitacao: HTTP %d: %s", httpResp.StatusCode, TruncateRunes(string(respBody), 500))
+	}
+
+	var parsed cgibsNovaSolicitacaoResponse
+	if uerr := json.Unmarshal(respBody, &parsed); uerr != nil {
+		return CGIBSNovaSolicitacaoResp{}, fmt.Errorf("cgibs nova solicitacao: erro ao parsear resposta: %w", uerr)
+	}
+
+	result := CGIBSNovaSolicitacaoResp{
+		TokenContrib:        parsed.TokenContrib,
+		TipoSolicitacao:     parsed.TipoSolicitacao,
+		SituacaoSolicitacao: parsed.SituacaoSolicitacao,
+		IDSolicitacao:       parsed.IDSolicitacao,
+		Resultado:           parsed.Resultado,
+	}
+	if t, ok := parseCGIBSSolicitacaoDate(parsed.DataTransacaoIni); ok {
+		result.DataTransacaoIni = t
+	} else if parsed.DataTransacaoIni != "" {
+		log.Printf("[CGIBS] AVISO: DataTransacaoIni %q não reconhecida em nenhum formato conhecido — devolvendo zero (chamador decide o fallback)", parsed.DataTransacaoIni)
+	}
+	if t, ok := parseCGIBSSolicitacaoDate(parsed.DataTransacaoFim); ok {
+		result.DataTransacaoFim = t
+	} else if parsed.DataTransacaoFim != "" {
+		log.Printf("[CGIBS] AVISO: DataTransacaoFim %q não reconhecida em nenhum formato conhecido — devolvendo zero (chamador decide o fallback)", parsed.DataTransacaoFim)
+	}
+
+	log.Printf("[CGIBS] Nova Solicitação processada: IDSolicitacao=%d SituacaoSolicitacao=%q TipoSolicitacao=%q", result.IDSolicitacao, result.SituacaoSolicitacao, result.TipoSolicitacao)
+	return result, nil
+}
+
+// cgibsCancelamentoRequest é o corpo enviado à API de Cancelamento (MOC 5.6, inferido do nome
+// dado pela spec — seção não extraiu como texto). Mesma suposição de autenticação documentada
+// em cgibsHabilitacaoRequest.
+type cgibsCancelamentoRequest struct {
+	ClientID      string `json:"ClientID"`
+	ClientSecret  string `json:"ClientSecret"`
+	IDSolicitacao int64  `json:"IDSolicitacao"`
+}
+
+// cgibsCancelamentoResponse é a resposta esperada da API de Cancelamento.
+type cgibsCancelamentoResponse struct {
+	Resultado string `json:"Resultado"`
+}
+
+// CancelarSolicitacao chama a API de Cancelamento da CGIBS para cancelar uma solicitação ainda
+// em situação 'solicitada' (ainda não gerada/enviada, conforme MOC — a checagem de qual
+// situação permite cancelamento é responsabilidade do chamador, não desta função). Lê
+// CGIBS_CANCELAMENTO_URL do ambiente; se vazia, retorna ErrCGIBSCancelamentoNaoConfigurado SEM
+// tentar nenhuma chamada de rede — mesmo padrão de Habilitar/ObterArquivo/NovaSolicitacao.
+func CancelarSolicitacao(clientID, clientSecret string, idSolicitacao int64) (resultado string, err error) {
+	endpoint := strings.TrimSpace(os.Getenv("CGIBS_CANCELAMENTO_URL"))
+	if endpoint == "" {
+		return "", ErrCGIBSCancelamentoNaoConfigurado
+	}
+
+	payload := cgibsCancelamentoRequest{
+		ClientID:      clientID,
+		ClientSecret:  clientSecret,
+		IDSolicitacao: idSolicitacao,
+	}
+	payloadJSON, merr := json.Marshal(payload)
+	if merr != nil {
+		return "", fmt.Errorf("cgibs cancelar solicitacao: erro ao montar corpo: %w", merr)
+	}
+
+	log.Printf("[CGIBS] Cancelando solicitação: POST %s (idSolicitacao=%d)", endpoint, idSolicitacao)
+
+	req, rerr := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(payloadJSON)))
+	if rerr != nil {
+		return "", fmt.Errorf("cgibs cancelar solicitacao: erro ao criar requisição: %w", rerr)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	httpResp, derr := cgibsHTTPClient.Do(req)
+	if derr != nil {
+		return "", fmt.Errorf("cgibs cancelar solicitacao: requisição falhou: %w", derr)
+	}
+	defer httpResp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(httpResp.Body, cgibsMaxJSONBodyBytes))
+	log.Printf("[CGIBS] Resposta do Cancelamento (HTTP %d): %s", httpResp.StatusCode, TruncateRunes(string(respBody), 500))
+
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		return "", fmt.Errorf("cgibs cancelar solicitacao: HTTP %d: %s", httpResp.StatusCode, TruncateRunes(string(respBody), 500))
+	}
+
+	var parsed cgibsCancelamentoResponse
+	if uerr := json.Unmarshal(respBody, &parsed); uerr != nil {
+		return "", fmt.Errorf("cgibs cancelar solicitacao: erro ao parsear resposta: %w", uerr)
+	}
+
+	log.Printf("[CGIBS] Cancelamento processado (idSolicitacao=%d): Resultado=%q", idSolicitacao, parsed.Resultado)
+	return parsed.Resultado, nil
+}

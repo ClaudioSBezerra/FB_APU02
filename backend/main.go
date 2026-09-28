@@ -560,6 +560,15 @@ func main() {
 	http.HandleFunc("/api/cgibs/debitos/periodos", withAuth(handlers.PeriodosDebitosIBSHandler, ""))
 	http.HandleFunc("/api/cgibs/debitos", withAuth(handlers.ListarDebitosIBSHandler, ""))
 
+	// CGIBS Operações (ledger — conta corrente fiscal, leitura ao vivo sobre cgibs_operacoes/
+	// cgibs_lancamentos; mesmo padrão de prefixo + rota exata usado em /api/cgibs/apuracao/*)
+	http.HandleFunc("/api/cgibs/operacoes", withAuth(handlers.ListarOperacoesCGIBSHandler, ""))
+	http.HandleFunc("/api/cgibs/operacoes/", withAuth(handlers.LancamentosOperacaoCGIBSHandler, ""))
+
+	// CGIBS Resumo agregado por período (substituto real do antigo "resumo por request",
+	// removido junto com cgibs_resumo na migration 132 — revisão adversarial #2, item 5)
+	http.HandleFunc("/api/cgibs/resumo", withAuth(handlers.ResumoCGIBSHandler, ""))
+
 	// NF-e Saídas
 	http.HandleFunc("/api/nfe-saidas/upload", withAuth(handlers.NfeSaidasUploadHandler, ""))
 	http.HandleFunc("/api/nfe-saidas/filiais", withAuth(handlers.NfeSaidasFiliaisHandler, ""))

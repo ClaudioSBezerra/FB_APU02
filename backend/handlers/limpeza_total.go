@@ -23,7 +23,7 @@ var LimpezaTotalTabelas = []string{
 	"nfe_entradas", "nfe_saidas", "cte_entradas",
 	"rfb_debitos", "rfb_creditos", "rfb_debitos_liquidacoes", "rfb_creditos_liquidacoes",
 	"rfb_resumo", "rfb_creditos_resumo", "rfb_requests",
-	"cgibs_debitos", "cgibs_requests", "cgibs_resumo",
+	"cgibs_lancamentos", "cgibs_operacoes", "cgibs_arquivos", "cgibs_solicitacoes",
 	"erp_bridge_runs", "erp_bridge_run_items",
 	"import_jobs", "participants",
 	"sap_sync_runs", "sap_resultados_busca",

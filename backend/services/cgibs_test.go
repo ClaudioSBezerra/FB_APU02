@@ -243,6 +243,184 @@ func TestObterArquivo_CorpoNoLimiteDoLimitReader_DevolveErroExplicito(t *testing
 // TestObterArquivo_CorpoDentroDoLimite_NaoErra confirma que um corpo exatamente no limite (não
 // além dele) continua sendo aceito normalmente — a checagem do item 12 não pode rejeitar
 // arquivos legítimos de tamanho máximo.
+// TestNovaSolicitacao_SemEnvConfigurada_NaoTentaRede confirma que, sem
+// CGIBS_NOVA_SOLICITACAO_URL, NovaSolicitacao devolve ErrCGIBSNovaSolicitacaoNaoConfigurada
+// sem tentar nenhuma chamada de rede — mesmo padrão de Habilitar/ObterArquivo.
+func TestNovaSolicitacao_SemEnvConfigurada_NaoTentaRede(t *testing.T) {
+	t.Setenv("CGIBS_NOVA_SOLICITACAO_URL", "")
+
+	dataIni := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	dataFim := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	resp, err := NovaSolicitacao("client-id", "client-secret", "12345678", dataIni, dataFim)
+
+	if !errors.Is(err, ErrCGIBSNovaSolicitacaoNaoConfigurada) {
+		t.Fatalf("esperava ErrCGIBSNovaSolicitacaoNaoConfigurada, obteve %v", err)
+	}
+	if resp != (CGIBSNovaSolicitacaoResp{}) {
+		t.Errorf("esperava resp zero-value, obteve %+v", resp)
+	}
+}
+
+// TestNovaSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta confirma que NovaSolicitacao
+// monta o corpo exatamente com os 5 campos documentados (ClientID, ClientSecret, CNPJ,
+// DataTransacaoIni, DataTransacaoFim — datas em AAAA-MM-DD) e parseia corretamente uma
+// resposta de sucesso.
+func TestNovaSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) {
+	var capturedBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("esperava POST, veio %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("erro ao decodificar corpo recebido: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"TokenContrib":        "token-abc",
+			"TipoSolicitacao":     "diferencial",
+			"SituacaoSolicitacao": "solicitada",
+			"IDSolicitacao":       12345,
+			"DataTransacaoIni":    "2026-01-01",
+			"DataTransacaoFim":    "2026-01-31",
+			"Resultado":           "sucesso",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("CGIBS_NOVA_SOLICITACAO_URL", srv.URL)
+
+	dataIni := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	dataFim := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC)
+	resp, err := NovaSolicitacao("cid-teste", "secret-teste", "12345678", dataIni, dataFim)
+	if err != nil {
+		t.Fatalf("NovaSolicitacao retornou erro inesperado: %v", err)
+	}
+
+	if capturedBody["ClientID"] != "cid-teste" {
+		t.Errorf("ClientID: esperava %q, veio %v", "cid-teste", capturedBody["ClientID"])
+	}
+	if capturedBody["ClientSecret"] != "secret-teste" {
+		t.Errorf("ClientSecret: esperava %q, veio %v", "secret-teste", capturedBody["ClientSecret"])
+	}
+	if capturedBody["CNPJ"] != "12345678" {
+		t.Errorf("CNPJ: esperava %q, veio %v", "12345678", capturedBody["CNPJ"])
+	}
+	if capturedBody["DataTransacaoIni"] != "2026-01-01" {
+		t.Errorf("DataTransacaoIni: esperava %q, veio %v", "2026-01-01", capturedBody["DataTransacaoIni"])
+	}
+	if capturedBody["DataTransacaoFim"] != "2026-01-31" {
+		t.Errorf("DataTransacaoFim: esperava %q, veio %v", "2026-01-31", capturedBody["DataTransacaoFim"])
+	}
+
+	if resp.TokenContrib != "token-abc" {
+		t.Errorf("esperava TokenContrib=token-abc, veio %q", resp.TokenContrib)
+	}
+	if resp.TipoSolicitacao != "diferencial" {
+		t.Errorf("esperava TipoSolicitacao=diferencial, veio %q", resp.TipoSolicitacao)
+	}
+	if resp.SituacaoSolicitacao != "solicitada" {
+		t.Errorf("esperava SituacaoSolicitacao=solicitada, veio %q", resp.SituacaoSolicitacao)
+	}
+	if resp.IDSolicitacao != 12345 {
+		t.Errorf("esperava IDSolicitacao=12345, veio %d", resp.IDSolicitacao)
+	}
+	if resp.Resultado != "sucesso" {
+		t.Errorf("esperava Resultado=sucesso, veio %q", resp.Resultado)
+	}
+	if !resp.DataTransacaoIni.Equal(dataIni) {
+		t.Errorf("esperava DataTransacaoIni=%v, veio %v", dataIni, resp.DataTransacaoIni)
+	}
+	if !resp.DataTransacaoFim.Equal(dataFim) {
+		t.Errorf("esperava DataTransacaoFim=%v, veio %v", dataFim, resp.DataTransacaoFim)
+	}
+}
+
+// TestNovaSolicitacao_HTTPErro_DevolveErro confirma que um status HTTP de erro vira erro Go.
+func TestNovaSolicitacao_HTTPErro_DevolveErro(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"erro":"falha interna"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("CGIBS_NOVA_SOLICITACAO_URL", srv.URL)
+
+	_, err := NovaSolicitacao("cid", "secret", "12345678", time.Now(), time.Now())
+	if err == nil {
+		t.Fatal("esperava erro para HTTP 500, obteve nil")
+	}
+}
+
+// TestCancelarSolicitacao_SemEnvConfigurada_NaoTentaRede confirma que, sem
+// CGIBS_CANCELAMENTO_URL, CancelarSolicitacao devolve ErrCGIBSCancelamentoNaoConfigurado sem
+// tentar nenhuma chamada de rede.
+func TestCancelarSolicitacao_SemEnvConfigurada_NaoTentaRede(t *testing.T) {
+	t.Setenv("CGIBS_CANCELAMENTO_URL", "")
+
+	resultado, err := CancelarSolicitacao("client-id", "client-secret", 123)
+
+	if !errors.Is(err, ErrCGIBSCancelamentoNaoConfigurado) {
+		t.Fatalf("esperava ErrCGIBSCancelamentoNaoConfigurado, obteve %v", err)
+	}
+	if resultado != "" {
+		t.Errorf("esperava resultado vazio, obteve %q", resultado)
+	}
+}
+
+// TestCancelarSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta confirma que
+// CancelarSolicitacao monta o corpo com os 3 campos documentados (ClientID, ClientSecret,
+// IDSolicitacao) e parseia corretamente o Resultado da resposta.
+func TestCancelarSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) {
+	var capturedBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("esperava POST, veio %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
+			t.Fatalf("erro ao decodificar corpo recebido: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"Resultado": "cancelado com sucesso"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("CGIBS_CANCELAMENTO_URL", srv.URL)
+
+	resultado, err := CancelarSolicitacao("cid-teste", "secret-teste", 456)
+	if err != nil {
+		t.Fatalf("CancelarSolicitacao retornou erro inesperado: %v", err)
+	}
+
+	if capturedBody["ClientID"] != "cid-teste" {
+		t.Errorf("ClientID: esperava %q, veio %v", "cid-teste", capturedBody["ClientID"])
+	}
+	if capturedBody["ClientSecret"] != "secret-teste" {
+		t.Errorf("ClientSecret: esperava %q, veio %v", "secret-teste", capturedBody["ClientSecret"])
+	}
+	if capturedBody["IDSolicitacao"] != float64(456) {
+		t.Errorf("IDSolicitacao: esperava 456, veio %v", capturedBody["IDSolicitacao"])
+	}
+	if resultado != "cancelado com sucesso" {
+		t.Errorf("esperava Resultado='cancelado com sucesso', veio %q", resultado)
+	}
+}
+
+// TestCancelarSolicitacao_HTTPErro_DevolveErro confirma que um status HTTP de erro vira erro Go.
+func TestCancelarSolicitacao_HTTPErro_DevolveErro(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"erro":"falha interna"}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("CGIBS_CANCELAMENTO_URL", srv.URL)
+
+	_, err := CancelarSolicitacao("cid", "secret", 1)
+	if err == nil {
+		t.Fatal("esperava erro para HTTP 500, obteve nil")
+	}
+}
+
 func TestObterArquivo_CorpoDentroDoLimite_NaoErra(t *testing.T) {
 	exact := make([]byte, cgibsObterArquivoMaxBodyBytes)
 	for i := range exact {

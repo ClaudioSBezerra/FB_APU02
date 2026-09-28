@@ -1,5 +1,14 @@
 # Deferred Work
 
+## Deferred from: code review of spec-cgibs-nova-solicitacao-drop-legado (2026-09-28)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-nova-solicitacao-drop-legado.md`
+  summary: **`CGIBSApuracao.tsx` (frontend) fica incompatível com o backend desta sub-spec** — chave de resposta mudou (`requests`→`solicitacoes`), shape mudou, POST de solicitar agora exige corpo `{data_ini,data_fim}` (a tela hoje não envia nada). Antes do deploy: histórico da tela some (fica vazio, igual já era) e o botão "Solicitar" passa a dar 400 em vez do 503 amigável de antes.
+  evidence: Split deliberado — frontend é a próxima sub-spec (`spec-cgibs-frontend.md`), ainda não escrita. **Confirmado por 2 revisores independentes lendo o arquivo real.** NÃO FAZER DEPLOY das sub-specs de schema/habilitação/parser/nova-solicitação sem a de frontend junto, ou o botão de solicitar fica pior do que estava (sem nunca ter funcionado de verdade em nenhum dos dois estados).
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-nova-solicitacao-drop-legado.md`
+  summary: `services.CancelarSolicitacao` tem o request/response inteiramente inferido (seção 5.6 do MOC não extraiu como texto) — mesma classe de incerteza já aceita para `Habilitar`/`ObterArquivo`/`NovaSolicitacao`. Falha do cancelamento remoto é só logada (best-effort), sem feedback ao usuário nem reconciliação se o cancelamento local prosseguir mas o remoto não confirmar.
+  evidence: Consistente com o padrão já aceito de "construir contra a especificação, validar quando tivermos acesso real". Baixa prioridade — não é dado incorreto, é só reconciliação de UX pra uma operação assíncrona best-effort. Revisitar quando testarmos contra a API real (piloto).
+
 ## Deferred from: code review of spec-cgibs-obter-arquivo-parser (2026-09-28)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-obter-arquivo-parser.md`
