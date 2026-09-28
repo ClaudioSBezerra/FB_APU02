@@ -1,5 +1,20 @@
 # Deferred Work
 
+## Deferred from: code review of spec-cgibs-habilitacao-webhook (2026-09-28)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-habilitacao-webhook.md`
+  summary: `POST /api/cgibs/webhook` (público, sem JWT) não tem rate limiting — mesma lacuna já aceita no webhook RFB (`/api/rfb/webhook`), não é regressão nova.
+  evidence: Achado por revisor adversarial, explicitamente notado como "mesmo padrão do irmão RFB". Revisitar junto se algum dia adicionar rate limiting nos 2 webhooks juntos.
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-habilitacao-webhook.md`
+  summary: `cgibs_credentials.company_id` é `TEXT` sem FK pra `companies` (migration 102, pré-existente) — uma linha órfã (empresa deletada) mantém `token_contrib` válido capaz de autenticar webhook indefinidamente. Mitigado parcialmente nesta rodada (verificação de existência da empresa antes do INSERT em `cgibs_solicitacoes`), mas a causa raiz (sem FK/cascade) não foi corrigida — decisão consciente da sub-spec de schema, fora de escopo.
+  evidence: Achado por 2 revisores. Revisitar se `company_id` de `cgibs_credentials` for migrado pra UUID FK algum dia (mudança maior, toca o schema 102 que não pode ser alterado, só uma migration nova de conversão).
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-habilitacao-webhook.md`
+  summary: `ambiente` (piloto/produção) da credencial é ignorado ao chamar `CGIBS_HABILITACAO_URL` — sempre a mesma URL global, diferente do padrão RFB (`SetAmbiente`/`ResolveRFBAPIVersion`) que roteia por ambiente.
+  evidence: Não implementado de propósito — não há confirmação no manual da CGIBS de que existem endpoints distintos por ambiente (diferente da RFB, onde isso é documentado e confirmado). Revisitar quando/se a CGIBS confirmar URLs separadas, ou quando testarmos contra a API real.
+- source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-habilitacao-webhook.md`
+  summary: `matchCGIBSCredential` decripta e compara o token em loop sobre todas as credenciais ativas candidatas (custo O(n) por webhook recebido, com vazamento de timing grosseiro correlacionado à posição da credencial que casa o CNPJ). `crypto.DecryptFieldWithFallback` falha silenciosamente (retorna o texto cifrado) se `ENCRYPTION_KEY` divergir de quando a linha foi escrita — indistinguível de uma tentativa de acesso não autorizado nos logs.
+  evidence: Achados de revisor, baixo risco na escala atual (poucas empresas CGIBS habilitadas). O 2º item é característica do helper de criptografia compartilhado do projeto (mesmo padrão em `sap_credentials.go`), não regressão desta sub-spec. Revisitar se o volume de credenciais CGIBS crescer, ou se houver suspeita de rotação de `ENCRYPTION_KEY` mal feita em produção.
+
 ## Deferred from: code review of spec-rfb-cbs-v2-urls-download-webhook (2026-09-24)
 
 - source_spec: `_bmad-output/implementation-artifacts/spec-rfb-cbs-v2-urls-download-webhook.md`

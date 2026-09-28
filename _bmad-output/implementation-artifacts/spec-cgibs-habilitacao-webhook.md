@@ -2,9 +2,9 @@
 title: 'CGIBS: Habilitação do Contribuinte + webhook receptor'
 type: 'feature'
 created: '2026-09-28'
-status: 'in-progress'
+status: 'done'
 review_loop_iteration: 0
-baseline_commit: '9e92b6b121346f2304878e615421c8d11f1e2f5b'
+baseline_commit: 'b7d04851ee0fd3e0f4cd9d8f8be7087d21b5b339'
 context: ['{project-root}/_bmad-output/implementation-artifacts/spec-cgibs-conta-corrente-plano.md']
 ---
 
@@ -44,11 +44,11 @@ context: ['{project-root}/_bmad-output/implementation-artifacts/spec-cgibs-conta
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] `backend/services/cgibs.go` -- `Habilitar(clientID, clientSecret, webhookURL, tokenContrib string) (habilitado string, dataHabilitacao time.Time, err error)`, lendo `CGIBS_HABILITACAO_URL`; erro tipado se env vazia; JSON no corpo com os 5 campos.
-- [ ] `backend/handlers/cgibs_credentials.go` -- `POST /api/cgibs/credentials/habilitar`: carrega credencial da empresa, gera `token_contrib` (se ainda não tiver), chama `Habilitar()` com `CGIBS_WEBHOOK_URL`, persiste `habilitado`/`data_habilitacao`/`webhook_url`/`token_contrib`; confirmar/aplicar criptografia de `client_secret`/`token_contrib`.
-- [ ] `backend/handlers/cgibs_webhook.go` -- `CGIBSWebhookHandler`: parse do payload (`TipoSolicitacao`, `SituacaoSolicitacao`, `CNPJ`, `IDSolicitacao`, `DataSolicitacao`, `DataTransacaoIni/Fim`, `QtdOperacoes`, `QtdArqVinculados`, `DataValidadeSolicitacao`, `Arquivos[]`); identifica empresa por CNPJ+TokenContrib; upsert `cgibs_solicitacoes` + `cgibs_arquivos` (status `pendente`).
-- [ ] `backend/main.go` -- registrar as 2 rotas.
-- [ ] Testes (padrão do pacote, `openTestDB`, fake `httptest`): `Habilitar()` sem env configurada retorna erro tipado sem chamar rede; `Habilitar()` com fake server monta o corpo certo; webhook com CNPJ+token corretos faz upsert; webhook com token errado rejeita; webhook chamado 2x pra mesma `IDSolicitacao` atualiza (não duplica) a solicitação; `Arquivos[]` viram linhas em `cgibs_arquivos` sem duplicar em reenvio.
+- [x] `backend/services/cgibs.go` -- `Habilitar(clientID, clientSecret, webhookURL, tokenContrib string) (habilitado string, dataHabilitacao time.Time, err error)`, lendo `CGIBS_HABILITACAO_URL`; erro tipado se env vazia; JSON no corpo com os 5 campos.
+- [x] `backend/handlers/cgibs_credentials.go` -- `POST /api/cgibs/credentials/habilitar`: carrega credencial da empresa, gera `token_contrib` (se ainda não tiver), chama `Habilitar()` com `CGIBS_WEBHOOK_URL`, persiste `habilitado`/`data_habilitacao`/`webhook_url`/`token_contrib`; confirmar/aplicar criptografia de `client_secret`/`token_contrib`.
+- [x] `backend/handlers/cgibs_webhook.go` -- `CGIBSWebhookHandler`: parse do payload (`TipoSolicitacao`, `SituacaoSolicitacao`, `CNPJ`, `IDSolicitacao`, `DataSolicitacao`, `DataTransacaoIni/Fim`, `QtdOperacoes`, `QtdArqVinculados`, `DataValidadeSolicitacao`, `Arquivos[]`); identifica empresa por CNPJ+TokenContrib; upsert `cgibs_solicitacoes` + `cgibs_arquivos` (status `pendente`).
+- [x] `backend/main.go` -- registrar as 2 rotas.
+- [x] Testes (padrão do pacote, `openTestDB`, fake `httptest`): `Habilitar()` sem env configurada retorna erro tipado sem chamar rede; `Habilitar()` com fake server monta o corpo certo; webhook com CNPJ+token corretos faz upsert; webhook com token errado rejeita; webhook chamado 2x pra mesma `IDSolicitacao` atualiza (não duplica) a solicitação; `Arquivos[]` viram linhas em `cgibs_arquivos` sem duplicar em reenvio.
 
 **Acceptance Criteria:**
 - Given `CGIBS_HABILITACAO_URL` não configurada, when `/api/cgibs/credentials/habilitar` é chamado, then retorna erro claro sem tentar rede.

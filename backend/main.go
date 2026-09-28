@@ -545,6 +545,10 @@ func main() {
 		}
 		handlers.AuthMiddleware(handlers.UpdateCGIBSScheduleHandler(database), "")(w, r)
 	})
+	http.HandleFunc("/api/cgibs/credentials/habilitar", withAuth(handlers.HabilitarCGIBSHandler, ""))
+
+	// CGIBS Webhook (PUBLIC - no JWT auth)
+	http.HandleFunc("/api/cgibs/webhook", withDB(handlers.CGIBSWebhookHandler))
 
 	// CGIBS Apuração
 	http.HandleFunc("/api/cgibs/apuracao/solicitar", withAuth(handlers.SolicitarCGIBSApuracaoHandler, ""))
