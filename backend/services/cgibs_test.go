@@ -29,18 +29,20 @@ func TestHabilitar_SemEnvConfigurada_NaoTentaRede(t *testing.T) {
 	}
 }
 
-// TestHabilitar_ComFakeServer_MontaCorpoEParseiaResposta confirma que Habilitar monta o
-// corpo exatamente com os 5 campos documentados (ClientID, ClientSecret, QueroHabilitar,
-// WebhookURL, TokenContrib — autenticação por credencial no corpo, não Bearer) e parseia
+// TestHabilitar_ComFakeServer_MontaCorpoEParseiaResposta confirma que Habilitar manda
+// ClientID/ClientSecret em HEADERS (confirmado pelo MOC v1.10, seção 5.1) e monta o corpo
+// com os 3 campos documentados (QueroHabilitar, WebhookURL, TokenContrib), parseando
 // corretamente uma resposta de sucesso.
 func TestHabilitar_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) {
 	var capturedBody map[string]string
-	var capturedContentType string
+	var capturedContentType, capturedClientID, capturedClientSecret string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("esperava POST, veio %s", r.Method)
 		}
 		capturedContentType = r.Header.Get("Content-Type")
+		capturedClientID = r.Header.Get("ClientID")
+		capturedClientSecret = r.Header.Get("ClientSecret")
 		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
 			t.Fatalf("erro ao decodificar corpo recebido: %v", err)
 		}
@@ -62,11 +64,11 @@ func TestHabilitar_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) {
 	if capturedContentType != "application/json" {
 		t.Errorf("esperava Content-Type application/json, veio %q", capturedContentType)
 	}
-	if capturedBody["ClientID"] != "cid-teste" {
-		t.Errorf("ClientID: esperava %q, veio %q", "cid-teste", capturedBody["ClientID"])
+	if capturedClientID != "cid-teste" {
+		t.Errorf("header ClientID: esperava %q, veio %q", "cid-teste", capturedClientID)
 	}
-	if capturedBody["ClientSecret"] != "secret-teste" {
-		t.Errorf("ClientSecret: esperava %q, veio %q", "secret-teste", capturedBody["ClientSecret"])
+	if capturedClientSecret != "secret-teste" {
+		t.Errorf("header ClientSecret: esperava %q, veio %q", "secret-teste", capturedClientSecret)
 	}
 	if capturedBody["QueroHabilitar"] != "HAB" {
 		t.Errorf("QueroHabilitar: esperava %q, veio %q", "HAB", capturedBody["QueroHabilitar"])
@@ -77,8 +79,8 @@ func TestHabilitar_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) {
 	if capturedBody["TokenContrib"] != "token-abc" {
 		t.Errorf("TokenContrib: esperava %q, veio %q", "token-abc", capturedBody["TokenContrib"])
 	}
-	if _, hasAuthField := capturedBody["Authorization"]; hasAuthField {
-		t.Errorf("corpo não deveria ter campo Authorization (autenticação é por credencial no corpo, não Bearer)")
+	if _, hasClientIDInBody := capturedBody["ClientID"]; hasClientIDInBody {
+		t.Errorf("corpo não deveria ter campo ClientID (vai em header, não no corpo — MOC 5.1)")
 	}
 
 	if habilitado != "sucesso" {
@@ -123,17 +125,20 @@ func TestObterArquivo_SemEnvConfigurada_NaoTentaRede(t *testing.T) {
 	}
 }
 
-// TestObterArquivo_ComFakeServer_MontaCorpoEDevolveBytesCrus confirma que ObterArquivo monta o
-// corpo com os 4 campos documentados (ClientID, ClientSecret, IDSolicitacao, NumeroSequencial)
-// e devolve a resposta 200 como bytes crus, sem tentar decodificar (quem decodifica é o
-// parser).
+// TestObterArquivo_ComFakeServer_MontaCorpoEDevolveBytesCrus confirma que ObterArquivo manda
+// ClientID/ClientSecret em headers e monta o corpo com os 2 campos documentados
+// (IDSolicitacao, NumeroSequencial), devolvendo a resposta 200 como bytes crus, sem tentar
+// decodificar (quem decodifica é o parser).
 func TestObterArquivo_ComFakeServer_MontaCorpoEDevolveBytesCrus(t *testing.T) {
 	var capturedBody map[string]interface{}
+	var capturedClientID, capturedClientSecret string
 	const respostaCrua = `{"nomearquivo":"arquivo1.json","operacoes":[]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("esperava POST, veio %s", r.Method)
 		}
+		capturedClientID = r.Header.Get("ClientID")
+		capturedClientSecret = r.Header.Get("ClientSecret")
 		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
 			t.Fatalf("erro ao decodificar corpo recebido: %v", err)
 		}
@@ -149,11 +154,11 @@ func TestObterArquivo_ComFakeServer_MontaCorpoEDevolveBytesCrus(t *testing.T) {
 		t.Fatalf("ObterArquivo retornou erro inesperado: %v", err)
 	}
 
-	if capturedBody["ClientID"] != "cid-teste" {
-		t.Errorf("ClientID: esperava %q, veio %v", "cid-teste", capturedBody["ClientID"])
+	if capturedClientID != "cid-teste" {
+		t.Errorf("header ClientID: esperava %q, veio %q", "cid-teste", capturedClientID)
 	}
-	if capturedBody["ClientSecret"] != "secret-teste" {
-		t.Errorf("ClientSecret: esperava %q, veio %v", "secret-teste", capturedBody["ClientSecret"])
+	if capturedClientSecret != "secret-teste" {
+		t.Errorf("header ClientSecret: esperava %q, veio %q", "secret-teste", capturedClientSecret)
 	}
 	if capturedBody["IDSolicitacao"] != float64(456) {
 		t.Errorf("IDSolicitacao: esperava 456, veio %v", capturedBody["IDSolicitacao"])
@@ -262,15 +267,18 @@ func TestNovaSolicitacao_SemEnvConfigurada_NaoTentaRede(t *testing.T) {
 }
 
 // TestNovaSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta confirma que NovaSolicitacao
-// monta o corpo exatamente com os 5 campos documentados (ClientID, ClientSecret, CNPJ,
-// DataTransacaoIni, DataTransacaoFim — datas em AAAA-MM-DD) e parseia corretamente uma
+// manda ClientID/ClientSecret em headers e monta o corpo com os 3 campos documentados (CNPJ,
+// DataTransacaoIni, DataTransacaoFim — datas em AAAA-MM-DD), parseando corretamente uma
 // resposta de sucesso.
 func TestNovaSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) {
 	var capturedBody map[string]interface{}
+	var capturedClientID, capturedClientSecret string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("esperava POST, veio %s", r.Method)
 		}
+		capturedClientID = r.Header.Get("ClientID")
+		capturedClientSecret = r.Header.Get("ClientSecret")
 		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
 			t.Fatalf("erro ao decodificar corpo recebido: %v", err)
 		}
@@ -296,11 +304,11 @@ func TestNovaSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) 
 		t.Fatalf("NovaSolicitacao retornou erro inesperado: %v", err)
 	}
 
-	if capturedBody["ClientID"] != "cid-teste" {
-		t.Errorf("ClientID: esperava %q, veio %v", "cid-teste", capturedBody["ClientID"])
+	if capturedClientID != "cid-teste" {
+		t.Errorf("header ClientID: esperava %q, veio %q", "cid-teste", capturedClientID)
 	}
-	if capturedBody["ClientSecret"] != "secret-teste" {
-		t.Errorf("ClientSecret: esperava %q, veio %v", "secret-teste", capturedBody["ClientSecret"])
+	if capturedClientSecret != "secret-teste" {
+		t.Errorf("header ClientSecret: esperava %q, veio %q", "secret-teste", capturedClientSecret)
 	}
 	if capturedBody["CNPJ"] != "12345678" {
 		t.Errorf("CNPJ: esperava %q, veio %v", "12345678", capturedBody["CNPJ"])
@@ -368,14 +376,17 @@ func TestCancelarSolicitacao_SemEnvConfigurada_NaoTentaRede(t *testing.T) {
 }
 
 // TestCancelarSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta confirma que
-// CancelarSolicitacao monta o corpo com os 3 campos documentados (ClientID, ClientSecret,
-// IDSolicitacao) e parseia corretamente o Resultado da resposta.
+// CancelarSolicitacao manda ClientID/ClientSecret em headers e monta o corpo só com
+// IDSolicitacao, parseando corretamente o Resultado da resposta.
 func TestCancelarSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta(t *testing.T) {
 	var capturedBody map[string]interface{}
+	var capturedClientID, capturedClientSecret string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("esperava POST, veio %s", r.Method)
 		}
+		capturedClientID = r.Header.Get("ClientID")
+		capturedClientSecret = r.Header.Get("ClientSecret")
 		if err := json.NewDecoder(r.Body).Decode(&capturedBody); err != nil {
 			t.Fatalf("erro ao decodificar corpo recebido: %v", err)
 		}
@@ -391,11 +402,11 @@ func TestCancelarSolicitacao_ComFakeServer_MontaCorpoEParseiaResposta(t *testing
 		t.Fatalf("CancelarSolicitacao retornou erro inesperado: %v", err)
 	}
 
-	if capturedBody["ClientID"] != "cid-teste" {
-		t.Errorf("ClientID: esperava %q, veio %v", "cid-teste", capturedBody["ClientID"])
+	if capturedClientID != "cid-teste" {
+		t.Errorf("header ClientID: esperava %q, veio %q", "cid-teste", capturedClientID)
 	}
-	if capturedBody["ClientSecret"] != "secret-teste" {
-		t.Errorf("ClientSecret: esperava %q, veio %v", "secret-teste", capturedBody["ClientSecret"])
+	if capturedClientSecret != "secret-teste" {
+		t.Errorf("header ClientSecret: esperava %q, veio %q", "secret-teste", capturedClientSecret)
 	}
 	if capturedBody["IDSolicitacao"] != float64(456) {
 		t.Errorf("IDSolicitacao: esperava 456, veio %v", capturedBody["IDSolicitacao"])

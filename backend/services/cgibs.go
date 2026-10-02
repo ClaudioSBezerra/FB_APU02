@@ -28,15 +28,12 @@ const cgibsMaxJSONBodyBytes = 1 << 20
 
 // cgibsHabilitacaoRequest é o corpo enviado à API de Habilitação do Contribuinte (MOC 5.1).
 //
-// Autenticação por credencial no corpo (ClientID+ClientSecret), NÃO OAuth2 Bearer como a
-// RFB: inferido da doc — todo endpoint especificado no MOC lista ClientID/ClientSecret como
-// parâmetros obrigatórios do próprio corpo/tabela de parâmetros, diferente da RFB (token
-// OAuth2 obtido uma vez via /token e reutilizado como Bearer nas chamadas seguintes). Se a
-// CGIBS usar Bearer na prática, ajustar esta função é um ponto único de mudança (mesmo
-// princípio já usado em rfb.go — ver Design Notes da spec).
+// Autenticação por credencial em HEADERS (ClientID+ClientSecret), NÃO no corpo e NÃO OAuth2
+// Bearer como a RFB — confirmado pelo MOC v1.10 (seção 5.1, tabela "Cabeçalhos da
+// Requisição"): ClientID/ClientSecret vão em headers HTTP, separados do corpo
+// (QueroHabilitar/WebhookURL/TokenContrib). Mesmo padrão nos outros 3 endpoints
+// implementados (5.4 Listagem, 5.5 Nova Solicitação, 5.6 Cancelamento).
 type cgibsHabilitacaoRequest struct {
-	ClientID       string `json:"ClientID"`
-	ClientSecret   string `json:"ClientSecret"`
 	QueroHabilitar string `json:"QueroHabilitar"`
 	WebhookURL     string `json:"WebhookURL"`
 	TokenContrib   string `json:"TokenContrib"`
@@ -92,8 +89,6 @@ func Habilitar(clientID, clientSecret, webhookURL, tokenContrib string) (habilit
 	}
 
 	payload := cgibsHabilitacaoRequest{
-		ClientID:       clientID,
-		ClientSecret:   clientSecret,
 		QueroHabilitar: "HAB",
 		WebhookURL:     webhookURL,
 		TokenContrib:   tokenContrib,
@@ -110,6 +105,8 @@ func Habilitar(clientID, clientSecret, webhookURL, tokenContrib string) (habilit
 		return "", time.Time{}, fmt.Errorf("cgibs habilitar: erro ao criar requisição: %w", rerr)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ClientID", clientID)
+	req.Header.Set("ClientSecret", clientSecret)
 
 	resp, derr := cgibsHTTPClient.Do(req)
 	if derr != nil {
@@ -150,14 +147,16 @@ var ErrCGIBSObterArquivoNaoConfigurado = errors.New("CGIBS_NAO_CONFIGURADO: CGIB
 // Habilitação; teto generoso (16 MB) sobre um arquivo individual de conta corrente fiscal.
 const cgibsObterArquivoMaxBodyBytes = 16 << 20
 
-// cgibsObterArquivoRequest é o corpo enviado à API Obter Arquivo (MOC 5.3). Mesma suposição de
-// autenticação documentada em cgibsHabilitacaoRequest (ClientID/ClientSecret no corpo, não
-// Bearer) — a seção 5.3 do MOC não extraiu como texto (ver spec-cgibs-conta-corrente-plano.md).
+// cgibsObterArquivoRequest é o corpo enviado à API Obter Arquivo (MOC 5.3) — ClientID/
+// ClientSecret vão em headers (mesmo padrão confirmado nos outros 4 endpoints, ver
+// cgibsHabilitacaoRequest). A rota/assinatura exata de Obter Arquivo não é dada no corpo do
+// texto do MOC (seção 5.3 só remete aos Anexos I/II, que descrevem o payload de RESPOSTA, não
+// a requisição) — o shape do corpo da requisição abaixo (IDSolicitacao/NumeroSequencial)
+// continua inferido por analogia aos demais endpoints (Cancelamento usa IDSolicitacao; Webhook
+// usa Arquivo_Id como "número sequencial do arquivo gerado").
 type cgibsObterArquivoRequest struct {
-	ClientID         string `json:"ClientID"`
-	ClientSecret     string `json:"ClientSecret"`
-	IDSolicitacao    int64  `json:"IDSolicitacao"`
-	NumeroSequencial int64  `json:"NumeroSequencial"`
+	IDSolicitacao    int64 `json:"IDSolicitacao"`
+	NumeroSequencial int64 `json:"NumeroSequencial"`
 }
 
 // ObterArquivo chama a API Obter Arquivo da CGIBS (MOC 5.3) para baixar um arquivo específico
@@ -175,8 +174,6 @@ func ObterArquivo(clientID, clientSecret string, idSolicitacao, numeroSequencial
 	}
 
 	payload := cgibsObterArquivoRequest{
-		ClientID:         clientID,
-		ClientSecret:     clientSecret,
 		IDSolicitacao:    idSolicitacao,
 		NumeroSequencial: numeroSequencial,
 	}
@@ -192,6 +189,8 @@ func ObterArquivo(clientID, clientSecret string, idSolicitacao, numeroSequencial
 		return nil, fmt.Errorf("cgibs obter arquivo: erro ao criar requisição: %w", rerr)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ClientID", clientID)
+	req.Header.Set("ClientSecret", clientSecret)
 
 	resp, derr := cgibsHTTPClient.Do(req)
 	if derr != nil {
@@ -258,12 +257,10 @@ func parseCGIBSSolicitacaoDate(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// cgibsNovaSolicitacaoRequest é o corpo enviado à API de Nova Solicitação (MOC 5.5). Mesma
-// suposição de autenticação documentada em cgibsHabilitacaoRequest (ClientID/ClientSecret no
-// corpo, não Bearer).
+// cgibsNovaSolicitacaoRequest é o corpo enviado à API de Nova Solicitação (MOC 5.5) —
+// ClientID/ClientSecret vão em headers (ver cgibsHabilitacaoRequest), confirmado pela tabela
+// "Cabeçalhos da Requisição" da seção 5.5 do MOC v1.10.
 type cgibsNovaSolicitacaoRequest struct {
-	ClientID         string `json:"ClientID"`
-	ClientSecret     string `json:"ClientSecret"`
 	CNPJ             string `json:"CNPJ"`
 	DataTransacaoIni string `json:"DataTransacaoIni"`
 	DataTransacaoFim string `json:"DataTransacaoFim"`
@@ -315,8 +312,6 @@ func NovaSolicitacao(clientID, clientSecret, cnpj string, dataIni, dataFim time.
 	}
 
 	payload := cgibsNovaSolicitacaoRequest{
-		ClientID:         clientID,
-		ClientSecret:     clientSecret,
 		CNPJ:             cnpj,
 		DataTransacaoIni: dataIni.Format("2006-01-02"),
 		DataTransacaoFim: dataFim.Format("2006-01-02"),
@@ -333,6 +328,8 @@ func NovaSolicitacao(clientID, clientSecret, cnpj string, dataIni, dataFim time.
 		return CGIBSNovaSolicitacaoResp{}, fmt.Errorf("cgibs nova solicitacao: erro ao criar requisição: %w", rerr)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ClientID", clientID)
+	req.Header.Set("ClientSecret", clientSecret)
 
 	httpResp, derr := cgibsHTTPClient.Do(req)
 	if derr != nil {
@@ -374,13 +371,11 @@ func NovaSolicitacao(clientID, clientSecret, cnpj string, dataIni, dataFim time.
 	return result, nil
 }
 
-// cgibsCancelamentoRequest é o corpo enviado à API de Cancelamento (MOC 5.6, inferido do nome
-// dado pela spec — seção não extraiu como texto). Mesma suposição de autenticação documentada
-// em cgibsHabilitacaoRequest.
+// cgibsCancelamentoRequest é o corpo enviado à API de Cancelamento (MOC 5.6) — ClientID/
+// ClientSecret vão em headers (ver cgibsHabilitacaoRequest), confirmado pela seção 5.6 do
+// MOC v1.10.
 type cgibsCancelamentoRequest struct {
-	ClientID      string `json:"ClientID"`
-	ClientSecret  string `json:"ClientSecret"`
-	IDSolicitacao int64  `json:"IDSolicitacao"`
+	IDSolicitacao int64 `json:"IDSolicitacao"`
 }
 
 // cgibsCancelamentoResponse é a resposta esperada da API de Cancelamento.
@@ -400,8 +395,6 @@ func CancelarSolicitacao(clientID, clientSecret string, idSolicitacao int64) (re
 	}
 
 	payload := cgibsCancelamentoRequest{
-		ClientID:      clientID,
-		ClientSecret:  clientSecret,
 		IDSolicitacao: idSolicitacao,
 	}
 	payloadJSON, merr := json.Marshal(payload)
@@ -416,6 +409,8 @@ func CancelarSolicitacao(clientID, clientSecret string, idSolicitacao int64) (re
 		return "", fmt.Errorf("cgibs cancelar solicitacao: erro ao criar requisição: %w", rerr)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("ClientID", clientID)
+	req.Header.Set("ClientSecret", clientSecret)
 
 	httpResp, derr := cgibsHTTPClient.Do(req)
 	if derr != nil {
