@@ -1,22 +1,36 @@
 import { useState, useEffect } from 'react'
+import { toast } from 'sonner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Globe, Save, Trash2, Pencil, CheckCircle2, XCircle, Clock, Info, ExternalLink } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Globe, Save, Trash2, Pencil, CheckCircle2, XCircle, Clock, Info, ExternalLink, ShieldCheck } from 'lucide-react'
 
 interface CGIBSCredential {
   id: string
   cnpj_matriz: string
   client_id: string
-  client_secret: string
+  tem_client_secret: boolean
   ambiente: string
   ativo: boolean
   agendamento_ativo: boolean
   horario_agendamento: string
+  habilitado: boolean
+  data_habilitacao: string | null
+  webhook_url: string
   created_at: string
   updated_at: string
+}
+
+async function extractError(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json()
+    return data?.error || fallback
+  } catch {
+    return fallback
+  }
 }
 
 function formatCNPJ(value: string): string {
@@ -34,6 +48,7 @@ export default function CGIBSCredentials() {
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState(false)
   const [savingSchedule, setSavingSchedule] = useState(false)
+  const [habilitando, setHabilitando] = useState(false)
   const [scheduleData, setScheduleData] = useState({ agendamento_ativo: false, horario_agendamento: '06:00' })
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [formData, setFormData] = useState({
@@ -50,6 +65,8 @@ export default function CGIBSCredentials() {
         const data = await res.json()
         if (data.credential) {
           setCredential(data.credential)
+          // client_secret do formulário fica sempre vazio — a API nunca devolve o valor salvo
+          // (tem_client_secret informa só se já existe um; usuário digita de novo pra trocar).
           setFormData({
             cnpj_matriz: formatCNPJ(data.credential.cnpj_matriz),
             client_id: data.credential.client_id,
@@ -118,6 +135,31 @@ export default function CGIBSCredentials() {
       }
     } catch {
       setMessage({ type: 'error', text: 'Erro de conexão' })
+    }
+  }
+
+  const handleHabilitar = async () => {
+    setHabilitando(true)
+    setMessage(null)
+    try {
+      const res = await fetch('/api/cgibs/credentials/habilitar', { method: 'POST' })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.habilitado) {
+          toast.success(data.message || 'Contribuinte habilitado com sucesso na CGIBS!')
+        } else {
+          toast.error('CGIBS respondeu, mas não confirmou a habilitação — confira as credenciais e tente novamente.')
+        }
+        fetchCredential()
+      } else if (res.status === 503) {
+        toast.info(await extractError(res, 'Integração CGIBS ainda não configurada (URL da API ausente).'))
+      } else {
+        toast.error(await extractError(res, 'Erro ao habilitar contribuinte na CGIBS'))
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Erro de conexão')
+    } finally {
+      setHabilitando(false)
     }
   }
 
@@ -286,12 +328,29 @@ export default function CGIBSCredentials() {
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Client Secret</Label>
-                  <p className="text-sm font-medium mt-1">{credential?.client_secret}</p>
+                  <p className="text-sm font-medium mt-1">
+                    {credential?.tem_client_secret ? '•'.repeat(24) : (
+                      <span className="text-amber-600">Não cadastrado</span>
+                    )}
+                  </p>
                 </div>
                 <div>
                   <Label className="text-muted-foreground">Ambiente</Label>
                   <p className="text-sm font-medium mt-1">
                     {credential?.ambiente === 'piloto' ? 'Piloto (fase restrita)' : 'Produção'}
+                  </p>
+                </div>
+                <div>
+                  <Label className="text-muted-foreground">Habilitação</Label>
+                  <p className="text-sm font-medium mt-1">
+                    {credential?.habilitado ? (
+                      <Badge className="bg-green-100 text-green-700">
+                        <CheckCircle2 className="mr-1 h-3 w-3" /> Habilitado
+                        {credential.data_habilitacao && ` em ${new Date(credential.data_habilitacao).toLocaleString('pt-BR')}`}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-muted-foreground">Não habilitado</Badge>
+                    )}
                   </p>
                 </div>
                 <div>
@@ -301,7 +360,11 @@ export default function CGIBSCredentials() {
                   </p>
                 </div>
               </div>
-              <div className="flex gap-2 pt-2">
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Button onClick={handleHabilitar} disabled={habilitando || !credential?.ativo}>
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  {habilitando ? 'Habilitando...' : credential?.habilitado ? 'Re-habilitar na CGIBS' : 'Habilitar na CGIBS'}
+                </Button>
                 <Button variant="outline" onClick={() => setEditing(true)}>
                   <Pencil className="mr-2 h-4 w-4" /> Editar
                 </Button>
