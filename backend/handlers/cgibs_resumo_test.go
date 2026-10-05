@@ -121,6 +121,80 @@ func TestResumoCGIBSHandler_PeriodoSemLancamentos_RetornaZeros(t *testing.T) {
 	}
 }
 
+// TestResumoCGIBSHandler_AlertaDecadencia_LancamentoAntigoDisparaAlerta cobre a Task 2/
+// Acceptance #2 da spec-apuracao-mensal-cbs-ibs.md: uma operação com saldo de
+// credito_nao_utilizado > 0 cujo lançamento mais antigo tem mais de 4 anos deve aparecer em
+// alertas_decadencia — mesmo quando esse lançamento está fora do range data_ini/data_fim
+// pedido (a query de alertas não usa esse filtro, ver comentário de alertasDecadenciaCGIBS).
+func TestResumoCGIBSHandler_AlertaDecadencia_LancamentoAntigoDisparaAlerta(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupCGIBSHabilitarTest(t, db)
+	defer cleanup()
+
+	chaveAntiga := strings.Repeat("7", 44)
+	opAntiga := insertCGIBSOperacaoTeste(t, db, companyID, chaveAntiga, "77777777")
+	// Lançamento de 4 anos e meio atrás, com credito_nao_utilizado positivo — dispara o
+	// alerta (mais de 4 anos, dentro da janela de antecedência de 1 ano antes dos 5).
+	antigo := time.Now().AddDate(-4, -6, 0)
+	insertCGIBSLancamentoComData(t, db, companyID, opAntiga, 1, antigo, 0, 0, 0, 50.00, 0, 0, 0)
+
+	chaveRecente := strings.Repeat("8", 44)
+	opRecente := insertCGIBSOperacaoTeste(t, db, companyID, chaveRecente, "88888888")
+	// Lançamento recente com saldo positivo — não deve aparecer no alerta.
+	insertCGIBSLancamentoComData(t, db, companyID, opRecente, 1, time.Now().AddDate(0, -1, 0), 0, 0, 0, 30.00, 0, 0, 0)
+
+	chaveZerada := strings.Repeat("9", 44)
+	opZerada := insertCGIBSOperacaoTeste(t, db, companyID, chaveZerada, "99999999")
+	// Lançamento antigo, mas saldo líquido de credito_nao_utilizado é zero (apropriação
+	// seguida de utilização total) — não deve alertar (saldo real atual não é positivo).
+	bemAntigo := time.Now().AddDate(-5, 0, 0)
+	insertCGIBSLancamentoComData(t, db, companyID, opZerada, 1, bemAntigo, 0, 0, 0, 40.00, 0, 0, 0)
+	insertCGIBSLancamentoComData(t, db, companyID, opZerada, 2, time.Now().AddDate(0, -1, 0), 0, 0, 0, -40.00, 0, 0, 0)
+
+	// Período pedido não inclui nenhum dos lançamentos acima — confirma que a query de
+	// alertas independe do range data_ini/data_fim.
+	rec := getResumoCGIBS(t, db, authed, "2026-01-01", "2026-01-02")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperava 200, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resumo CGIBSResumoPeriodo
+	if err := json.NewDecoder(rec.Body).Decode(&resumo); err != nil {
+		t.Fatalf("erro ao decodificar resposta: %v", err)
+	}
+
+	achouAntiga, achouRecente, achouZerada := false, false, false
+	for _, a := range resumo.AlertasDecadencia {
+		switch a.ChaveAcesso {
+		case chaveAntiga:
+			achouAntiga = true
+			if a.Valor != 50.00 {
+				t.Errorf("esperava valor=50.00 para a operação antiga, obteve %.2f", a.Valor)
+			}
+			// Lançamento com 4 anos e 6 meses de idade: faltam ~6 meses (~180 dias) para
+			// completar os 5 anos de decadência — deve ser positivo e dentro da janela de
+			// alerta de 1 ano de antecedência (0 < dias_restantes <= ~365).
+			if a.DiasRestantes <= 0 || a.DiasRestantes > 366 {
+				t.Errorf("esperava dias_restantes positivo e dentro de ~1 ano (lançamento com 4 anos e 6 meses, faltam ~6 meses para os 5 anos), obteve %d", a.DiasRestantes)
+			}
+		case chaveRecente:
+			achouRecente = true
+		case chaveZerada:
+			achouZerada = true
+		}
+	}
+	if !achouAntiga {
+		t.Errorf("esperava operação com lançamento de >4 anos e saldo positivo em alertas_decadencia, obteve %+v", resumo.AlertasDecadencia)
+	}
+	if achouRecente {
+		t.Errorf("BUG: operação só com lançamento recente não deveria aparecer em alertas_decadencia")
+	}
+	if achouZerada {
+		t.Errorf("BUG: operação com saldo líquido zerado (apesar do lançamento antigo) não deveria aparecer em alertas_decadencia")
+	}
+}
+
 // TestResumoCGIBSHandler_DataInvalida_Retorna400 confirma a validação básica de formato.
 func TestResumoCGIBSHandler_DataInvalida_Retorna400(t *testing.T) {
 	db := openTestDB(t)

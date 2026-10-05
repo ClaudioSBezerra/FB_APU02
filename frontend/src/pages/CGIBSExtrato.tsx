@@ -1,13 +1,23 @@
 import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import { toast } from 'sonner'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import { formatCurrency } from '@/lib/utils'
 import {
-  FileBarChart, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Inbox,
+  FileBarChart, Search, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Inbox, AlertTriangle, Wallet,
 } from 'lucide-react'
+
+interface CGIBSAlertaDecadencia {
+  chave_acesso: string
+  operacao_id: string
+  ja_decaido?: boolean
+  valor: number
+  dth_lancto: string
+  dias_restantes: number
+}
 
 interface CGIBSResumoPeriodo {
   data_ini: string
@@ -20,6 +30,30 @@ interface CGIBSResumoPeriodo {
   credito_utilizado: number
   debito_em_aberto: number
   debito_extinto: number
+  status_periodo: string
+  data_fechamento: string
+  saldo_a_pagar: number
+  alertas_decadencia: CGIBSAlertaDecadencia[]
+}
+
+// ─── Status do período de apuração (spec-apuracao-mensal-cbs-ibs.md) ───────────
+function statusPeriodoLabel(status: string, dataFechamento: string): string {
+  if (status === 'em_ajuste') {
+    const d = new Date(dataFechamento)
+    if (!isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, '0')
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      return `Em ajuste — prévia até ${dd}/${mm}`
+    }
+    return 'Em ajuste — prévia'
+  }
+  if (status === 'fechado') return 'Fechado'
+  return 'Em andamento'
+}
+function statusPeriodoBadgeClass(status: string): string {
+  if (status === 'em_ajuste') return 'bg-orange-100 text-orange-700 border-orange-200'
+  if (status === 'fechado') return 'bg-green-100 text-green-700 border-green-200'
+  return 'bg-blue-100 text-blue-700 border-blue-200'
 }
 
 interface CGIBSOperacao {
@@ -237,6 +271,64 @@ export default function CGIBSExtrato() {
         <p className="text-sm text-center text-muted-foreground py-4">Não foi possível carregar o resumo do período.</p>
       ) : (
         <div className="space-y-4">
+          {/* ── Saldo a pagar + status do período ── */}
+          <Card className="border-2 border-primary/20 bg-primary/5">
+            <CardContent className="pt-4 pb-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <Wallet className="h-6 w-6 text-primary shrink-0" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">Saldo a pagar (débito em aberto do período)</p>
+                    <p className="text-2xl font-bold">{formatCurrency(resumo.saldo_a_pagar)}</p>
+                  </div>
+                </div>
+                <Badge variant="outline" className={`${statusPeriodoBadgeClass(resumo.status_periodo)} text-xs px-2.5 py-1`}>
+                  {statusPeriodoLabel(resumo.status_periodo, resumo.data_fechamento)}
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* ── Alertas de decadência de crédito (5 anos) ── */}
+          {resumo.alertas_decadencia && resumo.alertas_decadencia.length > 0 && (
+            <Card className="border-2 border-amber-200 bg-amber-50/60">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2 text-amber-800">
+                  <AlertTriangle className="h-4 w-4" />
+                  Alerta de decadência de crédito ({resumo.alertas_decadencia.length})
+                </CardTitle>
+                <p className="text-xs text-amber-700">
+                  Operações com crédito IBS não utilizado há mais de 4 anos — o prazo legal de decadência é de 5 anos.
+                  Esta lista é da empresa inteira, independente do período selecionado acima.
+                </p>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b text-muted-foreground uppercase tracking-wide">
+                        <th className="text-left px-2 py-1 font-medium">Chave de acesso</th>
+                        <th className="text-right px-2 py-1 font-medium">Valor</th>
+                        <th className="text-right px-2 py-1 font-medium">Dias restantes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {resumo.alertas_decadencia.map(a => (
+                        <tr key={a.operacao_id}>
+                          <td className="px-2 py-1 font-mono" title={a.chave_acesso}>{fmtChave(a.chave_acesso)}</td>
+                          <td className="px-2 py-1 text-right font-mono">{formatCurrency(a.valor)}</td>
+                          <td className={`px-2 py-1 text-right font-mono ${a.ja_decaido || a.dias_restantes <= 90 ? 'text-red-600 font-semibold' : 'text-amber-700'}`}>
+                            {a.ja_decaido ? `Decaído há ${Math.abs(a.dias_restantes)}d` : `${a.dias_restantes}d`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Card className="p-3">
               <p className="text-xs text-muted-foreground">Total de operações</p>

@@ -496,6 +496,11 @@ func main() {
 	http.HandleFunc("/api/rfb/creditos/status", withAuth(handlers.StatusCreditosHandler, ""))
 	http.HandleFunc("/api/rfb/creditos/lista", withAuth(handlers.ListarCreditosHandler, ""))
 
+	// RFB Resumo Mensal CBS — saldo a pagar aproximado + status do período de apuração
+	// (spec-apuracao-mensal-cbs-ibs.md), mesmo padrão de withAuth sem role específica usado
+	// em /api/cgibs/resumo.
+	http.HandleFunc("/api/rfb/resumo-mensal", withAuth(handlers.RFBResumoMensalHandler, ""))
+
 	// RFB Pgtos Fornecedores — conciliação pagamentos vs CBS RFB
 	http.HandleFunc("/api/rfb/pagamentos-fornecedores", withAuth(handlers.RFBPagamentosFornecedoresHandler, ""))
 

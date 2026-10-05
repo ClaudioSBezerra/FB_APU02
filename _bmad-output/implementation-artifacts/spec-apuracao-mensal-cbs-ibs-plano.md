@@ -2,7 +2,7 @@
 title: 'Apuração Mensal CBS/IBS: validação do que já existe + plano de saldo a pagar/transportar'
 type: 'feature'
 created: '2026-10-05'
-status: 'draft'
+status: 'done'
 review_loop_iteration: 0
 context: []
 ---
@@ -48,6 +48,13 @@ Nenhum tributo (CBS ou IBS) tem campo estruturado pra split payment hoje — só
 
 **Never:** implementar split payment estruturado agora (sem schema confirmado); replicar decadência manual pro CBS (vai vir pronto na v2); mexer na captura/schema do IBS (já está correta).
 
+## Decisões resolvidas (2026-10-05)
+
+1. **Escopo**: IBS + CBS juntos nesta rodada (usuário optou por não esperar a v2 do CBS) — o saldo do CBS é explicitamente rotulado como **aproximado**, já que o schema v1 só tem o corte binário extinto/não-extinto, sem a granularidade de apropriação que o IBS já tem.
+2. **Saldo prévia/definitivo**: mostrar sempre, com rótulo claro ("prévia — sujeita a ajuste até DD/MM" ou "definitivo") baseado no `status_periodo` calculado.
+3. **Alerta de decadência**: entra nesta fase (IBS apenas — CBS não precisa, a v2 vai trazer `prescrito` pronto).
+4. **Calendário**: suportar os dois modos (piloto 2026 com datas fixas dia 25/26; real pós-2027 com último dia útil do mês) via parâmetro/config — não travar num só.
+
 </frozen-after-approval>
 
 ## Code Map
@@ -61,8 +68,8 @@ Nenhum tributo (CBS ou IBS) tem campo estruturado pra split payment hoje — só
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Responder as 4 decisões "Ask First" acima com o usuário.
-- [ ] (Após decisões) Escrever sub-spec de implementação da Fase 1 (Apuração Mensal IBS — rótulo de saldo + aviso prévia/definitivo + alerta de decadência, conforme decisões 2 e 3).
+- [x] Responder as 4 decisões "Ask First" acima com o usuário.
+- [x] (Após decisões) Escrever sub-spec de implementação da Fase 1 (Apuração Mensal IBS — rótulo de saldo + aviso prévia/definitivo + alerta de decadência, conforme decisões 2 e 3).
 
 **Acceptance Criteria:**
 - Given as decisões "Ask First" respondidas, when a sub-spec de implementação for escrita, then ela referencia só os campos/tabelas já existentes (nenhuma migration de captura nova é necessária pro IBS).

@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Search, User, Filter, MoreVertical } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
+import { Search, User, Filter, MoreVertical, Info, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,6 +8,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Separator } from '@/components/ui/separator';
+import { formatCurrency } from '@/lib/utils';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -72,6 +74,58 @@ const concStatusCfg: Record<ConciliacaoItem['statusCredito'], { label: string; c
   pendente:   { label: 'Pendente',   cls: 'bg-orange-100 text-orange-700 border-orange-200' },
 };
 
+// ─── Apuração Mensal CBS (spec-apuracao-mensal-cbs-ibs.md) ────────────────────
+// Camada aproximada sobre o schema raso (binário extinto/não-extinto) do CBS v1 —
+// contraste com o IBS acima (ainda mock nesta tela), que já é granular.
+
+interface RFBResumoMensal {
+  periodo: string;
+  valor_cbs_nao_extinto: number;
+  valor_cbs_extinto_credito: number;
+  saldo_a_pagar_aproximado: number;
+  aproximado: boolean;
+  status_periodo: string;
+  data_fechamento: string;
+}
+
+const mesesLabel = [
+  '01 - Janeiro', '02 - Fevereiro', '03 - Março', '04 - Abril', '05 - Maio', '06 - Junho',
+  '07 - Julho', '08 - Agosto', '09 - Setembro', '10 - Outubro', '11 - Novembro', '12 - Dezembro',
+];
+
+function anosDisponiveis(): number[] {
+  const atual = new Date().getFullYear();
+  return [atual - 1, atual, atual + 1];
+}
+
+function statusPeriodoLabelCBS(status: string, dataFechamento: string): string {
+  if (status === 'em_ajuste') {
+    const d = new Date(dataFechamento);
+    if (!isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `Em ajuste — prévia até ${dd}/${mm}`;
+    }
+    return 'Em ajuste — prévia';
+  }
+  if (status === 'fechado') return 'Fechado';
+  return 'Em andamento';
+}
+function statusPeriodoBadgeClassCBS(status: string): string {
+  if (status === 'em_ajuste') return 'bg-orange-100 text-orange-700 border-orange-200';
+  if (status === 'fechado') return 'bg-green-100 text-green-700 border-green-200';
+  return 'bg-blue-100 text-blue-700 border-blue-200';
+}
+
+async function extractErrorCBS(res: Response, fallback: string): Promise<string> {
+  try {
+    const data = await res.json();
+    return data?.error || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 // ─── Componente Principal ─────────────────────────────────────────────────────
 
 export default function GestaoCredIBSCBS() {
@@ -80,6 +134,43 @@ export default function GestaoCredIBSCBS() {
   const [statusFiltro, setStatusFiltro] = useState('todas');
   const [concDocFiltro, setConcDocFiltro] = useState('todos');
   const [concStatusFiltro, setConcStatusFiltro] = useState('todos');
+
+  // ─── Apuração Mensal CBS ──────────────────────────────────────────────────
+  const agora = new Date();
+  const [mesCBS, setMesCBS] = useState(String(agora.getMonth() + 1).padStart(2, '0'));
+  const [anoCBS, setAnoCBS] = useState(String(agora.getFullYear()));
+  const [resumoCBS, setResumoCBS] = useState<RFBResumoMensal | null>(null);
+  const [loadingResumoCBS, setLoadingResumoCBS] = useState(true);
+
+  const fetchResumoCBS = useCallback(async (mes: string, ano: string) => {
+    setLoadingResumoCBS(true);
+    try {
+      const params = new URLSearchParams({ periodo: `${mes}/${ano}` });
+      const res = await fetch(`/api/rfb/resumo-mensal?${params}`);
+      if (res.ok) {
+        setResumoCBS(await res.json());
+      } else {
+        toast.error(await extractErrorCBS(res, 'Erro ao carregar apuração mensal CBS'));
+        setResumoCBS(null);
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Erro de conexão');
+      setResumoCBS(null);
+    } finally {
+      setLoadingResumoCBS(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchResumoCBS(mesCBS, anoCBS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function handlePeriodoCBSChange(mes: string, ano: string) {
+    setMesCBS(mes);
+    setAnoCBS(ano);
+    fetchResumoCBS(mes, ano);
+  }
 
   const filteredLancamentos = lancamentosMock.filter((l) => {
     const tabOk =
@@ -135,6 +226,67 @@ export default function GestaoCredIBSCBS() {
           </Card>
         ))}
       </div>
+
+      {/* ── Apuração Mensal CBS ── */}
+      <Card className="border-2 border-primary/20 bg-primary/5">
+        <CardHeader className="pb-2 pt-3 px-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-sm font-semibold">Apuração Mensal CBS</CardTitle>
+            <div className="flex items-center gap-2">
+              <Select value={mesCBS} onValueChange={(v) => handlePeriodoCBSChange(v, anoCBS)}>
+                <SelectTrigger className="h-7 w-36 text-[11px]">
+                  <SelectValue placeholder="Mês" />
+                </SelectTrigger>
+                <SelectContent>
+                  {mesesLabel.map((label, idx) => {
+                    const valor = String(idx + 1).padStart(2, '0');
+                    return <SelectItem key={valor} value={valor} className="text-[11px]">{label}</SelectItem>;
+                  })}
+                </SelectContent>
+              </Select>
+              <Select value={anoCBS} onValueChange={(v) => handlePeriodoCBSChange(mesCBS, v)}>
+                <SelectTrigger className="h-7 w-24 text-[11px]">
+                  <SelectValue placeholder="Ano" />
+                </SelectTrigger>
+                <SelectContent>
+                  {anosDisponiveis().map((ano) => (
+                    <SelectItem key={ano} value={String(ano)} className="text-[11px]">{ano}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          {loadingResumoCBS ? (
+            <p className="text-xs text-center text-muted-foreground py-4">Carregando...</p>
+          ) : !resumoCBS ? (
+            <p className="text-xs text-center text-muted-foreground py-4">Não foi possível carregar a apuração mensal CBS.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5 text-primary shrink-0" />
+                  <div>
+                    <p className="text-[10px] text-muted-foreground">Saldo a pagar (aproximado)</p>
+                    <p className="text-lg font-bold">{formatCurrency(resumoCBS.saldo_a_pagar_aproximado)}</p>
+                  </div>
+                </div>
+                <Badge variant="outline" className={`${statusPeriodoBadgeClassCBS(resumoCBS.status_periodo)} text-[11px] px-2 py-0.5`}>
+                  {statusPeriodoLabelCBS(resumoCBS.status_periodo, resumoCBS.data_fechamento)}
+                </Badge>
+              </div>
+              <div className="flex items-start gap-1.5 rounded-md bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] text-amber-800">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>
+                  Valor aproximado — o schema atual da RFB (v1) só informa o corte binário extinto/não-extinto,
+                  sem o detalhamento completo de apropriação de crédito. O detalhamento completo chega com a API v2 da RFB.
+                </span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Card Principal ── */}
       <Card>
