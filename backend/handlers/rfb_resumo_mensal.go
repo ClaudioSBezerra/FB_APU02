@@ -28,6 +28,13 @@ type RFBResumoMensal struct {
 	ValorCBSNaoExtinto     float64 `json:"valor_cbs_nao_extinto"`
 	ValorCBSExtintoCredito float64 `json:"valor_cbs_extinto_credito"`
 	SaldoAPagarAproximado  float64 `json:"saldo_a_pagar_aproximado"`
+	// Campos adicionados para os KPIs da tela "Gestão de Créditos e Débitos" (spec
+	// apuracao-cbs-dashboard-real.md) — mesmas fontes/COALESCE das 2 queries já existentes
+	// abaixo, apenas lendo colunas adicionais das mesmas linhas já buscadas.
+	TotalDebitos         int     `json:"total_debitos"`
+	TotalCreditos        int     `json:"total_creditos"`
+	ValorCBSTotalDebito  float64 `json:"valor_cbs_total_debito"`
+	ValorCBSTotalCredito float64 `json:"valor_cbs_total_credito"`
 	// Aproximado é sempre true nesta versão — o schema v1 de rfb_resumo/rfb_creditos_resumo só
 	// tem o corte binário extinto/não-extinto, sem a granularidade de apropriação
 	// (a_apropriar/não_utilizado/utilizado) que o schema v2 da RFB vai trazer pronta (ver
@@ -74,23 +81,23 @@ func RFBResumoMensalHandler(db *sql.DB) http.HandlerFunc {
 		resp.Periodo = periodo
 
 		err = db.QueryRow(`
-			SELECT COALESCE(valor_cbs_nao_extinto, 0)
+			SELECT COALESCE(valor_cbs_nao_extinto, 0), COALESCE(total_debitos, 0), COALESCE(valor_cbs_total, 0)
 			FROM rfb_resumo
 			WHERE company_id = $1 AND data_apuracao = $2
-		`, companyID, periodo).Scan(&resp.ValorCBSNaoExtinto)
+		`, companyID, periodo).Scan(&resp.ValorCBSNaoExtinto, &resp.TotalDebitos, &resp.ValorCBSTotalDebito)
 		if err != nil && err != sql.ErrNoRows {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar resumo de débitos CBS", err, "[RFBResumoMensal]")
 			return
 		}
-		// err == sql.ErrNoRows: nenhuma linha para o período — resp.ValorCBSNaoExtinto
-		// permanece no zero-value (0), equivalente ao COALESCE para o caso "linha existe mas
-		// coluna é NULL".
+		// err == sql.ErrNoRows: nenhuma linha para o período — resp.ValorCBSNaoExtinto,
+		// resp.TotalDebitos e resp.ValorCBSTotalDebito permanecem no zero-value (0),
+		// equivalente ao COALESCE para o caso "linha existe mas coluna é NULL".
 
 		err = db.QueryRow(`
-			SELECT COALESCE(valor_cbs_extinto, 0)
+			SELECT COALESCE(valor_cbs_extinto, 0), COALESCE(total_creditos, 0), COALESCE(valor_cbs_total, 0)
 			FROM rfb_creditos_resumo
 			WHERE company_id = $1 AND data_apuracao = $2
-		`, companyID, periodo).Scan(&resp.ValorCBSExtintoCredito)
+		`, companyID, periodo).Scan(&resp.ValorCBSExtintoCredito, &resp.TotalCreditos, &resp.ValorCBSTotalCredito)
 		if err != nil && err != sql.ErrNoRows {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao consultar resumo de créditos CBS", err, "[RFBResumoMensal]")
 			return

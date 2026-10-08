@@ -15,6 +15,14 @@ import (
 // rfb_pagamentos_fornecedores_test.go).
 func insertRfbResumoTeste(t *testing.T, db *sql.DB, companyID, periodo string, valorCBSNaoExtinto float64) {
 	t.Helper()
+	insertRfbResumoCompletoTeste(t, db, companyID, periodo, valorCBSNaoExtinto, 0, 0)
+}
+
+// insertRfbResumoCompletoTeste insere uma linha rfb_resumo de teste com total_debitos e
+// valor_cbs_total também preenchidos — usado pelos testes dos campos novos (ver spec
+// apuracao-cbs-dashboard-real.md).
+func insertRfbResumoCompletoTeste(t *testing.T, db *sql.DB, companyID, periodo string, valorCBSNaoExtinto float64, totalDebitos int, valorCBSTotal float64) {
+	t.Helper()
 	var requestID string
 	if err := db.QueryRow(`
 		INSERT INTO rfb_requests (company_id, cnpj_base, status, tipo) VALUES ($1, '12345678', 'completed', 'debito') RETURNING id
@@ -22,15 +30,23 @@ func insertRfbResumoTeste(t *testing.T, db *sql.DB, companyID, periodo string, v
 		t.Fatalf("falha ao criar rfb_requests de teste: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO rfb_resumo (request_id, company_id, data_apuracao, valor_cbs_nao_extinto)
-		VALUES ($1, $2, $3, $4)
-	`, requestID, companyID, periodo, valorCBSNaoExtinto); err != nil {
+		INSERT INTO rfb_resumo (request_id, company_id, data_apuracao, valor_cbs_nao_extinto, total_debitos, valor_cbs_total)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, requestID, companyID, periodo, valorCBSNaoExtinto, totalDebitos, valorCBSTotal); err != nil {
 		t.Fatalf("falha ao inserir rfb_resumo de teste: %v", err)
 	}
 }
 
 // insertRfbCreditosResumoTeste insere uma linha rfb_creditos_resumo de teste.
 func insertRfbCreditosResumoTeste(t *testing.T, db *sql.DB, companyID, periodo string, valorCBSExtinto float64) {
+	t.Helper()
+	insertRfbCreditosResumoCompletoTeste(t, db, companyID, periodo, valorCBSExtinto, 0, 0)
+}
+
+// insertRfbCreditosResumoCompletoTeste insere uma linha rfb_creditos_resumo de teste com
+// total_creditos e valor_cbs_total também preenchidos — usado pelos testes dos campos novos
+// (ver spec apuracao-cbs-dashboard-real.md).
+func insertRfbCreditosResumoCompletoTeste(t *testing.T, db *sql.DB, companyID, periodo string, valorCBSExtinto float64, totalCreditos int, valorCBSTotal float64) {
 	t.Helper()
 	var requestID string
 	if err := db.QueryRow(`
@@ -39,9 +55,9 @@ func insertRfbCreditosResumoTeste(t *testing.T, db *sql.DB, companyID, periodo s
 		t.Fatalf("falha ao criar rfb_requests de teste: %v", err)
 	}
 	if _, err := db.Exec(`
-		INSERT INTO rfb_creditos_resumo (request_id, company_id, data_apuracao, valor_cbs_extinto)
-		VALUES ($1, $2, $3, $4)
-	`, requestID, companyID, periodo, valorCBSExtinto); err != nil {
+		INSERT INTO rfb_creditos_resumo (request_id, company_id, data_apuracao, valor_cbs_extinto, total_creditos, valor_cbs_total)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, requestID, companyID, periodo, valorCBSExtinto, totalCreditos, valorCBSTotal); err != nil {
 		t.Fatalf("falha ao inserir rfb_creditos_resumo de teste: %v", err)
 	}
 }
@@ -68,8 +84,8 @@ func TestRFBResumoMensalHandler_ComAmbasAsLinhas_CalculaSaldoAproximado(t *testi
 	defer db.Exec(`DELETE FROM rfb_creditos_resumo WHERE company_id = $1`, companyID)
 	defer db.Exec(`DELETE FROM rfb_requests WHERE company_id = $1`, companyID)
 
-	insertRfbResumoTeste(t, db, companyID, "03/2026", 1000.00)
-	insertRfbCreditosResumoTeste(t, db, companyID, "03/2026", 300.00)
+	insertRfbResumoCompletoTeste(t, db, companyID, "03/2026", 1000.00, 12, 2500.00)
+	insertRfbCreditosResumoCompletoTeste(t, db, companyID, "03/2026", 300.00, 5, 1800.00)
 
 	rec := getResumoMensalRFB(t, db, authed, "03/2026")
 	if rec.Code != http.StatusOK {
@@ -92,6 +108,18 @@ func TestRFBResumoMensalHandler_ComAmbasAsLinhas_CalculaSaldoAproximado(t *testi
 	if resp.DataFechamento == "" {
 		t.Errorf("esperava data_fechamento preenchida")
 	}
+	if resp.TotalDebitos != 12 {
+		t.Errorf("esperava total_debitos=12, obteve %d", resp.TotalDebitos)
+	}
+	if resp.TotalCreditos != 5 {
+		t.Errorf("esperava total_creditos=5, obteve %d", resp.TotalCreditos)
+	}
+	if resp.ValorCBSTotalDebito != 2500.00 {
+		t.Errorf("esperava valor_cbs_total_debito=2500.00, obteve %.2f", resp.ValorCBSTotalDebito)
+	}
+	if resp.ValorCBSTotalCredito != 1800.00 {
+		t.Errorf("esperava valor_cbs_total_credito=1800.00, obteve %.2f", resp.ValorCBSTotalCredito)
+	}
 }
 
 // TestRFBResumoMensalHandler_SemLinhaDeCreditos_NaoQuebra cobre a Acceptance Criteria #3
@@ -105,7 +133,7 @@ func TestRFBResumoMensalHandler_SemLinhaDeCreditos_NaoQuebra(t *testing.T) {
 	defer db.Exec(`DELETE FROM rfb_resumo WHERE company_id = $1`, companyID)
 	defer db.Exec(`DELETE FROM rfb_requests WHERE company_id = $1`, companyID)
 
-	insertRfbResumoTeste(t, db, companyID, "04/2026", 500.00)
+	insertRfbResumoCompletoTeste(t, db, companyID, "04/2026", 500.00, 8, 900.00)
 	// Nenhuma linha em rfb_creditos_resumo para 04/2026.
 
 	rec := getResumoMensalRFB(t, db, authed, "04/2026")
@@ -122,6 +150,21 @@ func TestRFBResumoMensalHandler_SemLinhaDeCreditos_NaoQuebra(t *testing.T) {
 	}
 	if resp.SaldoAPagarAproximado != 500.00 {
 		t.Errorf("esperava saldo_a_pagar_aproximado=500.00 (500-0 via COALESCE), obteve %.2f", resp.SaldoAPagarAproximado)
+	}
+	// Campos novos do lado de débito vêm da linha existente.
+	if resp.TotalDebitos != 8 {
+		t.Errorf("esperava total_debitos=8, obteve %d", resp.TotalDebitos)
+	}
+	if resp.ValorCBSTotalDebito != 900.00 {
+		t.Errorf("esperava valor_cbs_total_debito=900.00, obteve %.2f", resp.ValorCBSTotalDebito)
+	}
+	// Campos novos do lado de crédito ficam em zero — não há linha em rfb_creditos_resumo
+	// para este período (Acceptance Criteria #3 da spec, estendida aos campos novos).
+	if resp.TotalCreditos != 0 {
+		t.Errorf("esperava total_creditos=0 (sem linha de créditos), obteve %d", resp.TotalCreditos)
+	}
+	if resp.ValorCBSTotalCredito != 0 {
+		t.Errorf("esperava valor_cbs_total_credito=0 (sem linha de créditos), obteve %.2f", resp.ValorCBSTotalCredito)
 	}
 }
 
@@ -147,6 +190,12 @@ func TestRFBResumoMensalHandler_SemNenhumaLinha_RetornaZeros(t *testing.T) {
 	}
 	if !resp.Aproximado {
 		t.Errorf("esperava aproximado=true")
+	}
+	if resp.TotalDebitos != 0 || resp.TotalCreditos != 0 {
+		t.Errorf("esperava total_debitos=0 e total_creditos=0, obteve %d/%d", resp.TotalDebitos, resp.TotalCreditos)
+	}
+	if resp.ValorCBSTotalDebito != 0 || resp.ValorCBSTotalCredito != 0 {
+		t.Errorf("esperava valor_cbs_total_debito=0 e valor_cbs_total_credito=0, obteve %.2f/%.2f", resp.ValorCBSTotalDebito, resp.ValorCBSTotalCredito)
 	}
 }
 
