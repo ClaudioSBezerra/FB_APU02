@@ -593,3 +593,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-cgibs-obter-arquivo-parser.md`
   summary: O claim via `SELECT ... FOR UPDATE` em `ProcessarArquivoCGIBS` segura a linha de `cgibs_arquivos` (e uma conexão do pool) durante toda a chamada de rede a `ObterArquivo` — não dá pra liberar o lock antes sem perder a proteção contra processamento duplicado. Mitigado por um semáforo de concorrência (máx 5 simultâneos) no dispatch.
   evidence: Trade-off consciente do próprio agente de implementação, aceito dado o volume esperado (arquivo diferencial diário, poucos arquivos por solicitação). Revisitar se o volume de arquivos por solicitação crescer muito ou se sintomas de esgotamento de pool aparecerem em produção.
+
+## Deferred from: code review of spec-apuracao-cbs-dashboard-real (2026-10-08)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-apuracao-cbs-dashboard-real.md`
+  summary: `backend/handlers/rfb_creditos.go` (`ListarCreditosHandler`) e `rfb_debitos_lista.go` (`ListarDebitosHandler`) não têm NENHUM arquivo de teste — gap pré-existente, não introduzido por esta spec. O fix do `page_size` hardcoded nesta rodada (achado por revisão adversarial) ficou sem teste de regressão por isso.
+  evidence: Confirmado via `ls handlers/ | grep rfb_creditos` / `rfb_debitos_lista` — nenhum `_test.go` em nenhum dos dois. Escrever a infraestrutura de teste do zero pra esses 2 handlers é maior que o escopo do patch pontual. Revisitar se algum bug real escapar por falta de cobertura nesses endpoints.

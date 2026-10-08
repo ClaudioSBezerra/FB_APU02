@@ -64,13 +64,20 @@ context: ['{project-root}/_bmad-output/implementation-artifacts/spec-apuracao-me
 
 **Commands:**
 - `cd backend && go build ./... && go vet ./... && go test -count=1 ./handlers/... -run RFBResumoMensal`
-- `cd frontend && npx tsc --noEmit`
+- `cd frontend && npx tsc -p tsconfig.app.json --noEmit` (⚠️ sem `-p tsconfig.app.json`, o comando verifica zero arquivos e sempre "passa" — ver Spec Change Log)
 
 **Manual check:** `grep -n "Mock\|fmt(1_280_500\|850_300\|940_700\|90_400" frontend/src/pages/GestaoCredIBSCBS.tsx` deve vir vazio (confirma que nenhum dado mocado sobrou).
 
 ## Spec Change Log
 
-**Revisão adversarial (rodada 1, patch, sem loopback):**
+**Revisão adversarial (rodada 1 — própria + 2 subagentes Blind Hunter/Edge Case Hunter em paralelo, patch, sem loopback):**
 - Troca rápida de período (mês/ano) não tinha guarda de sequência — resposta atrasada de um período antigo podia sobrescrever KPIs/tabela do período recém-selecionado (mesma classe de bug já corrigida antes em `CGIBSExtrato.tsx`). Corrigido com refs de "último período pedido" por fetch.
 - Tabela de lançamentos busca no máximo 50 débitos + 50 créditos sem paginação, mas não avisava quando o período real tinha mais documentos que isso (KPIs, vindos do resumo agregado, cobrem o período inteiro) — adicionado aviso "mostrando os N mais recentes de M" quando a lista está truncada.
-- `go build`/`go vet`/`go test` e `tsc --noEmit` limpos após os patches.
+- `backend/handlers/rfb_creditos.go` (`ListarCreditosHandler`): `page_size` era hardcoded em 50, ignorando o parâmetro — a nova tela manda `page_size=50` na URL sem efeito real (coincidência de valor). Corrigido pra honrar o parâmetro (cap 500), mesmo padrão já usado por `ListarDebitosHandler`.
+- `formatContraparte` usava `formatCNPJ` (só formata 14 dígitos) em vez de `formatDocumento` (detecta CPF/CNPJ) — `ni_emitente`/`ni_adquirente` é NI livre da RFB, pode ser CPF de pessoa física.
+- Truncamento de `chave_dfe` (`slice(0,8)…slice(-6)`) sem checar comprimento mínimo — uma chave malformada/parcial mais curta que 14 chars podia gerar sobreposição entre os dois pedaços.
+- Comparador de ordenação por `data_dfe_emissao` não tratava `getTime()` retornando `NaN` (string de data não-parseável) — adicionado fallback `|| 0`.
+- `resumoCBS` não tinha defesa contra uma resposta de API mais antiga (deploy dessincronizado) sem os 4 campos novos — normalizado com `?? 0` no momento em que a resposta é recebida.
+- **2 variáveis mortas removidas** (`formatDateBR`, `periodoAAAAMM`) — achado que expôs um problema de processo sério: o comando de verificação usado durante toda a sessão (`cd frontend && npx tsc --noEmit`, sem `-p`) na verdade verifica **zero arquivos**, porque o `tsconfig.json` raiz é só de referências (`"files": []`) e `tsc` sem `-p`/`-b` não segue `references` automaticamente — ele "passava limpo" porque não checava nada. O comando correto é `npx tsc -p tsconfig.app.json --noEmit`. Isso significa que toda alegação anterior de "tsc limpo" nesta sessão (incluindo specs já commitadas/pushadas antes desta) não foi de fato verificada por esse comando — felizmente, re-rodado agora com o comando certo contra HEAD, todos os arquivos tocados nesta sessão (CGIBS*, GestaoCredIBSCBS) vieram limpos. **Registrar em memória pra usar o comando certo daqui pra frente.**
+- `backend/handlers/rfb_creditos.go`/`rfb_debitos_lista.go` não têm nenhum arquivo de teste (gap pré-existente, não desta spec) — o fix do `page_size` ficou sem teste de regressão; registrado em `deferred-work.md`.
+- `go build`/`go vet`/`go test` (backend) e `npx tsc -p tsconfig.app.json --noEmit` (frontend, comando corrigido) limpos após os patches.

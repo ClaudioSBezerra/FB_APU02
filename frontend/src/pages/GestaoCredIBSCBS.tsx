@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import { formatCNPJ } from '@/lib/formatFilial';
+import { formatDocumento as formatCPFCNPJ } from '@/lib/formatFilial';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +121,9 @@ async function extractErrorCBS(res: Response, fallback: string): Promise<string>
 
 function formatDocumento(l: LancamentoCBS): string {
   if (l.numero_dfe) return `NF-e ${l.numero_dfe}`;
-  if (l.chave_dfe) return `${l.chave_dfe.slice(0, 8)}…${l.chave_dfe.slice(-6)}`;
+  // Só trunca se a chave for longa o bastante pra evitar sobreposição entre os dois slices
+  // (chave_dfe malformada/parcial mais curta que 14 chars mostra o valor inteiro, sem truncar).
+  if (l.chave_dfe) return l.chave_dfe.length > 14 ? `${l.chave_dfe.slice(0, 8)}…${l.chave_dfe.slice(-6)}` : l.chave_dfe;
   return '—';
 }
 
@@ -131,18 +133,9 @@ function formatDocumento(l: LancamentoCBS): string {
 // dashboard-real.md.
 function formatContraparte(l: LancamentoCBS): string {
   const doc = l.tipo === 'credito' ? l.ni_emitente : l.ni_adquirente;
-  return doc ? formatCNPJ(doc) : '—';
-}
-
-function formatDateBR(s: string | null): string {
-  if (!s) return '—';
-  try {
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString('pt-BR');
-  } catch {
-    return s;
-  }
+  // formatDocumento (não formatCNPJ) porque ni_emitente/ni_adquirente é NI livre vindo da RFB
+  // — pode ser CPF (11 dígitos) se a contraparte for pessoa física, não só CNPJ.
+  return doc ? formatCPFCNPJ(doc) : '—';
 }
 
 const TIPO_APURACAO_LABELS: Record<string, string> = {
@@ -160,7 +153,6 @@ export default function GestaoCredIBSCBS() {
   const agora = new Date();
   const [mesCBS, setMesCBS] = useState(String(agora.getMonth() + 1).padStart(2, '0'));
   const [anoCBS, setAnoCBS] = useState(String(agora.getFullYear()));
-  const periodoAAAAMM = `${anoCBS}${mesCBS}`; // formato esperado por /api/rfb/debitos e /api/rfb/creditos/lista
 
   const [resumoCBS, setResumoCBS] = useState<RFBResumoMensal | null>(null);
   const [loadingResumoCBS, setLoadingResumoCBS] = useState(true);
@@ -183,7 +175,20 @@ export default function GestaoCredIBSCBS() {
       const res = await fetch(`/api/rfb/resumo-mensal?${params}`);
       if (ultimoPeriodoResumoRef.current !== chave) return
       if (res.ok) {
-        setResumoCBS(await res.json());
+        const data = await res.json();
+        // Normaliza campos numéricos ausentes pra 0 (defesa contra uma resposta de uma versão
+        // antiga da API, caso backend/frontend fiquem temporariamente dessincronizados num
+        // deploy) — evita "R$ NaN"/"undefined docs" renderizado se algum campo vier ausente.
+        setResumoCBS({
+          ...data,
+          total_debitos: data.total_debitos ?? 0,
+          total_creditos: data.total_creditos ?? 0,
+          valor_cbs_total_debito: data.valor_cbs_total_debito ?? 0,
+          valor_cbs_total_credito: data.valor_cbs_total_credito ?? 0,
+          valor_cbs_nao_extinto: data.valor_cbs_nao_extinto ?? 0,
+          valor_cbs_extinto_credito: data.valor_cbs_extinto_credito ?? 0,
+          saldo_a_pagar_aproximado: data.saldo_a_pagar_aproximado ?? 0,
+        });
       } else {
         toast.error(await extractErrorCBS(res, 'Erro ao carregar apuração mensal CBS'));
         setResumoCBS(null);
@@ -255,8 +260,10 @@ export default function GestaoCredIBSCBS() {
           situacao: c.situacao_credito,
         })),
       ].sort((a, b) => {
-        const da = a.data_dfe_emissao ? new Date(a.data_dfe_emissao).getTime() : 0;
-        const db_ = b.data_dfe_emissao ? new Date(b.data_dfe_emissao).getTime() : 0;
+        // || 0 cobre tanto ausência quanto string de data não-parseável (getTime() retorna NaN
+        // nesse caso, o que quebraria a comparação do sort de forma imprevisível).
+        const da = (a.data_dfe_emissao ? new Date(a.data_dfe_emissao).getTime() : 0) || 0;
+        const db_ = (b.data_dfe_emissao ? new Date(b.data_dfe_emissao).getTime() : 0) || 0;
         return db_ - da;
       });
 

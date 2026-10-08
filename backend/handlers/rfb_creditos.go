@@ -279,7 +279,14 @@ func ListarCreditosHandler(db *sql.DB) http.HandlerFunc {
 		if p, err2 := strconv.Atoi(pageStr); err2 == nil && p > 1 {
 			page = p
 		}
-		const pageSize = 50
+		// page_size honrado via query param (revisão adversarial) — antes era hardcoded em 50,
+		// deixando o parâmetro "page_size" aceito por chamadores (ex. GestaoCredIBSCBS.tsx) sem
+		// nenhum efeito real; ListarDebitosHandler (rfb_debitos_lista.go) já honra esse mesmo
+		// parâmetro, mesmo cap de 500 por consistência entre os dois endpoints irmãos.
+		pageSize := 50
+		if ps, err2 := strconv.Atoi(q.Get("page_size")); err2 == nil && ps > 0 && ps <= 500 {
+			pageSize = ps
+		}
 		offset := (page - 1) * pageSize
 
 		args := []interface{}{companyID}
