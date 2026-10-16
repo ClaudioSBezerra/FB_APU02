@@ -21,6 +21,14 @@ type FlexString string
 
 func (fs *FlexString) UnmarshalJSON(data []byte) error {
 	s := strings.Trim(string(data), `"`)
+	// JSON null (bytes literais "null", sem aspas) não é removido pelo Trim acima — sem esta
+	// checagem, um campo ausente na resposta da RFB virava a STRING "null" de 4 caracteres em
+	// vez de string vazia, e esse texto aparecia literalmente na tela (achado revisando a tela
+	// de Apuração CBS). Mesma checagem que RFBTime.UnmarshalJSON já faz logo abaixo.
+	if s == "null" {
+		*fs = ""
+		return nil
+	}
 	*fs = FlexString(s)
 	return nil
 }

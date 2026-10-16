@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -785,5 +786,33 @@ func TestProcessarDownloadRFB_V2NaoApagaCamposRicosDoV1(t *testing.T) {
 	}
 	if extinto != 40 {
 		t.Fatalf("valores monetários devem vir do v2 (extinto=40), veio %.2f", extinto)
+	}
+}
+
+// TestFlexString_JSONNull_VirStringVazia confirma o patch: um campo ausente na resposta da
+// RFB (JSON null, sem aspas) deve virar string vazia, não a string literal "null" de 4
+// caracteres — bug real encontrado revisando a tela de Apuração CBS (coluna Emitente/
+// Adquirente mostrava "null" em vez de "—" quando ni_adquirente vinha ausente).
+func TestFlexString_JSONNull_VirStringVazia(t *testing.T) {
+	var fs FlexString
+	if err := json.Unmarshal([]byte(`null`), &fs); err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if fs != "" {
+		t.Errorf("esperava string vazia pra JSON null, obteve %q", string(fs))
+	}
+
+	// Casos já suportados antes do patch não podem regredir.
+	if err := json.Unmarshal([]byte(`"12345678"`), &fs); err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if fs != "12345678" {
+		t.Errorf("esperava %q, obteve %q", "12345678", string(fs))
+	}
+	if err := json.Unmarshal([]byte(`55`), &fs); err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if fs != "55" {
+		t.Errorf("esperava %q (número vira string), obteve %q", "55", string(fs))
 	}
 }

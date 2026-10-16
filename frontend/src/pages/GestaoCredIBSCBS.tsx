@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
-import { Info, Wallet, FileCheck2, Users } from 'lucide-react';
+import { Info, Wallet, FileCheck2, Users, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
 import { formatCurrency } from '@/lib/utils';
 import { formatDocumento as formatCPFCNPJ } from '@/lib/formatFilial';
 
@@ -133,9 +134,13 @@ function formatDocumento(l: LancamentoCBS): string {
 // dashboard-real.md.
 function formatContraparte(l: LancamentoCBS): string {
   const doc = l.tipo === 'credito' ? l.ni_emitente : l.ni_adquirente;
+  // "null"/"undefined" como STRING literal (não o valor null/undefined do JS) às vezes chega
+  // assim vindo do backend (NI ausente na resposta da RFB) — sem esse filtro, aparecia a
+  // palavra "null" na tela em vez de "—".
+  if (!doc || doc === 'null' || doc === 'undefined') return '—';
   // formatDocumento (não formatCNPJ) porque ni_emitente/ni_adquirente é NI livre vindo da RFB
   // — pode ser CPF (11 dígitos) se a contraparte for pessoa física, não só CNPJ.
-  return doc ? formatCPFCNPJ(doc) : '—';
+  return formatCPFCNPJ(doc);
 }
 
 const TIPO_APURACAO_LABELS: Record<string, string> = {
@@ -148,6 +153,11 @@ const TIPO_APURACAO_LABELS: Record<string, string> = {
 
 export default function GestaoCredIBSCBS() {
   const [activeTab, setActiveTab] = useState('todos');
+
+  // ─── Filtros da tabela de lançamentos (client-side, sobre o array já carregado) ──
+  const [buscaTexto, setBuscaTexto] = useState('');
+  const [situacaoFiltro, setSituacaoFiltro] = useState('todas');
+  const [tipoApuracaoFiltro, setTipoApuracaoFiltro] = useState('todos');
 
   // ─── Período único da tela (reaproveitado por KPIs + tabela de lançamentos) ──
   const agora = new Date();
@@ -287,6 +297,10 @@ export default function GestaoCredIBSCBS() {
   function handlePeriodoCBSChange(mes: string, ano: string) {
     setMesCBS(mes);
     setAnoCBS(ano);
+    // Reseta filtros de Situação/Tipo Apuração ao trocar de período — um valor válido no mês
+    // anterior pode não existir no novo (situacao é texto livre da RFB, lista é derivada por mês).
+    setSituacaoFiltro('todas');
+    setTipoApuracaoFiltro('todos');
     fetchResumoCBS(mes, ano);
     fetchLancamentos(mes, ano);
   }
@@ -296,14 +310,38 @@ export default function GestaoCredIBSCBS() {
   // comum aos dois endpoints) em vez de tentar mapear situacao_debito (texto livre da RFB,
   // sem enum fechado) ou duplicar o enum fechado de situacao_credito (A_APROPRIAR/
   // APROPRIADO/COMPENSADO, de RFBCreditosCBS.tsx) — ver decisão registrada na spec.
+  // Opções de Situação derivadas dos dados já carregados (não hardcoded) — situacao é texto
+  // livre devolvido pela RFB (situacao_debito/situacao_credito), sem enum fechado conhecido, e
+  // valores observados podem não ser só "Extinto"/"Não Extinto".
+  const situacoesDisponiveis = useMemo(() => {
+    const vistos = new Set(lancamentos.map((l) => l.situacao).filter(Boolean));
+    return Array.from(vistos).sort();
+  }, [lancamentos]);
+
+  const buscaNormalizada = buscaTexto.trim().toLowerCase();
+
   const filteredLancamentos = useMemo(() => lancamentos.filter((l) => {
-    if (activeTab === 'creditos') return l.tipo === 'credito';
-    if (activeTab === 'debitos') return l.tipo === 'debito';
-    if (activeTab === 'pendencias') return l.valor_cbs_nao_extinto > 0;
+    if (activeTab === 'creditos' && l.tipo !== 'credito') return false;
+    if (activeTab === 'debitos' && l.tipo !== 'debito') return false;
+    if (activeTab === 'pendencias' && !(l.valor_cbs_nao_extinto > 0)) return false;
+    if (situacaoFiltro !== 'todas' && l.situacao !== situacaoFiltro) return false;
+    if (tipoApuracaoFiltro !== 'todos' && l.tipo_apuracao !== tipoApuracaoFiltro) return false;
+    if (buscaNormalizada) {
+      const alvo = [l.numero_dfe, l.chave_dfe, l.ni_emitente, l.ni_adquirente]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!alvo.includes(buscaNormalizada)) return false;
+    }
     return true;
-  }), [lancamentos, activeTab]);
+  }), [lancamentos, activeTab, situacaoFiltro, tipoApuracaoFiltro, buscaNormalizada]);
 
   const totalCBSFiltrado = filteredLancamentos.reduce((s, l) => s + l.valor_cbs_total, 0);
+  const temFiltroAdicionalAtivo = situacaoFiltro !== 'todas' || tipoApuracaoFiltro !== 'todos' || buscaNormalizada !== '';
+
+  function limparFiltrosAdicionais() {
+    setBuscaTexto('');
+    setSituacaoFiltro('todas');
+    setTipoApuracaoFiltro('todos');
+  }
 
   // A tabela busca no máximo 50 débitos + 50 créditos (sem paginação) — quando o período tem
   // mais documentos que isso (total_debitos/total_creditos vêm do resumo mensal, que cobre o
@@ -429,6 +467,47 @@ export default function GestaoCredIBSCBS() {
               <p className="text-[10px] font-semibold text-muted-foreground mb-2">
                 Lançamentos de Créditos e Débitos CBS — {mesesLabel[parseInt(mesCBS, 10) - 1]?.slice(5)}/{anoCBS}
               </p>
+
+              {/* ── Filtros adicionais (client-side, sobre os lançamentos já carregados) ── */}
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <div className="relative">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                  <Input
+                    value={buscaTexto}
+                    onChange={(e) => setBuscaTexto(e.target.value)}
+                    placeholder="Buscar documento ou CNPJ/CPF..."
+                    className="h-7 w-56 pl-7 text-[11px]"
+                  />
+                </div>
+                <Select value={situacaoFiltro} onValueChange={setSituacaoFiltro}>
+                  <SelectTrigger className="h-7 w-40 text-[11px]">
+                    <SelectValue placeholder="Situação" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todas" className="text-[11px]">Todas as situações</SelectItem>
+                    {situacoesDisponiveis.map((s) => (
+                      <SelectItem key={s} value={s} className="text-[11px]">{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={tipoApuracaoFiltro} onValueChange={setTipoApuracaoFiltro}>
+                  <SelectTrigger className="h-7 w-40 text-[11px]">
+                    <SelectValue placeholder="Tipo Apuração" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos" className="text-[11px]">Toda apuração</SelectItem>
+                    {Object.entries(TIPO_APURACAO_LABELS).map(([valor, label]) => (
+                      <SelectItem key={valor} value={valor} className="text-[11px]">{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {temFiltroAdicionalAtivo && (
+                  <Button variant="ghost" size="sm" className="h-7 text-[11px] px-2" onClick={limparFiltrosAdicionais}>
+                    <X className="mr-1 h-3 w-3" /> Limpar filtros
+                  </Button>
+                )}
+              </div>
+
               {loadingLancamentos ? (
                 <div className="flex justify-center py-10">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
@@ -454,7 +533,9 @@ export default function GestaoCredIBSCBS() {
                       {filteredLancamentos.length === 0 && (
                         <tr>
                           <td colSpan={6} className="px-2 py-4 text-center text-[11px] text-muted-foreground">
-                            Nenhum lançamento encontrado para este período.
+                            {lancamentos.length === 0
+                              ? 'Nenhum lançamento encontrado para este período.'
+                              : 'Nenhum lançamento corresponde aos filtros selecionados.'}
                           </td>
                         </tr>
                       )}
