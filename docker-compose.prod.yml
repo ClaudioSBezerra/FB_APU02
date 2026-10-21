@@ -87,6 +87,37 @@ services:
           cpus: '0.25'
           memory: 128M
 
+  # Cloudflare Tunnel (21/10, migração de segurança) — scaffold DORMENTE,
+  # mesmo padrão já aplicado em FB_APU05/FB_FAROL/FB_SMARTPICK. Sem
+  # CLOUDFLARE_TUNNEL_TOKEN setado no Coolify, este container só reinicia
+  # sozinho, sem afetar `api`/`web`/`db`.
+  #
+  # ATENÇÃO (achado durante a migração, não é sobre o túnel em si): os
+  # labels `traefik.*` do serviço `web` acima apontam pra
+  # `fbtax.cloud`/`www.fbtax.cloud`, mas o domínio real em produção é
+  # `apuracao.fbtax.cloud` (confirmado por HTTP + README interno —
+  # "FB_APU02 — Sistema de Apuração Fiscal") — então o "Public Hostname"
+  # do túnel precisa ser `apuracao.fbtax.cloud` -> http://web:80, mesmo
+  # que os labels do Traefik neste arquivo digam outro domínio.
+  #
+  # Passo a passo (manual, painel Cloudflare):
+  #   1. Zero Trust -> Networks -> Tunnels -> Create a tunnel, nome ex.
+  #      "fb-apu02-prod".
+  #   2. Copiar o token gerado e setar CLOUDFLARE_TUNNEL_TOKEN no Coolify.
+  #   3. Public Hostname: Subdomain=apuracao, Domain=fbtax.cloud,
+  #      Service=http://web:80.
+  #   4. Confirmar que apuracao.fbtax.cloud responde via o túnel antes de
+  #      remover os labels `traefik.*` de `web` (fallback até validar).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: fb_apu02-cloudflared-prod
+    restart: always
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - fb_net
+    depends_on:
+      - web
+
   # Banco de Dados - Production
   db:
     image: postgres:15-alpine

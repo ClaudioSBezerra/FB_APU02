@@ -103,9 +103,20 @@ func getEnv(key, fallback string) string {
 
 // getJWTSecret reads JWT_SECRET from the environment at call time.
 // This ensures godotenv.Load() in main() takes effect before first use.
+//
+// Fallback restrito a dev local sem banco (21/10, migração de segurança):
+// antes devolvia um valor hardcoded conhecido ("super-secret-key-change-me-
+// in-prod") em QUALQUER ambiente sem JWT_SECRET — inclusive produção, caso
+// algum caminho chamasse isto antes de ValidateJWTSecret() rodar. Agora só
+// tolera isso no mesmo cenário que ValidateJWTSecret() já permite (dev
+// local, sem DATABASE_URL) — em produção (DATABASE_URL setada) falha
+// (log.Fatal) em vez de devolver um segredo previsível.
 func getJWTSecret() []byte {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
+		if os.Getenv("DATABASE_URL") != "" {
+			log.Fatal("FATAL: getJWTSecret chamado sem JWT_SECRET setado num ambiente com DATABASE_URL — ValidateJWTSecret() deveria ter impedido o processo de chegar aqui.")
+		}
 		return []byte("super-secret-key-change-me-in-prod")
 	}
 	return []byte(secret)
