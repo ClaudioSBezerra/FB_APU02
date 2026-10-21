@@ -88,6 +88,33 @@ services:
     networks:
       - fb_net
 
+  # Cloudflare Tunnel (21/10, migração de segurança) — scaffold DORMENTE.
+  # IMPORTANTE (21/10): este serviço só pode viver AQUI, em docker-compose.yml
+  # — não em docker-compose.prod.yml, que o Coolify NÃO usa (mesmo achado do
+  # FB_FAROL, confirmado por log de deploy real: só os serviços deste
+  # arquivo aparecem buildados/rodando). Sem CLOUDFLARE_TUNNEL_TOKEN setado
+  # no Coolify, este container só reinicia sozinho, sem afetar os demais.
+  #
+  # Passo a passo (manual, painel Cloudflare):
+  #   1. Zero Trust -> Networks -> Tunnels -> Create a tunnel, nome ex.
+  #      "fb-apu02-prod".
+  #   2. Copiar o token gerado e setar CLOUDFLARE_TUNNEL_TOKEN no Coolify.
+  #   3. Public Hostname/Route: Subdomain=apuracao, Domain=fbtax.cloud,
+  #      Service=http://web:80.
+  #   4. Apagar o registro DNS A antigo de apuracao.fbtax.cloud ANTES de
+  #      criar a rota (senão o Cloudflare não cria o CNAME do túnel sozinho
+  #      — erro 1016 "Origin DNS error" se isso já tiver acontecido; aí só
+  #      criar o CNAME manual pra <tunnel-id>.cfargotunnel.com).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: fb_apu02-cloudflared-prod
+    restart: always
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - fb_net
+    depends_on:
+      - web
+
 networks:
   fb_net:
     driver: bridge
