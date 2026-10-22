@@ -136,7 +136,12 @@ func newRateLimiter(max int, window time.Duration) *rateLimiter {
 
 // Exported rate limiters used by auth handlers
 var (
-	LoginRL          = newRateLimiter(5, 15*time.Minute)
+	LoginRL = newRateLimiter(5, 15*time.Minute)
+	// LoginByAccountRL limita tentativas de login por conta (e-mail), além do
+	// LoginRL por IP acima — sem isto, um atacante distribuído por várias IPs
+	// consegue tentar senha contra uma única conta-alvo sem nunca esbarrar no
+	// limite por IP.
+	LoginByAccountRL = newRateLimiter(5, 15*time.Minute)
 	RegisterRL       = newRateLimiter(10, time.Hour)
 	ForgotPasswordRL = newRateLimiter(3, time.Hour)
 	ResetPasswordRL  = newRateLimiter(5, time.Hour)      // por IP

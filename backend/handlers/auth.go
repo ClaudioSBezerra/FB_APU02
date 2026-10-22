@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -646,6 +647,16 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 		var req LoginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+
+		// LoginByAccountRL limita tentativas por conta (e-mail), além do
+		// LoginRL por IP acima — sem isto, um atacante distribuído por várias
+		// IPs consegue tentar senha contra uma única conta-alvo sem nunca
+		// esbarrar no limite por IP.
+		accountKey := strings.ToLower(strings.TrimSpace(req.Email))
+		if !LoginByAccountRL.Allow(accountKey) {
+			http.Error(w, "Too many requests", http.StatusTooManyRequests)
 			return
 		}
 
