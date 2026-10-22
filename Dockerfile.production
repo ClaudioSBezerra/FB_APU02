@@ -19,7 +19,12 @@ ENV VITE_APP_MODULE=$VITE_APP_MODULE
 RUN npm run build
 
 # Backend stage
-FROM golang:1.22-alpine AS backend-builder
+# Pinado em patch exato (22/10, migração de segurança) — acompanha o
+# bump do go.mod (go 1.22.0 -> 1.26.1, 1.22 saiu de suporte) feito em
+# backend/Dockerfile — esse build (GitHub Actions -> GHCR, usado pelo
+# instalador cliente-aws) quebrava com a tag antiga porque go.mod passou
+# a exigir >= 1.26.1.
+FROM golang:1.26.10-alpine AS backend-builder
 WORKDIR /app/backend
 
 RUN apk add --no-cache git
