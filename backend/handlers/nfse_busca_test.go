@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"fb_apu02/services"
+
 	"software.sslmate.com/src/go-pkcs12"
 )
 
@@ -27,6 +29,14 @@ import (
 // Helpers de certificado de teste — gerados aqui mesmo (autoassinados), NUNCA um certificado
 // A1 real nem a API real do Portal Nacional ADN (mesmo princípio de
 // services/nfse_adn_test.go; helpers de teste não são compartilhados entre pacotes Go).
+//
+// A partir da sub-spec spec-nfse-agendamento-persistencia.md, estes testes cobrem só o
+// comportamento HTTP do handler (status code, rate limit, formato da resposta JSON e mapeamento
+// de erro). A cobertura de persistência/transação/autoemitido/CNPJ-inválido/dedup em si vive em
+// services/nfse_processor_test.go, que testa services.ExecutarCicloNFSe diretamente (a mesma
+// função que este handler chama) — formato-inesperado/limite-de-lotes são cobertos aqui mesmo,
+// via TestMapExecutarCicloNFSeErr_LimiteDeLotes_Retorna502 abaixo, porque são comportamento do
+// MAPEAMENTO HTTP (mapExecutarCicloNFSeErr), não da lógica de services.
 // ---------------------------------------------------------------------------
 
 func nfseBuscaGenTestCA(t *testing.T) (*x509.Certificate, *rsa.PrivateKey) {
@@ -102,9 +112,9 @@ func nfseBuscaBuildTestPfxBase64(t *testing.T, cert *x509.Certificate, key *rsa.
 
 // nfseBuscaWriteCAPEM grava o certificado da CA de teste em um arquivo PEM temporário e
 // aponta NFSE_ADN_TLS_CA_FILE para ele — é assim (ver comentário da constante em
-// services/nfse_adn.go) que o client mTLS montado DENTRO do handler passa a confiar no
-// certificado autoassinado do servidor de teste, sem alterar nenhum código de produção (que
-// usa o pool de CAs padrão do sistema quando essa variável não está definida).
+// services/nfse_adn.go) que o client mTLS montado DENTRO de services.ExecutarCicloNFSe passa a
+// confiar no certificado autoassinado do servidor de teste, sem alterar nenhum código de
+// produção (que usa o pool de CAs padrão do sistema quando essa variável não está definida).
 func nfseBuscaWriteCAPEM(t *testing.T, ca *x509.Certificate) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "ca-teste-nfse-busca.pem")
@@ -176,11 +186,12 @@ func TestBuscarNFSeHandlerMethodNotAllowed(t *testing.T) {
 // Testes — integração com Postgres (skip automático se indisponível)
 // ---------------------------------------------------------------------------
 
-// TestBuscarNFSeHandler_SemCertificado_Retorna400SemChamadaRede cobre o 1º Acceptance
-// Criterion: empresa sem certificado cadastrado -> 400 SEM tentar nenhuma chamada de rede.
-// NFSE_ADN_BASE_URL aponta para uma porta fechada: se o handler mudar de comportamento e
-// tentar uma chamada de rede antes de checar o certificado, o teste deixaria de ver 400 (veria
-// 502, já que a conexão seria recusada) — é essa divergência que detecta a regressão.
+// TestBuscarNFSeHandler_SemCertificado_Retorna400SemChamadaRede cobre o mapeamento HTTP de
+// services.ErrNFSeCertificadoNaoCadastrado: empresa sem certificado cadastrado -> 400 SEM
+// tentar nenhuma chamada de rede. NFSE_ADN_BASE_URL aponta para uma porta fechada: se o ciclo
+// mudar de comportamento e tentar uma chamada de rede antes de checar o certificado, o teste
+// deixaria de ver 400 (veria 502, já que a conexão seria recusada) — é essa divergência que
+// detecta a regressão.
 func TestBuscarNFSeHandler_SemCertificado_Retorna400SemChamadaRede(t *testing.T) {
 	db := openNFSeTestDB(t)
 	defer db.Close()
@@ -198,8 +209,9 @@ func TestBuscarNFSeHandler_SemCertificado_Retorna400SemChamadaRede(t *testing.T)
 	}
 }
 
-// TestBuscarNFSeHandler_CertificadoVencido_Retorna400SemChamadaRede cobre o 2º Acceptance
-// Criterion: certificado com status calculado 'vencido' -> 400 SEM tentar a chamada mTLS.
+// TestBuscarNFSeHandler_CertificadoVencido_Retorna400SemChamadaRede cobre o mapeamento HTTP de
+// services.ErrNFSeCertificadoIndisponivel: certificado com status calculado 'vencido' -> 400 SEM
+// tentar a chamada mTLS.
 func TestBuscarNFSeHandler_CertificadoVencido_Retorna400SemChamadaRede(t *testing.T) {
 	db := openNFSeTestDB(t)
 	defer db.Close()
@@ -217,11 +229,36 @@ func TestBuscarNFSeHandler_CertificadoVencido_Retorna400SemChamadaRede(t *testin
 	}
 }
 
-// TestBuscarNFSeHandler_ServidorAceita_GravaDocumentosSemDuplicarNaSegundaChamada cobre o 3º
-// Acceptance Criterion: servidor de teste mTLS aceita o certificado e devolve um payload
-// simulado -> os documentos aparecem em nfse_entradas/nfse_saidas, sem duplicar numa 2ª
-// chamada.
-func TestBuscarNFSeHandler_ServidorAceita_GravaDocumentosSemDuplicarNaSegundaChamada(t *testing.T) {
+// TestBuscarNFSeHandler_SegundaChamadaDentro30s_Retorna429 cobre o rate limit compartilhado
+// (NFSeBuscaRL, 1 chamada/30s por empresa): a 2ª chamada pra mesma empresa dentro da janela é
+// barrada com 429, sem nem chegar a resolver o certificado.
+func TestBuscarNFSeHandler_SegundaChamadaDentro30s_Retorna429(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	t.Setenv("NFSE_ADN_BASE_URL", "http://127.0.0.1:1")
+	NFSeBuscaRL.Reset(companyID)
+
+	rec1 := postBuscarNFSe(t, db, authed)
+	if rec1.Code == http.StatusTooManyRequests {
+		t.Fatalf("1ª chamada não deveria estar limitada ainda, veio 429: %s", rec1.Body.String())
+	}
+
+	rec2 := postBuscarNFSe(t, db, authed)
+	if rec2.Code != http.StatusTooManyRequests {
+		t.Fatalf("esperava 429 na 2ª chamada dentro de 30s, obteve %d: %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+// TestBuscarNFSeHandler_ServidorAceita_Retorna200ComContagens cobre o caminho feliz de ponta a
+// ponta via HTTP: o handler delega para services.ExecutarCicloNFSe, que autentica via mTLS,
+// busca o documento simulado e persiste — o teste confirma que a resposta HTTP é 200 com os
+// campos de contagem corretos. Cobertura de transação/dedup/autoemitido/CNPJ-inválido fica em
+// services/nfse_processor_test.go (TestExecutarCicloNFSe_*), que testa a mesma função
+// diretamente.
+func TestBuscarNFSeHandler_ServidorAceita_Retorna200ComContagens(t *testing.T) {
 	db := openNFSeTestDB(t)
 	defer db.Close()
 	companyID, authed, cleanup := setupNFSeCertTest(t, db)
@@ -237,24 +274,17 @@ func TestBuscarNFSeHandler_ServidorAceita_GravaDocumentosSemDuplicarNaSegundaCha
 	clientCAPool := x509.NewCertPool()
 	clientCAPool.AddCert(ca)
 
-	chamadas := 0
 	mux := http.NewServeMux()
 	mux.HandleFunc("/contribuintes/DFe/", func(w http.ResponseWriter, r *http.Request) {
-		chamadas++
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"loteVazio": true,
 			"ultimoNSU": "1",
 			"documentos": []map[string]interface{}{
 				{
-					"nsu": "1", "identificadorNfse": "NFSE-ENTRADA-001",
+					"nsu": "1", "identificadorNfse": "NFSE-HTTP-001",
 					"cnpjPrestador": "99999999000199", "cnpjTomador": cnpjEmpresa,
 					"dataEmissao": "2026-10-01", "valorServicos": 100.0,
-				},
-				{
-					"nsu": "2", "identificadorNfse": "NFSE-SAIDA-001",
-					"cnpjPrestador": cnpjEmpresa, "cnpjTomador": "88888888000188",
-					"dataEmissao": "2026-10-02", "valorServicos": 200.0,
 				},
 			},
 		})
@@ -270,61 +300,32 @@ func TestBuscarNFSeHandler_ServidorAceita_GravaDocumentosSemDuplicarNaSegundaCha
 	futuro := time.Now().AddDate(1, 0, 0)
 	insertNFSeCert(t, db, companyID, pfxB64, "senha-correta", "empresa.pfx", &futuro, "ativo")
 
-	rec1 := postBuscarNFSe(t, db, authed)
-	if rec1.Code != http.StatusOK {
-		t.Fatalf("1ª busca: esperava 200, obteve %d: %s", rec1.Code, rec1.Body.String())
+	NFSeBuscaRL.Reset(companyID)
+	rec := postBuscarNFSe(t, db, authed)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperava 200, obteve %d: %s", rec.Code, rec.Body.String())
 	}
-	var body1 struct {
+	var body struct {
 		DocumentosNovos     int `json:"documentos_novos"`
-		DocumentosRecebidos int `json:"documentos_recebidos"`
+		DocumentosIgnorados int `json:"documentos_ignorados"`
 	}
-	if err := json.Unmarshal(rec1.Body.Bytes(), &body1); err != nil {
-		t.Fatalf("falha ao decodificar resposta: %v, corpo: %s", err, rec1.Body.String())
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("falha ao decodificar resposta: %v, corpo: %s", err, rec.Body.String())
 	}
-	if body1.DocumentosNovos != 2 {
-		t.Errorf("esperava 2 documentos novos na 1ª busca, veio %d", body1.DocumentosNovos)
+	if body.DocumentosNovos != 1 {
+		t.Errorf("esperava 1 documento novo, veio %d", body.DocumentosNovos)
 	}
-
+	if body.DocumentosIgnorados != 0 {
+		t.Errorf("esperava 0 documentos ignorados, veio %d", body.DocumentosIgnorados)
+	}
 	if n := countNFSeRows(t, db, "nfse_entradas", companyID); n != 1 {
 		t.Errorf("esperava 1 linha em nfse_entradas (empresa é tomadora), veio %d", n)
 	}
-	if n := countNFSeRows(t, db, "nfse_saidas", companyID); n != 1 {
-		t.Errorf("esperava 1 linha em nfse_saidas (empresa é prestadora), veio %d", n)
-	}
-
-	// Este teste cobre idempotência entre 2 ciclos manuais, não o rate limit (patch
-	// separado, ver NFSeBuscaRL) — sem isto, a 2ª chamada abaixo levaria 429 em vez de 200.
-	NFSeBuscaRL.Reset(companyID)
-
-	// 2ª chamada: o servidor de teste devolve o MESMO lote de novo (simula um 2º ciclo manual
-	// "Buscar Agora") — não deve duplicar nenhuma linha.
-	rec2 := postBuscarNFSe(t, db, authed)
-	if rec2.Code != http.StatusOK {
-		t.Fatalf("2ª busca: esperava 200, obteve %d: %s", rec2.Code, rec2.Body.String())
-	}
-	var body2 struct {
-		DocumentosNovos int `json:"documentos_novos"`
-	}
-	if err := json.Unmarshal(rec2.Body.Bytes(), &body2); err != nil {
-		t.Fatalf("falha ao decodificar resposta da 2ª busca: %v, corpo: %s", err, rec2.Body.String())
-	}
-	if body2.DocumentosNovos != 0 {
-		t.Errorf("esperava 0 documentos novos na 2ª busca (já capturados), veio %d", body2.DocumentosNovos)
-	}
-	if n := countNFSeRows(t, db, "nfse_entradas", companyID); n != 1 {
-		t.Errorf("2ª busca duplicou nfse_entradas — esperava 1 linha, veio %d", n)
-	}
-	if n := countNFSeRows(t, db, "nfse_saidas", companyID); n != 1 {
-		t.Errorf("2ª busca duplicou nfse_saidas — esperava 1 linha, veio %d", n)
-	}
-	if chamadas != 2 {
-		t.Errorf("esperava 2 chamadas ao servidor de teste (1 por busca), veio %d", chamadas)
-	}
 }
 
-// TestBuscarNFSeHandler_ServidorRejeitaCertificado_Retorna502SemGravarNada cobre o 4º
-// Acceptance Criterion: servidor de teste rejeita o certificado (handshake falha) -> 502, nada
-// gravado no banco.
+// TestBuscarNFSeHandler_ServidorRejeitaCertificado_Retorna502SemGravarNada cobre o mapeamento
+// HTTP de services.ErrNFSeADNAutenticacaoFalhou: servidor de teste rejeita o certificado
+// (handshake falha) -> 502, nada gravado no banco.
 func TestBuscarNFSeHandler_ServidorRejeitaCertificado_Retorna502SemGravarNada(t *testing.T) {
 	db := openNFSeTestDB(t)
 	defer db.Close()
@@ -356,6 +357,7 @@ func TestBuscarNFSeHandler_ServidorRejeitaCertificado_Retorna502SemGravarNada(t 
 	futuro := time.Now().AddDate(1, 0, 0)
 	insertNFSeCert(t, db, companyID, pfxB64, "senha-correta", "empresa.pfx", &futuro, "ativo")
 
+	NFSeBuscaRL.Reset(companyID)
 	rec := postBuscarNFSe(t, db, authed)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("esperava 502 (certificado rejeitado pelo servidor), obteve %d: %s", rec.Code, rec.Body.String())
@@ -366,5 +368,22 @@ func TestBuscarNFSeHandler_ServidorRejeitaCertificado_Retorna502SemGravarNada(t 
 	}
 	if n := countNFSeRows(t, db, "nfse_saidas", companyID); n != 0 {
 		t.Errorf("certificado rejeitado não deveria gravar nada em nfse_saidas, veio %d linha(s)", n)
+	}
+}
+
+// TestMapExecutarCicloNFSeErr_LimiteDeLotes_Retorna502 cobre o item 2 do Spec Change Log
+// (loopback 1): services.ErrNFSeADNLimiteLotes (esgotamento de nfseADNMaxLotes sem o ADN jamais
+// sinalizar loteVazio=true) tem que mapear para 502 — antes desta correção caía no `default:` do
+// mapeamento e virava 500 genérico, inconsistente com os demais erros de comunicação com o ADN
+// (todos 502). Teste unitário puro: não precisa de banco nem de servidor mTLS, só exercita
+// mapExecutarCicloNFSeErr diretamente.
+func TestMapExecutarCicloNFSeErr_LimiteDeLotes_Retorna502(t *testing.T) {
+	rec := httptest.NewRecorder()
+	mapExecutarCicloNFSeErr(rec, "company-id-fake", services.ErrNFSeADNLimiteLotes)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("esperava 502 para ErrNFSeADNLimiteLotes, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "limite") {
+		t.Errorf("mensagem de erro deveria mencionar o limite de páginas, veio: %s", rec.Body.String())
 	}
 }

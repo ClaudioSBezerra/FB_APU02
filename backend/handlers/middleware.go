@@ -4,8 +4,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
+
+	"fb_apu02/services"
 )
 
 // ─── Allowed CORS Origins ─────────────────────────────────────────────────────
@@ -118,20 +119,14 @@ func SecurityMiddleware(next http.Handler, allowedOrigins map[string]bool) http.
 }
 
 // ─── Rate Limiter ─────────────────────────────────────────────────────────────
+// Tipo movido para services.RateLimiter (ver comentário lá) — alias mantém LoginRL/RegisterRL/
+// etc. e os métodos (Allow/IsLimited/RecordFailure/Reset) funcionando sem nenhuma mudança nos
+// call sites deste pacote.
 
-type rateLimiter struct {
-	mu       sync.Mutex
-	requests map[string][]time.Time
-	max      int
-	window   time.Duration
-}
+type rateLimiter = services.RateLimiter
 
 func newRateLimiter(max int, window time.Duration) *rateLimiter {
-	return &rateLimiter{
-		requests: make(map[string][]time.Time),
-		max:      max,
-		window:   window,
-	}
+	return services.NewRateLimiter(max, window)
 }
 
 // Exported rate limiters used by auth handlers
@@ -149,58 +144,8 @@ var (
 	SSOKeycloakRL    = newRateLimiter(5, 15*time.Minute) // por IP — mesmo limite de LoginRL
 )
 
-// Allow checks AND records one attempt. Returns false if limit is exceeded.
-func (rl *rateLimiter) Allow(key string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	now := time.Now()
-	existing := rl.requests[key]
-	valid := existing[:0]
-	for _, t := range existing {
-		if now.Sub(t) < rl.window {
-			valid = append(valid, t)
-		}
-	}
-	rl.requests[key] = valid
-
-	if len(valid) >= rl.max {
-		return false
-	}
-	rl.requests[key] = append(rl.requests[key], now)
-	return true
-}
-
-// IsLimited checks if the key is already over the limit without recording a new attempt.
-func (rl *rateLimiter) IsLimited(key string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-
-	now := time.Now()
-	existing := rl.requests[key]
-	valid := existing[:0]
-	for _, t := range existing {
-		if now.Sub(t) < rl.window {
-			valid = append(valid, t)
-		}
-	}
-	rl.requests[key] = valid
-	return len(valid) >= rl.max
-}
-
-// RecordFailure records one failed attempt without returning a decision.
-func (rl *rateLimiter) RecordFailure(key string) {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	rl.requests[key] = append(rl.requests[key], time.Now())
-}
-
-// Reset clears the counter for a key (e.g. on successful login).
-func (rl *rateLimiter) Reset(key string) {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	delete(rl.requests, key)
-}
+// Allow/IsLimited/RecordFailure/Reset agora vivem em services.RateLimiter (ver tipo acima) —
+// nada aqui muda de comportamento, só o lugar onde o código mora.
 
 // GetClientIP extracts the real client IP from reverse proxy headers.
 // Uses the LAST entry in X-Forwarded-For (set by trusted proxy) to prevent spoofing.

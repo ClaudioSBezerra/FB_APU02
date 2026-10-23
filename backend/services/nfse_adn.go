@@ -77,6 +77,9 @@ var (
 	// ErrNFSeADNComunicacaoFalhou cobre qualquer outra falha de comunicação (HTTP
 	// diferente de 200/401/403) que não seja nem falha de autenticação nem de formato.
 	ErrNFSeADNComunicacaoFalhou = errors.New("falha ao comunicar com o Portal Nacional ADN")
+	// ErrNFSeADNLimiteLotes cobre o esgotamento de nfseADNMaxLotes sem o ADN jamais sinalizar
+	// loteVazio=true — captura pode estar incompleta (ver BuscarTodosDocumentosADN).
+	ErrNFSeADNLimiteLotes = errors.New("limite de lotes de paginação atingido sem conclusão — captura pode estar incompleta")
 )
 
 // ResolveNFSeADNBaseURL resolve a base URL do Portal Nacional ADN. NFSE_ADN_BASE_URL
@@ -323,5 +326,5 @@ func BuscarTodosDocumentosADN(ctx context.Context, httpClient *http.Client, base
 	// Limite de lotes atingido sem o ADN jamais sinalizar loteVazio=true — devolver os
 	// documentos já coletados como se fosse uma captura completa esconderia uma captura
 	// incompleta (ver nfseADNMaxLotes acima).
-	return todos, fmt.Errorf("limite de %d lotes atingido sem loteVazio=true — captura pode estar incompleta", nfseADNMaxLotes)
+	return todos, fmt.Errorf("%w: limite de %d lotes atingido sem loteVazio=true", ErrNFSeADNLimiteLotes, nfseADNMaxLotes)
 }

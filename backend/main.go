@@ -226,6 +226,7 @@ func main() {
 	handlers.ValidateJWTSecret()
 	initDBAsync()
 	go services.StartRFBScheduler(getDB)
+	go services.StartNFSeScheduler(getDB)
 	go services.StartRawJSONJanitor(getDB)
 
 	if os.Getenv("ENCRYPTION_KEY") == "" && os.Getenv("DATABASE_URL") != "" {
