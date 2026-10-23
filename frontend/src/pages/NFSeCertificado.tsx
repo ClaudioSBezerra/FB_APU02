@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { toast } from 'sonner'
 import {
   ShieldCheck,
   Save,
@@ -14,6 +15,7 @@ import {
   AlertTriangle,
   Upload,
   FileKey,
+  Search,
 } from 'lucide-react'
 
 // NFSeCertificado reflete os metadados devolvidos por GET /api/nfse/certificado — nunca inclui
@@ -74,6 +76,7 @@ export default function NFSeCertificado() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [buscando, setBuscando] = useState(false)
   const [editing, setEditing] = useState(false)
   // fetchError é distinto de "certificado === null" — um GET que falhou (rede, 401, 500...)
   // nunca pode ser renderizado como "empresa sem certificado cadastrado".
@@ -204,6 +207,50 @@ export default function NFSeCertificado() {
     setEditing(true)
   }
 
+  // handleBuscarAgora dispara POST /api/nfse/buscar — um ciclo síncrono de busca manual contra
+  // o Portal Nacional ADN (mesma função services.ExecutarCicloNFSe usada pelo agendamento
+  // automático). Erros do backend (certificado ausente/vencido = 400, falha de mTLS/comunicação
+  // = 502, rate limit = 429) já vêm com mensagem pronta — só exibe via toast. AbortController com
+  // timeout de 6 minutos evita que o botão fique em "Buscando..." indefinidamente se o fetch
+  // nunca resolver (o ciclo ADN no backend já tem seu próprio timeout interno de ~5-10min).
+  const handleBuscarAgora = async () => {
+    setBuscando(true)
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 6 * 60 * 1000)
+    try {
+      const res = await fetch('/api/nfse/buscar', { method: 'POST', signal: controller.signal })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        toast.error(data?.error || 'Erro ao buscar NFS-e')
+        return
+      }
+      if (
+        !data ||
+        typeof data.documentos_recebidos !== 'number' ||
+        typeof data.documentos_novos !== 'number' ||
+        typeof data.documentos_ignorados !== 'number'
+      ) {
+        toast.error('Resposta inválida do servidor')
+        return
+      }
+      const recebidos = data.documentos_recebidos
+      const novos = data.documentos_novos
+      const ignorados = data.documentos_ignorados
+      toast.success(
+        `Busca concluída: ${recebidos} recebido(s), ${novos} novo(s), ${ignorados} ignorado(s)`
+      )
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        toast.error('A busca demorou mais que o esperado — tente novamente')
+      } else {
+        toast.error('Erro de conexão ao buscar NFS-e')
+      }
+    } finally {
+      clearTimeout(timeoutId)
+      setBuscando(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -218,6 +265,10 @@ export default function NFSeCertificado() {
   // horário do navegador pode divergir do servidor exatamente no dia do vencimento. dias só serve
   // para o texto complementar ("vence em N dias"), nunca para decidir a cor do badge.
   const vencido = certificado?.status === 'vencido'
+  // certificadoIndisponivel decide quando "Buscar Agora" fica desabilitado — sem certificado
+  // cadastrado, vencido ou revogado, a busca falharia com 400 sem nenhuma tentativa de rede
+  // (ver I/O Matrix da spec-nfse-frontend.md); desabilitar aqui evita o round-trip desnecessário.
+  const certificadoIndisponivel = !certificado?.tem_certificado || vencido || certificado?.status === 'revogado'
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
@@ -268,6 +319,17 @@ export default function NFSeCertificado() {
                       <XCircle className="h-3 w-3" /> Não configurado
                     </span>
                   )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleBuscarAgora}
+                    disabled={buscando || certificadoIndisponivel || saving || deleting}
+                    title={certificadoIndisponivel ? 'Cadastre um certificado ativo para buscar NFS-e' : undefined}
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    {buscando ? 'Buscando...' : 'Buscar Agora'}
+                  </Button>
                 </div>
               </div>
             </CardHeader>
@@ -406,8 +468,9 @@ export default function NFSeCertificado() {
           <div className="mt-6 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 text-sm">
             <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
             <p>
-              Esta tela só cadastra o certificado — a captura automática de NFS-e via Portal
-              Nacional ADN ainda não está implementada (próxima etapa).
+              Além do cadastro do certificado, a captura automática roda diariamente em horário
+              fixo e pode ser disparada manualmente pelo botão "Buscar Agora" acima. As telas de
+              consulta ficam em Notas Importadas → NFS-e.
             </p>
           </div>
         </>

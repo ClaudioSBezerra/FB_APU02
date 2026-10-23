@@ -6,6 +6,8 @@ import { ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
 import ConsultaNFesEntradas from './ConsultaNFesEntradas';
 import ConsultaNFeSaidas from './ConsultaNFeSaidas';
 import ConsultaCTesEntradas from './ConsultaCTesEntradas';
+import ConsultaNFSeEntradas from './ConsultaNFSeEntradas';
+import ConsultaNFSeSaidas from './ConsultaNFSeSaidas';
 
 type Direcao = 'entrada' | 'saida';
 
@@ -19,7 +21,7 @@ const TIPOS: TipoDocumento[] = [
   { key: 'nfe',     label: 'Nota Fiscal Eletrônica (NF-e)',     enabled: true },
   { key: 'cte',     label: 'Conhecimento de Frete (CT-e)',     enabled: true },
   { key: 'nfce',    label: 'Nota Fiscal Consumidor (NFC-e)',    enabled: false },
-  { key: 'nfse',    label: 'Nota Fiscal de Serviços (NFS-e)',   enabled: false },
+  { key: 'nfse',    label: 'Nota Fiscal de Serviços (NFS-e)',   enabled: true },
   { key: 'nce',     label: 'Nota de Crédito (NC-e)',            enabled: false },
   { key: 'nde',     label: 'Nota de Débito (ND-e)',             enabled: false },
   { key: 'bpe',     label: 'Bilhete de Passagem (BP-e)',        enabled: false },
@@ -35,11 +37,14 @@ const CONSULTA_POR_TIPO: Record<string, React.ComponentType | undefined> = {
   'nfe-entrada': ConsultaNFesEntradas,
   'nfe-saida': ConsultaNFeSaidas,
   'cte-entrada': ConsultaCTesEntradas,
+  'nfse-entrada': ConsultaNFSeEntradas,
+  'nfse-saida': ConsultaNFSeSaidas,
 };
 
 const DIRECOES_DISPONIVEIS: Record<string, Direcao[]> = {
   nfe: ['entrada', 'saida'],
   cte: ['entrada'],
+  nfse: ['entrada', 'saida'],
 };
 
 interface NotasImportadasModuloProps {

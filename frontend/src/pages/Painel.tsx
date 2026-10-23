@@ -1,7 +1,9 @@
+import { useEffect, useState } from 'react'
 import { Upload, FileText, ShieldAlert, TrendingUp, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface KpiCard {
   label: string
@@ -26,11 +28,10 @@ interface StatusRow {
   href: string
 }
 
-const statusItems: StatusRow[] = [
+const baseStatusItems: StatusRow[] = [
   { label: 'NF-e Saídas',    status: 'empty', href: '/apuracao/saida' },
   { label: 'NF-e Entradas',  status: 'empty', href: '/apuracao/entrada' },
   { label: 'CT-e Entradas',  status: 'empty', href: '/apuracao/cte-entrada' },
-  { label: 'NFS-e',          status: 'empty', href: '#' },
 ]
 
 const statusConfig = {
@@ -41,6 +42,48 @@ const statusConfig = {
 }
 
 export default function Painel() {
+  const { token, companyId } = useAuth()
+
+  // NFS-e ainda não tem contagem agregada num único endpoint — soma o `total` de
+  // entradas + saídas com page_size=1 (só queremos o total, não os itens). 'empty'
+  // enquanto a soma não chega; 'error' se qualquer uma das 2 chamadas falhar (nunca mostra
+  // contagem incerta como 'ok', e nunca confunde falha de rede com "zero documentos").
+  const [nfseStatus, setNfseStatus] = useState<StatusRow['status']>('empty')
+  const [nfseCount, setNfseCount] = useState<number | undefined>(undefined)
+
+  useEffect(() => {
+    if (!token || !companyId) return
+    let ignore = false
+    const authHeaders = { Authorization: `Bearer ${token}`, 'X-Company-ID': companyId }
+    Promise.all([
+      fetch('/api/nfse-entradas?page_size=1', { headers: authHeaders }).then(r => {
+        if (!r.ok) throw new Error('Erro ao consultar NFS-e entradas')
+        return r.json()
+      }),
+      fetch('/api/nfse-saidas?page_size=1', { headers: authHeaders }).then(r => {
+        if (!r.ok) throw new Error('Erro ao consultar NFS-e saídas')
+        return r.json()
+      }),
+    ])
+      .then(([entradas, saidas]) => {
+        if (ignore) return
+        const total = (entradas?.total ?? 0) + (saidas?.total ?? 0)
+        setNfseCount(total)
+        setNfseStatus(total > 0 ? 'ok' : 'empty')
+      })
+      .catch(() => {
+        if (ignore) return
+        setNfseStatus('error')
+        setNfseCount(undefined)
+      })
+    return () => { ignore = true }
+  }, [token, companyId])
+
+  const statusItems: StatusRow[] = [
+    ...baseStatusItems,
+    { label: 'NFS-e', status: nfseStatus, count: nfseCount, href: '/apuracao/nfse-entrada/notas' },
+  ]
+
   return (
     <div className="space-y-6">
       {/* KPIs */}
@@ -82,7 +125,9 @@ export default function Painel() {
                   <Icon className={cn('h-5 w-5 shrink-0', cfg.cls)} />
                   <div className="min-w-0">
                     <p className="text-xs font-medium truncate">{item.label}</p>
-                    <p className={cn('text-[10px]', cfg.cls)}>{cfg.label}</p>
+                    <p className={cn('text-[10px]', cfg.cls)}>
+                      {cfg.label}{item.count != null && item.count > 0 ? ` — ${item.count.toLocaleString('pt-BR')}` : ''}
+                    </p>
                   </div>
                 </CardContent>
               </Card>

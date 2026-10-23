@@ -648,3 +648,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-nfse-agendamento-persistencia.md`
   summary: A expressão SQL de "status calculado" do certificado (CASE WHEN status='ativo' AND validade < CURRENT_DATE THEN 'vencido' ELSE status END) está duplicada em 3 lugares (GetNFSeCertificadoHandler, ExecutarCicloNFSe, query do scheduler) — uma mudança de regra exige editar as 3 em lockstep.
   evidence: achado da revisão adversarial (Blind Hunter); o próprio objetivo da extração desta sub-spec era reduzir duplicação, mas essa duplicação específica (que já existia em 2 lugares antes) não foi centralizada — fica pra uma limpeza futura (view, CTE ou helper Go), não bloqueia esta sub-spec.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-frontend.md`
+  summary: Painel.tsx usa 2 chamadas pesadas (page_size=1, cada uma rodando COUNT+SUM+SELECT) só pra exibir um número no card resumo — a spec deixou em aberto "endpoint de resumo, à escolha da implementação" e a implementação escolheu a opção mais cara das disponíveis.
+  evidence: achado da revisão adversarial (Blind Hunter); sem impacto real hoje (zero empresas com dado real), mas um endpoint de contagem dedicado seria mais barato se o volume crescer.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-frontend.md`
+  summary: Estilo visual do aviso "valores tributários ainda zerados" é inconsistente em 3 lugares — as 2 telas novas de consulta usam Alert com override manual pra âmbar, a tela de certificado usa uma div âmbar artesanal diferente.
+  evidence: achado da revisão adversarial (Blind Hunter); puramente cosmético, não afeta funcionamento, mas vale padronizar numa limpeza futura de design system.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-frontend.md`
+  summary: ConsultaNFSeEntradas.tsx e ConsultaNFSeSaidas.tsx são quase duplicatas completas (448 linhas cada) sem extração de código compartilhado (formatadores, paginação, drawer de detalhe).
+  evidence: achado da revisão adversarial (Blind Hunter); mesmo padrão já usado no par NF-e equivalente (ConsultaNFesEntradas/ConsultaNFeSaidas) — não é um anti-padrão novo desta sub-spec, é consistente com a convenção já estabelecida no projeto.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-frontend.md`
+  summary: A sidebar tem duas seções com rótulo idêntico "NFS-e Entradas"/"NFS-e Saídas" — uma habilitada (Importações, recém-ativada), outra desabilitada (Malha Fina, feature distinta não construída) — nada na UI diferencia os dois motivos de desabilitação.
+  evidence: achado da revisão adversarial (Blind Hunter); comportamento correto por decisão da spec (não ativar Malha Fina), mas rótulos idênticos em dois lugares com comportamentos diferentes é fonte plausível de confusão de suporte.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-frontend.md`
+  summary: Nenhuma das 2 telas novas de consulta tem teste de frontend (filtros, ordenação, reset de página).
+  evidence: projeto não tem nenhuma infraestrutura de teste de frontend hoje (nenhuma das ~15+ páginas tocadas nesta sessão tem teste) — não é uma lacuna introduzida por esta sub-spec, é convenção (ausência de convenção) já existente no projeto inteiro.

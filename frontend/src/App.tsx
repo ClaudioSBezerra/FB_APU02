@@ -296,6 +296,8 @@ function AppLayout() {
       <Route path="/apuracao/saida/notas"       element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="saida" />} />
       <Route path="/apuracao/entrada/notas"     element={<NotasImportadasModulo tipoInicial="nfe" direcaoInicial="entrada" />} />
       <Route path="/apuracao/cte-entrada/notas" element={<NotasImportadasModulo tipoInicial="cte" direcaoInicial="entrada" />} />
+      <Route path="/apuracao/nfse-entrada/notas" element={<NotasImportadasModulo tipoInicial="nfse" direcaoInicial="entrada" />} />
+      <Route path="/apuracao/nfse-saida/notas"  element={<NotasImportadasModulo tipoInicial="nfse" direcaoInicial="saida" />} />
       <Route path="/apuracao/creditos-perdidos" element={<ApuracaoCredPerdidos />} />
       <Route path="/apuracao/limpar-dados"     element={<AdminRoute><LimparDadosApuracao /></AdminRoute>} />
       <Route path="/rfb/apuracao-ibs"           element={<PainelApuracaoIBS />} />

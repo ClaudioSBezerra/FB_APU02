@@ -612,6 +612,14 @@ func main() {
 	http.HandleFunc("/api/nfe-entradas/competencias", withAuth(handlers.NfeEntradasCompetenciasHandler, ""))
 	http.HandleFunc("/api/nfe-entradas", withAuth(handlers.NfeEntradasListHandler, ""))
 
+	// NFS-e Entradas / Saídas — listagem de consulta (tomadas/prestadas), mesmo padrão de
+	// paginação/filtro/competência de NF-e Entradas/Saídas acima. Valores tributários ainda
+	// ficam zerados até o parser de services/nfse_adn.go ser ajustado (ver spec-nfse-frontend.md).
+	http.HandleFunc("/api/nfse-entradas/competencias", withAuth(handlers.NFSeEntradasCompetenciasHandler, ""))
+	http.HandleFunc("/api/nfse-entradas", withAuth(handlers.NFSeEntradasListHandler, ""))
+	http.HandleFunc("/api/nfse-saidas/competencias", withAuth(handlers.NFSeSaidasCompetenciasHandler, ""))
+	http.HandleFunc("/api/nfse-saidas", withAuth(handlers.NFSeSaidasListHandler, ""))
+
 	// CT-e Entradas
 	http.HandleFunc("/api/cte-entradas/upload", withAuth(handlers.CteEntradasUploadHandler, ""))
 	http.HandleFunc("/api/cte-entradas/filiais", withAuth(handlers.CteEntradasFiliaisHandler, ""))
