@@ -478,6 +478,27 @@ func main() {
 	http.HandleFunc("/api/sap/credentials/test", withAuth(handlers.TestSAPConnectionHandler, "admin"))
 	http.HandleFunc("/api/sap/sync-runs", withAuth(handlers.SAPSyncRunsListHandler, "admin"))
 
+	// NFS-e Certificado (admin-only — poder de assinatura jurídica do certificado A1 é maior
+	// que um client_secret de API comum; mesmo padrão de role reforçada já usado para
+	// sap_credentials acima — decisão do usuário, Spec Change Log loopback 1).
+	http.HandleFunc("/api/nfse/certificado", func(w http.ResponseWriter, r *http.Request) {
+		database := getDB()
+		if database == nil {
+			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			handlers.AuthMiddleware(handlers.GetNFSeCertificadoHandler(database), "admin")(w, r)
+		case http.MethodPost:
+			handlers.AuthMiddleware(handlers.SaveNFSeCertificadoHandler(database), "admin")(w, r)
+		case http.MethodDelete:
+			handlers.AuthMiddleware(handlers.DeleteNFSeCertificadoHandler(database), "admin")(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// RFB Apuração
 	http.HandleFunc("/api/rfb/apuracao/solicitar", withAuth(handlers.SolicitarApuracaoHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/download", withAuth(handlers.DownloadManualHandler, ""))

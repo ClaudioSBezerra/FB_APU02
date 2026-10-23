@@ -23,6 +23,7 @@ import NotasImportadasModulo from './pages/NotasImportadasModulo'
 import ERPBridgeConfig from './pages/ERPBridgeConfig'
 import ERPBridgeLogs from './pages/ERPBridgeLogs'
 import ERPBridgeCredenciais from './pages/ERPBridgeCredenciais'
+import NFSeCertificado from './pages/NFSeCertificado'
 import ImportarXMLsEntrada from './pages/ImportarXMLsEntrada'
 import ImportarXMLsSaida from './pages/ImportarXMLsSaida'
 import ImportarXMLsCTe from './pages/ImportarXMLsCTe'
@@ -275,6 +276,7 @@ function AppLayout() {
       <Route path="/config/limpeza-total"   element={<AdminRoute><LimpezaTotalDados /></AdminRoute>} />
       <Route path="/config/erp-bridge"      element={<AdminRoute><ERPBridgeCredenciais /></AdminRoute>} />
       <Route path="/config/sap-credenciais" element={<AdminRoute><SAPCredentials /></AdminRoute>} />
+      <Route path="/nfse/certificado"       element={<AdminRoute><NFSeCertificado /></AdminRoute>} />
       <Route path="/config/sap-sincronizacoes" element={<AdminRoute><SAPSyncHistory /></AdminRoute>} />
       <Route path="/rfb/credenciais"        element={<RFBCredentials />} />
 

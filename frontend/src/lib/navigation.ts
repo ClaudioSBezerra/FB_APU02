@@ -87,6 +87,7 @@ export const modules: Record<string, ModuleConfig> = {
       { label: 'Credenciais CGIBS', path: '/cgibs/credenciais',  adminOnly: true },
       { label: 'Cred. ERP Bridge',  path: '/config/erp-bridge',  adminOnly: true },
       { label: 'Credenciais SAP',   path: '/config/sap-credenciais', adminOnly: true },
+      { label: 'Certificado NFS-e', path: '/nfse/certificado',   adminOnly: true },
       { label: 'Sincronizações SAP', path: '/config/sap-sincronizacoes', adminOnly: true },
       { label: 'Usuários',          path: '/config/usuarios',        adminOnly: true },
       { label: 'Atividade',         path: '/config/user-activity',   adminOnly: true },
@@ -114,7 +115,7 @@ export function getActiveModule(pathname: string): string {
 
   if (pathname.startsWith('/argus')) return 'argus'
 
-  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais' || pathname === '/cgibs/credenciais') return 'config'
+  if (pathname.startsWith('/config/') || pathname === '/rfb/credenciais' || pathname === '/cgibs/credenciais' || pathname === '/nfse/certificado') return 'config'
 
   return 'painel'
 }

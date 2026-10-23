@@ -599,3 +599,32 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-apuracao-cbs-dashboard-real.md`
   summary: `backend/handlers/rfb_creditos.go` (`ListarCreditosHandler`) e `rfb_debitos_lista.go` (`ListarDebitosHandler`) não têm NENHUM arquivo de teste — gap pré-existente, não introduzido por esta spec. O fix do `page_size` hardcoded nesta rodada (achado por revisão adversarial) ficou sem teste de regressão por isso.
   evidence: Confirmado via `ls handlers/ | grep rfb_creditos` / `rfb_debitos_lista` — nenhum `_test.go` em nenhum dos dois. Escrever a infraestrutura de teste do zero pra esses 2 handlers é maior que o escopo do patch pontual. Revisitar se algum bug real escapar por falta de cobertura nesses endpoints.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: GetEffectiveCompanyID concede acesso a qualquer membro do grupo/ambiente da empresa, não só usuários vinculados especificamente a ela.
+  evidence: comportamento pré-existente e compartilhado por todos os handlers do projeto que usam GetEffectiveCompanyID, não introduzido por esta spec; achado incidental da revisão adversarial (Blind Hunter) ao avaliar o blast radius do novo certificado NFS-e.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: status='revogado' em nfse_certificados é inalcançável via API — não existe endpoint de revogação, só a CHECK constraint permite o valor.
+  evidence: achado da revisão adversarial (Edge Case Hunter); não bloqueia o uso normal (ativo/vencido funcionam), fica pendente até haver um fluxo de revogação definido.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: POST e DELETE concorrentes para a mesma empresa em /api/nfse/certificado não são sincronizados (sem transação/lock), podendo causar uma leitura inconsistente logo após a escrita.
+  evidence: achado da revisão adversarial (Edge Case Hunter); baixa probabilidade real neste estágio (sem cliente mTLS ainda, uso esperado é um admin por vez), mas vale revisar se o volume de uso crescer.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: GetNFSeCertificadoHandler busca certificado_pfx/certificado_senha (blob cifrado inteiro) do banco só para calcular o booleano tem_certificado, em toda leitura.
+  evidence: achado da revisão adversarial (Blind Hunter); não é um vazamento (dado continua cifrado e nunca serializado), só ineficiência de tráfego com o banco.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: Nenhuma trilha de auditoria (quem fez upload/trocou/excluiu) para o certificado NFS-e — só created_at/updated_at genéricos.
+  evidence: achado da revisão adversarial (Blind Hunter); gap compartilhado com as credenciais RFB/SAP/CGIBS existentes (nenhuma tem auditoria por usuário), não é regressão desta spec especificamente, mas mais sensível aqui por ser uma identidade com poder de assinatura jurídica.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: DeleteNFSeCertificadoHandler faz hard delete sem histórico — exclusão não tem como ser auditada ou revertida.
+  evidence: achado da revisão adversarial (Blind Hunter); mesmo padrão das demais credenciais do projeto (nenhuma tem soft-delete), surgiu incidentalmente ao revisar o novo handler.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: certificado_pfx/certificado_senha são cifrados com a mesma ENCRYPTION_KEY global que protege todos os outros segredos do projeto (RFB/SAP/CGIBS), sem envelope encryption nem separação por tenant, apesar de ser um segredo mais sensível (identidade com poder de assinatura jurídica, não só uma chave de API).
+  evidence: achado da revisão adversarial (Blind Hunter); arquitetura de chave única é pré-existente e definida nas Boundaries da própria spec-mãe (reaproveitar crypto.EncryptField), não uma escolha desta sub-spec — mas o risco cresce com um segredo desta categoria.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: CI (`.github/workflows/deploy-production.yml`) roda `go test ./...` sem nenhum serviço Postgres disponível — todo teste que depende de banco (via `openTestDB`/`openNFSeTestDB`) faz `t.Skip()` silenciosamente quando a conexão falha, então o deploy automático em produção nunca executa de fato esses testes, apesar do check ficar verde.
+  evidence: confirmado por grep no workflow (sem `services:`/postgres) e no helper de teste (`t.Skip("tabela ... não existe — rode as migrations antes deste teste")`); gap pré-existente e compartilhado por TODOS os testes Postgres-backed do projeto (ex. `rfb_pagamentos_fornecedores_test.go` já tinha o mesmo padrão antes desta spec), não introduzido por ela — mas relevante o bastante pra registrar com destaque, já que mina a confiança em "os testes passam" pra qualquer spec futura que dependa de banco.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
+  summary: Sem transação/lock em SaveNFSeCertificadoHandler/DeleteNFSeCertificadoHandler — concorrência real pode causar lost update (um save concorrente reverte outro), um DELETE "ressuscitado" por um save concorrente que leu o registro antes da exclusão, e um código de status 200/201 incorreto sob duas primeiras-criações simultâneas da mesma empresa (ambas leem hasExisting=false antes do UPSERT resolver o conflito).
+  evidence: achado da 2ª rodada de revisão adversarial (Edge Case Hunter), mais preciso que o achado equivalente da 1ª rodada; baixa probabilidade real neste estágio (uso esperado é um admin por vez, sem cliente mTLS ainda consumindo o certificado) — revisitar com `SELECT ... FOR UPDATE` ou lock consultivo se o volume de uso crescer ou se operações concorrentes se tornarem comuns.
