@@ -10,3 +10,5 @@ require (
 )
 
 require github.com/joho/godotenv v1.5.1
+
+require software.sslmate.com/src/go-pkcs12 v0.7.4

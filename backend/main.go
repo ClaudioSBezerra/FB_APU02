@@ -499,6 +499,10 @@ func main() {
 		}
 	})
 
+	// NFS-e Busca manual ("Buscar Agora" — um ciclo síncrono contra o Portal Nacional ADN via
+	// mTLS). Admin-only, mesmo padrão de role de /api/nfse/certificado acima.
+	http.HandleFunc("/api/nfse/buscar", withAuth(handlers.BuscarNFSeHandler, "admin"))
+
 	// RFB Apuração
 	http.HandleFunc("/api/rfb/apuracao/solicitar", withAuth(handlers.SolicitarApuracaoHandler, ""))
 	http.HandleFunc("/api/rfb/apuracao/download", withAuth(handlers.DownloadManualHandler, ""))

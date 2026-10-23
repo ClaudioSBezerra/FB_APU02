@@ -628,3 +628,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-nfse-certificado-schema.md`
   summary: Sem transação/lock em SaveNFSeCertificadoHandler/DeleteNFSeCertificadoHandler — concorrência real pode causar lost update (um save concorrente reverte outro), um DELETE "ressuscitado" por um save concorrente que leu o registro antes da exclusão, e um código de status 200/201 incorreto sob duas primeiras-criações simultâneas da mesma empresa (ambas leem hasExisting=false antes do UPSERT resolver o conflito).
   evidence: achado da 2ª rodada de revisão adversarial (Edge Case Hunter), mais preciso que o achado equivalente da 1ª rodada; baixa probabilidade real neste estágio (uso esperado é um admin por vez, sem cliente mTLS ainda consumindo o certificado) — revisitar com `SELECT ... FOR UPDATE` ou lock consultivo se o volume de uso crescer ou se operações concorrentes se tornarem comuns.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cliente-adn.md`
+  summary: Nenhuma trava (mutex/lock consultivo) impede dois cliques concorrentes em "Buscar Agora" pela mesma empresa de rodarem dois ciclos de paginação completos simultaneamente contra o Portal Nacional ADN.
+  evidence: mesma categoria do achado já deferido na sub-spec de certificado (falta de transação/lock em save/delete); aqui o risco é duplicar carga contra um sistema de terceiros (governo), não corromper dado local (ON CONFLICT já evita duplicar linha) — baixa prioridade sem scheduler automático ainda rodando isso.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cliente-adn.md`
+  summary: Sem trilha de auditoria persistida (só log.Printf) para quem disparou uma busca via certificado com poder de assinatura jurídica contra um sistema federal.
+  evidence: mesmo gap já deferido na sub-spec de certificado (upload/troca/exclusão também só tem log.Printf); aqui se repete pra ação de busca — mesmo tratamento, mesma decisão de adiar até um desenho de auditoria mais amplo.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cliente-adn.md`
+  summary: O papel "admin" verificado por AuthMiddleware é uma string plana sem escopo por empresa — não é um "admin desta empresa", é um claim JWT global. GetEffectiveCompanyID ainda valida vínculo de posse/membro antes de honrar X-Company-ID, então não é um bug de vazamento entre tenants introduzido por esta spec, mas o modelo de papel é menos preciso do que o comentário em main.go sugere.
+  evidence: achado da revisão adversarial (Blind Hunter), confirmado como padrão pré-existente em `AuthMiddleware` (auth.go) usado por toda a aplicação, não algo específico desta sub-spec — vale revisitar se o modelo de permissões for revisado de forma mais ampla no futuro.
