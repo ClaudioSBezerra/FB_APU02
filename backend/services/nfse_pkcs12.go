@@ -42,6 +42,14 @@ var ErrNFSeOpensslIndisponivel = errors.New("openssl não disponível no ambient
 // no handler: HTTP 500 com log explícito pro operador, não 400.
 var ErrNFSeAmbienteTemporarioIndisponivel = errors.New("ambiente temporário do servidor indisponível para normalizar o certificado")
 
+// nfseOpensslEnv — ambiente MÍNIMO de todo subprocesso openssl (aqui e em nfse_cadeia.go): só
+// PATH. Nada de herdar OPENSSL_CONF, OPENSSL_ENGINES, OPENSSL_MODULES, LD_PRELOAD etc. do
+// processo do servidor — o openssl processa entrada controlada pelo usuário (o .pfx e a
+// resposta AIA), então config/engines/bibliotecas externas não podem influenciar.
+func nfseOpensslEnv() []string {
+	return []string{"PATH=" + os.Getenv("PATH")}
+}
+
 // NormalizarPKCS12ParaDER tenta decodificar pfxBytes diretamente com pkcs12.Decode (caminho
 // rápido, sem subprocesso, cobre certificados já DER-compatíveis). Se isso falhar — o caso
 // real confirmado em produção são certificados A1 codificados em BER, que o
@@ -80,7 +88,7 @@ func NormalizarPKCS12ParaDER(pfxBytes []byte, senha string) (normalizado []byte,
 	}
 	defer func() {
 		if rmErr := os.RemoveAll(tmpDir); rmErr != nil {
-			log.Printf("[NFSePkcs12] falha ao remover diretório temporário %s: %v", tmpDir, rmErr)
+			log.Printf("[NFSePkcs12] falha ao remover diretório temporário %q: %v", tmpDir, rmErr)
 		}
 	}()
 
@@ -111,13 +119,15 @@ func NormalizarPKCS12ParaDER(pfxBytes []byte, senha string) (normalizado []byte,
 		"-legacy",
 		"-passin", "file:"+passPath,
 	)
+	extractCmd.Env = nfseOpensslEnv()
 	if out, runErr := extractCmd.CombinedOutput(); runErr != nil {
 		if errors.Is(runErr, exec.ErrNotFound) {
 			return nil, false, ErrNFSeOpensslIndisponivel
 		}
 		// stderr/stdout do openssl pode conter detalhes técnicos (caminhos, parâmetros de
-		// algoritmo) — nunca repassado ao usuário final, só ao log para o operador investigar.
-		return nil, false, fmt.Errorf("openssl pkcs12 (extração) falhou: %w: %s", runErr, string(out))
+		// algoritmo) — nunca repassado ao usuário final, só ao log para o operador investigar
+		// (%q: sem quebra de linha crua no log).
+		return nil, false, fmt.Errorf("openssl pkcs12 (extração) falhou: %w: %q", runErr, TruncateRunes(string(out), 500))
 	}
 
 	// Passo 2: reexporta o PEM intermediário como um novo .pfx — sempre DER-compatível,
@@ -134,11 +144,12 @@ func NormalizarPKCS12ParaDER(pfxBytes []byte, senha string) (normalizado []byte,
 		"-out", fixedPath,
 		"-passout", "file:"+passPath,
 	)
+	exportCmd.Env = nfseOpensslEnv()
 	if out, runErr := exportCmd.CombinedOutput(); runErr != nil {
 		if errors.Is(runErr, exec.ErrNotFound) {
 			return nil, false, ErrNFSeOpensslIndisponivel
 		}
-		return nil, false, fmt.Errorf("openssl pkcs12 (exportação) falhou: %w: %s", runErr, string(out))
+		return nil, false, fmt.Errorf("openssl pkcs12 (exportação) falhou: %w: %q", runErr, TruncateRunes(string(out), 500))
 	}
 
 	fixedBytes, readErr := os.ReadFile(fixedPath)

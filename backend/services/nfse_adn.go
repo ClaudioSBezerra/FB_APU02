@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -155,8 +156,16 @@ func BuildNFSeMTLSClient(cert NFSeADNCertificado) (*http.Client, *x509.Certifica
 		Leaf: x509Cert,
 	}
 
+	// GetClientCertificate (não Certificates): com Certificates, o Go só envia o certificado
+	// se o emissor dele casar com uma das CAs listadas pelo servidor no CertificateRequest — o
+	// ADN lista só as RAÍZES ICP-Brasil, que nunca são o emissor direto de um certificado final
+	// (sempre há AC intermediária), então o Go não enviava certificado nenhum. Aqui o
+	// certificado (com a cadeia completada no upload, ver nfse_cadeia.go) é SEMPRE enviado e o
+	// servidor decide.
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return &tlsCert, nil
+		},
 	}
 	if caFile := strings.TrimSpace(os.Getenv(nfseADNExtraCAFileEnv)); caFile != "" {
 		caPEM, rerr := os.ReadFile(caFile)
@@ -265,6 +274,22 @@ func parseNFSeADNPayload(body []byte) (NFSeADNResponse, error) {
 	return resp, nil
 }
 
+// explicarErroHandshakeADN devolve uma explicação para o operador (SÓ para o log) quando o erro
+// de transporte tem uma causa provável não óbvia, ou "" caso contrário. "bad record MAC" no TLS
+// 1.3 é como o crypto/tls do Go reporta o alerta do servidor que chega logo depois de o cliente
+// enviar (ou não enviar) o certificado — com certificado descartável, em TLS 1.2 o mesmo
+// servidor responde "handshake failure". É a causa PROVÁVEL, não certa: corrupção/interferência
+// no caminho de rede (proxy, inspeção TLS) produz o mesmo erro.
+func explicarErroHandshakeADN(err error) string {
+	if err == nil || !strings.Contains(err.Error(), "bad record MAC") {
+		return ""
+	}
+	return "no TLS 1.3, 'bad record MAC' tem como causa provável a rejeição do certificado do cliente pelo servidor " +
+		"(cadeia ICP-Brasil incompleta, CNPJ não habilitado no ADN ou certificado não aceito); também pode ser " +
+		"interferência de rede (proxy/inspeção TLS) — reenvie o certificado (o upload completa a cadeia via AIA), " +
+		"confira a habilitação do CNPJ e, se persistir, o caminho de rede até o ADN"
+}
+
 // BuscarDFeADN chama GET {baseURL}/contribuintes/DFe/{nsu} usando o client mTLS fornecido.
 // Endpoint confirmado por fonte oficial; autenticação além do mTLS, parâmetros de paginação e
 // formato de resposta exatos NÃO são confirmados — ver comentários de NFSeADNResponse e
@@ -286,6 +311,11 @@ func BuscarDFeADN(ctx context.Context, httpClient *http.Client, baseURL, nsu str
 		// Sem resposta HTTP nenhuma: handshake mTLS falhou (certificado rejeitado pelo
 		// servidor) ou falha de rede. Tratado como falha de autenticação — é o cenário mais
 		// provável contra um servidor que exige certificado de cliente.
+		if explicacao := explicarErroHandshakeADN(err); explicacao != "" {
+			// Explicação (causa provável) só no log do operador — o erro devolvido e as
+			// mensagens HTTP fixas do handler não mudam.
+			log.Printf("[NFSeADN] chamada a %q falhou: %q — %s", endpoint, err.Error(), explicacao)
+		}
 		return NFSeADNResponse{}, fmt.Errorf("%w: %v", ErrNFSeADNAutenticacaoFalhou, err)
 	}
 	defer resp.Body.Close()

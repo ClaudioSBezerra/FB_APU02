@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -15,6 +17,7 @@ import (
 	"fb_apu02/services"
 
 	"github.com/golang-jwt/jwt/v5"
+	"software.sslmate.com/src/go-pkcs12"
 )
 
 // NFSeCertificado representa os METADADOS do certificado digital A1 de uma empresa.
@@ -258,18 +261,48 @@ func SaveNFSeCertificadoHandler(db *sql.DB) http.HandlerFunc {
 					// Problema de ambiente/deploy (imagem sem openssl, ou disco/permissão do
 					// diretório temporário), nunca do usuário — nunca confundir com senha
 					// incorreta. 500 + log explícito pro operador.
-					log.Printf("[NFSeCertificado] ambiente do servidor indisponível ao normalizar certificado, companyID=%s: %v", companyID, normErr)
+					log.Printf("[NFSeCertificado] ambiente do servidor indisponível ao normalizar certificado, companyID=%s: %q", companyID, normErr.Error())
 					jsonErr(w, http.StatusInternalServerError, "Não foi possível processar o certificado — ambiente do servidor incompleto, contate o suporte")
 					return
 				}
-				log.Printf("[NFSeCertificado] falha ao normalizar certificado PKCS#12, companyID=%s: %v", companyID, normErr)
+				log.Printf("[NFSeCertificado] falha ao normalizar certificado PKCS#12, companyID=%s: %q", companyID, normErr.Error())
 				jsonErr(w, http.StatusBadRequest, "Não foi possível processar o certificado — verifique a senha ou o arquivo")
 				return
 			}
 			if foiNormalizado {
 				log.Printf("[NFSeCertificado] Certificado normalizado BER->DER no upload, companyID=%s", companyID)
 			}
-			req.CertificadoPfx = base64.StdEncoding.EncodeToString(normalizado)
+
+			// Cadeia ICP-Brasil (ver spec-nfse-cadeia-icp-brasil.md): o ADN só aceita o
+			// handshake se conseguir montar o caminho do certificado até uma raiz ICP-Brasil, e
+			// muitos .pfx reais não trazem as ACs intermediárias. Completa via AIA aqui, no
+			// upload, valida contra as raízes embutidas e persiste o .pfx re-encodado já com a
+			// cadeia (sem a raiz). Certificado cuja cadeia não fecha nunca é salvo.
+			chave, certFinal, intermediariasOriginais, decErr := pkcs12.DecodeChain(normalizado, req.CertificadoSenha)
+			if decErr != nil {
+				// NormalizarPKCS12ParaDER já revalidou com DecodeChain — inesperado.
+				log.Printf("[NFSeCertificado] falha ao decodificar certificado já normalizado, companyID=%s: %v", companyID, decErr)
+				jsonErr(w, http.StatusBadRequest, "Não foi possível processar o certificado — verifique a senha ou o arquivo")
+				return
+			}
+			intermediarias, cadeiaErr := completarCadeiaNFSe(r.Context(), certFinal, intermediariasOriginais)
+			if cadeiaErr != nil {
+				status, msg := mensagemErroCadeiaNFSe(cadeiaErr)
+				// %q: o erro carrega URLs AIA/hosts/stderr do openssl vindos do certificado
+				// enviado — nunca quebra de linha crua no log (log injection).
+				log.Printf("[NFSeCertificado] cadeia ICP-Brasil não validada, companyID=%s (HTTP %d): %q", companyID, status, cadeiaErr.Error())
+				jsonErr(w, status, msg)
+				return
+			}
+			if baixadas := contarCertificadosNovos(intermediarias, intermediariasOriginais); baixadas > 0 {
+				log.Printf("[NFSeCertificado] Cadeia ICP-Brasil completada via AIA no upload, companyID=%s: %d certificado(s) baixado(s), cadeia final com %d intermediária(s)", companyID, baixadas, len(intermediarias))
+			}
+			comCadeia, encErr := pkcs12.Modern.Encode(chave, certFinal, intermediarias, req.CertificadoSenha)
+			if encErr != nil {
+				sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao processar certificado", encErr, "[NFSeCertificado]")
+				return
+			}
+			req.CertificadoPfx = base64.StdEncoding.EncodeToString(comCadeia)
 		}
 
 		pfxToSave := existingPfxEnc
@@ -359,6 +392,56 @@ func SaveNFSeCertificadoHandler(db *sql.DB) http.HandlerFunc {
 			"message":     "Certificado NFS-e salvo com sucesso",
 		})
 	}
+}
+
+// completarCadeiaNFSe é o ponto de chamada de services.CompletarCadeiaICPBrasil no upload.
+// Variável NÃO exportada só para os testes deste pacote poderem validar contra uma raiz de teste
+// (ninguém tem a chave de uma raiz ICP-Brasil real para gerar certificados de teste) — em
+// produção é sempre a função real, sem nenhum caminho de configuração que a troque.
+var completarCadeiaNFSe = services.CompletarCadeiaICPBrasil
+
+// mensagemErroCadeiaNFSe mapeia os erros de services.CompletarCadeiaICPBrasil para HTTP. As
+// mensagens nunca trazem detalhe técnico (URL, IP, saída do openssl) — isso vai só para o log.
+// 502 SÓ para falha transitória (rede/timeout/HTTP 5xx/prazo esgotado); conteúdo/formato
+// inválido da AIA é permanente -> 400 com mensagem acionável.
+func mensagemErroCadeiaNFSe(err error) (int, string) {
+	switch {
+	case errors.Is(err, services.ErrNFSeCadeiaAmbienteIndisponivel):
+		return http.StatusInternalServerError, "Não foi possível validar a cadeia do certificado — ambiente do servidor incompleto, contate o suporte"
+	case errors.Is(err, services.ErrNFSeCadeiaDownloadFalhou):
+		return http.StatusBadGateway, "Não foi possível baixar a cadeia de certificação da Autoridade Certificadora — tente novamente em alguns minutos"
+	case errors.Is(err, services.ErrNFSeCadeiaVencida):
+		return http.StatusBadRequest, "O certificado ou uma Autoridade Certificadora da cadeia está vencido — envie um certificado válido"
+	case errors.Is(err, services.ErrNFSeCadeiaAIAEsquemaNaoSuportado):
+		return http.StatusBadRequest, "Não foi possível obter as ACs intermediárias: o endereço indicado no certificado usa um esquema não suportado (só http/https) — verifique com a sua certificadora"
+	case errors.Is(err, services.ErrNFSeCadeiaAIAInvalida):
+		return http.StatusBadRequest, "Não foi possível obter as ACs intermediárias pelo endereço indicado no certificado — verifique com a sua certificadora"
+	case errors.Is(err, services.ErrNFSeCadeiaAIABloqueada):
+		return http.StatusBadRequest, "O certificado não pôde ter a cadeia de certificação validada — o endereço da Autoridade Certificadora informado no certificado não é permitido"
+	case errors.Is(err, services.ErrNFSeCadeiaNaoICPBrasil):
+		return http.StatusBadRequest, "O certificado não é ICP-Brasil (a cadeia não termina numa raiz ICP-Brasil) — envie um certificado A1 e-CNPJ emitido por AC credenciada"
+	default:
+		return http.StatusBadRequest, "O certificado não pôde ter a cadeia de certificação validada até uma raiz ICP-Brasil"
+	}
+}
+
+// contarCertificadosNovos conta quantos certificados de final não estavam em original
+// (= baixados via AIA).
+func contarCertificadosNovos(final, original []*x509.Certificate) int {
+	n := 0
+	for _, f := range final {
+		achou := false
+		for _, o := range original {
+			if bytes.Equal(f.Raw, o.Raw) {
+				achou = true
+				break
+			}
+		}
+		if !achou {
+			n++
+		}
+	}
+	return n
 }
 
 // DeleteNFSeCertificadoHandler exclui (hard delete) o certificado NFS-e da empresa

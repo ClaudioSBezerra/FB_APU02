@@ -304,3 +304,14 @@ func TestNormalizarPKCS12ParaDER_OpensslCorrigeMasGoNaoLe_Erro400(t *testing.T) 
 		t.Errorf("esperava mensagem de erro mencionando a revalidação via pkcs12.DecodeChain, veio: %v", err)
 	}
 }
+
+// Patch 5 (revisão adversarial da cadeia ICP-Brasil): os subprocessos openssl da normalização
+// rodam com ambiente mínimo (só PATH) — nada de OPENSSL_CONF/OPENSSL_ENGINES/variáveis do
+// processo do servidor (ver opensslQueGravaAmbiente em nfse_cadeia_test.go).
+func TestNormalizarPKCS12ParaDER_OpensslAmbienteMinimo(t *testing.T) {
+	arquivoEnv := opensslQueGravaAmbiente(t)
+	if _, _, err := NormalizarPKCS12ParaDER([]byte("nao e pkcs12, cai no fallback via openssl"), "senha"); err == nil {
+		t.Fatal("openssl falso falha — esperava erro")
+	}
+	exigirAmbienteMinimo(t, arquivoEnv)
+}

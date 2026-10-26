@@ -241,8 +241,12 @@ func TestNFSeBuildNFSeMTLSClient_Valido_DecodificaCertEChave(t *testing.T) {
 		t.Errorf("CN inesperado: %q", x509Cert.Subject.CommonName)
 	}
 	transport, ok := httpClient.Transport.(*http.Transport)
-	if !ok || len(transport.TLSClientConfig.Certificates) != 1 {
-		t.Fatal("esperava exatamente 1 certificado configurado no Transport TLS")
+	if !ok || transport.TLSClientConfig.GetClientCertificate == nil {
+		t.Fatal("esperava GetClientCertificate configurado no Transport TLS")
+	}
+	enviado, gerr := transport.TLSClientConfig.GetClientCertificate(&tls.CertificateRequestInfo{})
+	if gerr != nil || enviado == nil || len(enviado.Certificate) != 1 {
+		t.Fatalf("esperava GetClientCertificate devolvendo o certificado (1 na cadeia), veio %v / %v", enviado, gerr)
 	}
 }
 
@@ -281,10 +285,14 @@ func TestNFSeBuildNFSeMTLSClient_ComCadeiaIntermediaria_AceitaEMontaCadeiaComple
 	}
 
 	transport, ok := httpClient.Transport.(*http.Transport)
-	if !ok || len(transport.TLSClientConfig.Certificates) != 1 {
-		t.Fatal("esperava exatamente 1 tls.Certificate configurado no Transport TLS")
+	if !ok || transport.TLSClientConfig.GetClientCertificate == nil {
+		t.Fatal("esperava GetClientCertificate configurado no Transport TLS")
 	}
-	tlsCert := transport.TLSClientConfig.Certificates[0]
+	enviado, gerr := transport.TLSClientConfig.GetClientCertificate(&tls.CertificateRequestInfo{})
+	if gerr != nil || enviado == nil {
+		t.Fatalf("GetClientCertificate deveria devolver o certificado: %v", gerr)
+	}
+	tlsCert := *enviado
 	if len(tlsCert.Certificate) != 2 {
 		t.Fatalf("esperava cadeia completa com 2 certificados (leaf + CA intermediária) em tlsCert.Certificate, veio %d", len(tlsCert.Certificate))
 	}

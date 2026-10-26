@@ -15,10 +15,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"fb_apu02/crypto"
+	"fb_apu02/services"
 
 	"github.com/golang-jwt/jwt/v5"
 	"software.sslmate.com/src/go-pkcs12"
@@ -61,6 +63,7 @@ func genValidPfxBase64(t *testing.T, senha string) string {
 	if err != nil {
 		t.Fatalf("falha ao gerar chave de teste: %v", err)
 	}
+	pki := pkiTesteNFSe(t)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: "certificado-teste-nfse"},
@@ -68,7 +71,9 @@ func genValidPfxBase64(t *testing.T, senha string) string {
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	// Assinado pela AC intermediária de teste, que vai junto no .pfx (cadeia completa, sem
+	// download) — desde spec-nfse-cadeia-icp-brasil.md o upload exige cadeia válida até a raiz.
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, pki.inter, &key.PublicKey, pki.interKey)
 	if err != nil {
 		t.Fatalf("falha ao criar certificado de teste: %v", err)
 	}
@@ -76,11 +81,137 @@ func genValidPfxBase64(t *testing.T, senha string) string {
 	if err != nil {
 		t.Fatalf("falha ao parsear certificado de teste: %v", err)
 	}
-	pfxBytes, err := pkcs12.Modern.Encode(key, cert, nil, senha)
+	pfxBytes, err := pkcs12.Modern.Encode(key, cert, []*x509.Certificate{pki.inter}, senha)
 	if err != nil {
 		t.Fatalf("falha ao empacotar .pfx de teste: %v", err)
 	}
 	return base64.StdEncoding.EncodeToString(pfxBytes)
+}
+
+// ---------------------------------------------------------------------------
+// PKI de teste para a validação de cadeia ICP-Brasil (spec-nfse-cadeia-icp-brasil.md)
+// ---------------------------------------------------------------------------
+
+// pkiTeste: raiz falsa -> AC intermediária falsa. Ninguém tem a chave de uma raiz ICP-Brasil
+// real, então os testes deste pacote trocam completarCadeiaNFSe (ver usarCadeiaTesteNFSe) por
+// uma validação real (x509.Verify) contra esta raiz. A lógica de AIA/anti-SSRF/raízes
+// embutidas é coberta em services/nfse_cadeia_test.go.
+type pkiTeste struct {
+	raiz, inter       *x509.Certificate
+	raizKey, interKey *rsa.PrivateKey
+}
+
+var (
+	pkiTesteOnce sync.Once
+	pkiTesteVal  pkiTeste
+	pkiTesteErr  error
+)
+
+func gerarCATeste(cn string, emissor *x509.Certificate, emissorKey *rsa.PrivateKey) (*x509.Certificate, *rsa.PrivateKey, error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: cn},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(48 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	parent, signer := tmpl, key
+	if emissor != nil {
+		parent, signer = emissor, emissorKey
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, &key.PublicKey, signer)
+	if err != nil {
+		return nil, nil, err
+	}
+	c, err := x509.ParseCertificate(der)
+	return c, key, err
+}
+
+func pkiTesteNFSe(t *testing.T) pkiTeste {
+	t.Helper()
+	pkiTesteOnce.Do(func() {
+		var p pkiTeste
+		if p.raiz, p.raizKey, pkiTesteErr = gerarCATeste("Raiz Falsa de Teste", nil, nil); pkiTesteErr != nil {
+			return
+		}
+		if p.inter, p.interKey, pkiTesteErr = gerarCATeste("AC Intermediaria Falsa de Teste", p.raiz, p.raizKey); pkiTesteErr != nil {
+			return
+		}
+		pkiTesteVal = p
+	})
+	if pkiTesteErr != nil {
+		t.Fatalf("falha ao gerar PKI de teste: %v", pkiTesteErr)
+	}
+	return pkiTesteVal
+}
+
+// assinaturaCadeiaNFSe — assinatura de completarCadeiaNFSe (= services.CompletarCadeiaICPBrasil).
+type assinaturaCadeiaNFSe = func(context.Context, *x509.Certificate, []*x509.Certificate) ([]*x509.Certificate, error)
+
+// stubCadeiaNFSe valida de verdade (x509.Verify, KeyUsages clientAuth como a produção) contra a
+// raiz de teste, com as intermediárias do .pfx; se não fechar, "baixa" das publicadas SÓ o que
+// for emissor real de algum certificado já conhecido (Subject == Issuer e assinatura conferida,
+// como baixarEmissorAIA na produção — nunca qualquer coisa publicada), contando em downloads, e
+// tenta de novo (até 5 rodadas). Devolve as intermediárias da cadeia sem o final e sem a raiz,
+// como a função real.
+func stubCadeiaNFSe(raiz *x509.Certificate, downloads *int, publicadas ...*x509.Certificate) assinaturaCadeiaNFSe {
+	return func(_ context.Context, cert *x509.Certificate, inter []*x509.Certificate) ([]*x509.Certificate, error) {
+		roots := x509.NewCertPool()
+		roots.AddCert(raiz)
+		pool := x509.NewCertPool()
+		conhecidas := append([]*x509.Certificate(nil), inter...)
+		for _, c := range conhecidas {
+			pool.AddCert(c)
+		}
+		opts := x509.VerifyOptions{Roots: roots, Intermediates: pool, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}
+		chains, err := cert.Verify(opts)
+		for rodada := 0; err != nil && rodada < 5; rodada++ {
+			novos := 0
+			for _, c := range append([]*x509.Certificate{cert}, conhecidas...) {
+				for _, pub := range publicadas {
+					jaConhecida := false
+					for _, k := range conhecidas {
+						if bytes.Equal(k.Raw, pub.Raw) {
+							jaConhecida = true
+							break
+						}
+					}
+					if jaConhecida || !bytes.Equal(pub.RawSubject, c.RawIssuer) || c.CheckSignatureFrom(pub) != nil {
+						continue
+					}
+					conhecidas = append(conhecidas, pub)
+					pool.AddCert(pub)
+					novos++
+				}
+			}
+			if novos == 0 {
+				break
+			}
+			if downloads != nil {
+				*downloads += novos
+			}
+			chains, err = cert.Verify(opts)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", services.ErrNFSeCadeiaNaoICPBrasil, err)
+		}
+		c := chains[0]
+		return append([]*x509.Certificate(nil), c[1:len(c)-1]...), nil
+	}
+}
+
+// usarCadeiaTesteNFSe troca completarCadeiaNFSe por f (restaurado no fim do teste).
+func usarCadeiaTesteNFSe(t *testing.T, f assinaturaCadeiaNFSe) {
+	t.Helper()
+	prev := completarCadeiaNFSe
+	completarCadeiaNFSe = f
+	t.Cleanup(func() { completarCadeiaNFSe = prev })
 }
 
 // openNFSeTestDB abre conexão com o Postgres de teste (reaproveita openTestDB,
@@ -102,6 +233,8 @@ func openNFSeTestDB(t *testing.T) *sql.DB {
 // setupCGIBSHabilitarTest (cgibs_habilitar_test.go).
 func setupNFSeCertTest(t *testing.T, db *sql.DB) (companyID string, authed func(*http.Request) *http.Request, cleanup func()) {
 	t.Helper()
+	// Upload valida a cadeia até a raiz — por padrão, contra a raiz de teste (ver pkiTeste).
+	usarCadeiaTesteNFSe(t, stubCadeiaNFSe(pkiTesteNFSe(t).raiz, nil))
 	companyID, cleanupCompany := setupTestCompany(t, db)
 
 	var userID string
@@ -456,6 +589,17 @@ func TestSaveNFSeCertificadoHandler_ReUploadSemPfxSenha_PreservaValoresAnteriore
 	if rec1.Code != http.StatusCreated {
 		t.Fatalf("1º save: esperava 201, obteve %d: %s", rec1.Code, rec1.Body.String())
 	}
+	// Desde spec-nfse-cadeia-icp-brasil.md o upload persiste o .pfx RE-ENCODADO (com a cadeia
+	// validada), não os bytes enviados — o que precisa sobreviver ao save parcial é o valor
+	// persistido pelo 1º save.
+	var pfxEnc1 string
+	if err := db.QueryRow(`SELECT certificado_pfx FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&pfxEnc1); err != nil {
+		t.Fatalf("falha ao ler certificado_pfx do 1º save: %v", err)
+	}
+	pfxPersistido1 := crypto.DecryptFieldWithFallback(pfxEnc1)
+	if pfxPersistido1 == "" {
+		t.Fatal("1º save deveria ter persistido certificado_pfx")
+	}
 
 	rec2 := postSaveNFSeCert(t, db, authed, map[string]interface{}{
 		"certificado_pfx":   "",
@@ -472,7 +616,7 @@ func TestSaveNFSeCertificadoHandler_ReUploadSemPfxSenha_PreservaValoresAnteriore
 		Scan(&pfxEnc, &senhaEnc); err != nil {
 		t.Fatalf("falha ao ler campos persistidos: %v", err)
 	}
-	if crypto.DecryptFieldWithFallback(pfxEnc) != pfxOriginal {
+	if crypto.DecryptFieldWithFallback(pfxEnc) != pfxPersistido1 {
 		t.Error("certificado_pfx foi sobrescrito por um save com o campo vazio — deveria preservar")
 	}
 	if crypto.DecryptFieldWithFallback(senhaEnc) != "senha-que-deve-sobreviver" {
@@ -810,7 +954,10 @@ func genBERPfxBase64(t *testing.T, senha string) string {
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 	}
-	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	// Assinado pela RAIZ de teste diretamente (cadeia fecha sem intermediária) — mantém o .pfx
+	// com exatamente 2 safe bags, pré-condição do pkcs12.Decode abaixo.
+	pki := pkiTesteNFSe(t)
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, pki.raiz, &key.PublicKey, pki.raizKey)
 	if err != nil {
 		t.Fatalf("falha ao criar certificado de teste: %v", err)
 	}
@@ -942,5 +1089,325 @@ func TestSaveNFSeCertificadoHandler_OpensslAusente_Retorna500(t *testing.T) {
 	})
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("openssl ausente: esperava 500 (problema de ambiente, não do usuário), obteve %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cadeia ICP-Brasil no upload (spec-nfse-cadeia-icp-brasil.md)
+// ---------------------------------------------------------------------------
+
+// genPfxComExtras gera um certificado final assinado pela AC intermediária de teste e devolve
+// o .pfx com o final + extras (extras=nil reproduz o caso real do .pfx de 4 KB sem ACs).
+func genPfxComExtras(t *testing.T, senha string, extras []*x509.Certificate) (pfxB64 string, final *x509.Certificate) {
+	t.Helper()
+	pki := pkiTesteNFSe(t)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: "EMPRESA TESTE LTDA:12345678000199"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, pki.inter, &key.PublicKey, pki.interKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, err = x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pfx, err := pkcs12.Modern.Encode(key, final, extras, senha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(pfx), final
+}
+
+func lerPfxPersistido(t *testing.T, db *sql.DB, companyID, senha string) (*x509.Certificate, []*x509.Certificate) {
+	t.Helper()
+	var pfxEnc string
+	if err := db.QueryRow(`SELECT certificado_pfx FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&pfxEnc); err != nil {
+		t.Fatalf("falha ao ler certificado_pfx persistido: %v", err)
+	}
+	pfx, err := base64.StdEncoding.DecodeString(crypto.DecryptFieldWithFallback(pfxEnc))
+	if err != nil {
+		t.Fatalf("certificado_pfx persistido não é base64: %v", err)
+	}
+	_, leaf, cas, err := pkcs12.DecodeChain(pfx, senha)
+	if err != nil {
+		t.Fatalf("certificado_pfx persistido não decodifica com DecodeChain: %v", err)
+	}
+	return leaf, cas
+}
+
+// AC 1: certificado final sem intermediárias + AIA válida -> o .pfx persistido decodifica com
+// DecodeChain trazendo a cadeia completa até antes da raiz.
+func TestSaveNFSeCertificadoHandler_SoCertificadoFinal_PersistePfxComCadeiaCompleta(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+	pki := pkiTesteNFSe(t)
+	downloads := 0
+	usarCadeiaTesteNFSe(t, stubCadeiaNFSe(pki.raiz, &downloads, pki.inter))
+
+	pfxB64, final := genPfxComExtras(t, "senha-cadeia", nil)
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx": pfxB64, "certificado_senha": "senha-cadeia", "nome_arquivo": "so-final.pfx", "validade": "2027-01-01",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("esperava 201, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	if downloads == 0 {
+		t.Fatal("pré-condição: a cadeia deveria ter sido completada via AIA (simulada)")
+	}
+	leaf, cas := lerPfxPersistido(t, db, companyID, "senha-cadeia")
+	if !bytes.Equal(leaf.Raw, final.Raw) {
+		t.Fatal("leaf persistido deveria ser o certificado final")
+	}
+	if len(cas) != 1 || !bytes.Equal(cas[0].Raw, pki.inter.Raw) {
+		t.Fatalf("esperava a AC intermediária (e só ela, sem a raiz) no .pfx persistido, veio %d certificado(s)", len(cas))
+	}
+}
+
+// AC 4 + "raiz nunca vai pro .pfx": cadeia já completa -> nenhum download, e a raiz enviada
+// junto no .pfx é descartada.
+func TestSaveNFSeCertificadoHandler_CadeiaJaCompleta_NaoBaixaERemoveRaiz(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+	pki := pkiTesteNFSe(t)
+	downloads := 0
+	usarCadeiaTesteNFSe(t, stubCadeiaNFSe(pki.raiz, &downloads, pki.inter))
+
+	pfxB64, _ := genPfxComExtras(t, "senha-completa", []*x509.Certificate{pki.inter, pki.raiz})
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx": pfxB64, "certificado_senha": "senha-completa", "nome_arquivo": "completo.pfx", "validade": "2027-01-01",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("esperava 201, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	if downloads != 0 {
+		t.Fatalf("cadeia já completa: nenhum download esperado, houve %d", downloads)
+	}
+	_, cas := lerPfxPersistido(t, db, companyID, "senha-completa")
+	if len(cas) != 1 || !bytes.Equal(cas[0].Raw, pki.inter.Raw) {
+		t.Fatalf("esperava só a AC intermediária (raiz removida) no .pfx persistido, veio %d certificado(s)", len(cas))
+	}
+}
+
+// Cadeia que não fecha com a raiz de teste (sem AIA simulada) -> 400 e nada persistido.
+func TestSaveNFSeCertificadoHandler_CadeiaNaoFecha_Retorna400ENaoSalva(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	pfxB64, _ := genPfxComExtras(t, "senha-x", nil) // sem intermediária, stub padrão não "baixa"
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx": pfxB64, "certificado_senha": "senha-x", "nome_arquivo": "x.pfx", "validade": "2027-01-01",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("esperava 400, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&n)
+	if n != 0 {
+		t.Fatal("certificado com cadeia inválida nunca deveria ser salvo")
+	}
+}
+
+// Mapeamento das sentinelas de services.CompletarCadeiaICPBrasil para HTTP (I/O Matrix), sem
+// vazar detalhe técnico (URL, IP, openssl) na mensagem, e sem persistir nada.
+func TestSaveNFSeCertificadoHandler_ErrosDeCadeia_MapeamentoHTTP(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+
+	detalhe := " (http://127.0.0.1:8080/ac.crt 169.254.169.254 openssl stderr)"
+	casos := []struct {
+		nome      string
+		err       error
+		status    int
+		contido   string
+		proibidos []string
+	}{
+		{"AIA bloqueada", fmt.Errorf("%w%s", services.ErrNFSeCadeiaAIABloqueada, detalhe), http.StatusBadRequest, "não pôde ter a cadeia", nil},
+		{"download falhou", fmt.Errorf("%w%s", services.ErrNFSeCadeiaDownloadFalhou, detalhe), http.StatusBadGateway, "tente novamente", nil},
+		{"AIA invalida (conteudo/formato)", fmt.Errorf("%w%s", services.ErrNFSeCadeiaAIAInvalida, detalhe), http.StatusBadRequest, "verifique com a sua certificadora", []string{"tente novamente", "não é permitido"}},
+		{"AIA esquema nao suportado", fmt.Errorf("%w%s", services.ErrNFSeCadeiaAIAEsquemaNaoSuportado, detalhe), http.StatusBadRequest, "esquema não suportado", []string{"não é permitido", "segurança", "bloquead", "tente novamente"}},
+		{"nao ICP-Brasil", fmt.Errorf("%w%s", services.ErrNFSeCadeiaNaoICPBrasil, detalhe), http.StatusBadRequest, "não é ICP-Brasil", nil},
+		{"vencido", fmt.Errorf("%w%s", services.ErrNFSeCadeiaVencida, detalhe), http.StatusBadRequest, "vencido", nil},
+		{"invalida generica", fmt.Errorf("%w%s", services.ErrNFSeCadeiaInvalida, detalhe), http.StatusBadRequest, "raiz ICP-Brasil", nil},
+		{"ambiente", fmt.Errorf("%w: %w%s", services.ErrNFSeCadeiaAmbienteIndisponivel, services.ErrNFSeOpensslIndisponivel, detalhe), http.StatusInternalServerError, "contate o suporte", nil},
+	}
+	for _, c := range casos {
+		t.Run(c.nome, func(t *testing.T) {
+			companyID, authed, cleanup := setupNFSeCertTest(t, db)
+			defer cleanup()
+			usarCadeiaTesteNFSe(t, func(context.Context, *x509.Certificate, []*x509.Certificate) ([]*x509.Certificate, error) {
+				return nil, c.err
+			})
+
+			rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+				"certificado_pfx": genValidPfxBase64(t, "s"), "certificado_senha": "s", "nome_arquivo": "a.pfx", "validade": "2027-01-01",
+			})
+			if rec.Code != c.status {
+				t.Fatalf("esperava %d, obteve %d: %s", c.status, rec.Code, rec.Body.String())
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("corpo não é JSON: %v", err)
+			}
+			msg := body["error"]
+			if !strings.Contains(msg, c.contido) {
+				t.Errorf("mensagem %q deveria conter %q", msg, c.contido)
+			}
+			for _, p := range c.proibidos {
+				if strings.Contains(msg, p) {
+					t.Errorf("mensagem %q não deveria conter %q", msg, p)
+				}
+			}
+			for _, vazado := range []string{"http://", "127.0.0.1", "169.254", "openssl", "stderr"} {
+				if strings.Contains(strings.ToLower(msg), vazado) {
+					t.Errorf("mensagem ao usuário vazou detalhe técnico %q: %q", vazado, msg)
+				}
+			}
+			var n int
+			db.QueryRow(`SELECT COUNT(*) FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&n)
+			if n != 0 {
+				t.Fatal("nada deveria ser persistido quando a cadeia não é validada")
+			}
+		})
+	}
+}
+
+// O stub só "baixa" o que é emissor real (como a produção): uma AC publicada que não assina o
+// certificado não fecha a cadeia -> 400, sem nenhum "download".
+func TestSaveNFSeCertificadoHandler_StubNaoBaixaACNaoRelacionada(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+	pki := pkiTesteNFSe(t)
+	naoRelacionada, _, err := gerarCATeste("AC Nao Relacionada", pki.raiz, pki.raizKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloads := 0
+	usarCadeiaTesteNFSe(t, stubCadeiaNFSe(pki.raiz, &downloads, naoRelacionada))
+
+	pfxB64, _ := genPfxComExtras(t, "senha-nr", nil)
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx": pfxB64, "certificado_senha": "senha-nr", "nome_arquivo": "nr.pfx", "validade": "2027-01-01",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("esperava 400, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	if downloads != 0 {
+		t.Fatalf("AC que não assina o certificado nunca deveria ser \"baixada\", houve %d", downloads)
+	}
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&n)
+	if n != 0 {
+		t.Fatal("certificado com cadeia inválida nunca deveria ser salvo")
+	}
+}
+
+// genPfxFinalComAIA gera um .pfx só com o certificado final (autoassinado se emissor == nil)
+// e AIA opcional, sem intermediária — cadeia que nunca fecha nas raízes ICP-Brasil reais.
+func genPfxFinalComAIA(t *testing.T, senha string, aia []string, emissor *x509.Certificate, emissorKey *rsa.PrivateKey) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: "EMPRESA FORA DA ICP:12345678000199"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		IssuingCertificateURL: aia,
+	}
+	parent, signer := tmpl, key
+	if emissor != nil {
+		parent, signer = emissor, emissorKey
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, &key.PublicKey, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pfx, err := pkcs12.Modern.Encode(key, cert, nil, senha)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(pfx)
+}
+
+// Upload passando pela função REAL services.CompletarCadeiaICPBrasil (sem stub), com as raízes
+// ICP-Brasil reais embutidas: cadeias que não fecham falham rápido, sem rede, e mapeiam para 400
+// sem persistir nada.
+func TestSaveNFSeCertificadoHandler_CadeiaReal_SemStub_Retorna400(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	pki := pkiTesteNFSe(t)
+
+	casos := []struct {
+		nome    string
+		pfx     func(t *testing.T) string
+		contido string
+	}{
+		{"autoassinado sem AIA", func(t *testing.T) string {
+			return genPfxFinalComAIA(t, "s", nil, nil, nil)
+		}, "não é ICP-Brasil"},
+		{"emitido por AC de outra PKI sem AIA", func(t *testing.T) string {
+			pfx, _ := genPfxComExtras(t, "s", nil)
+			return pfx
+		}, "não é ICP-Brasil"},
+		{"AIA para metadata de nuvem", func(t *testing.T) string {
+			return genPfxFinalComAIA(t, "s", []string{"http://169.254.169.254/latest/meta-data/"}, pki.inter, pki.interKey)
+		}, "não é permitido"},
+		{"AIA ldap", func(t *testing.T) string {
+			return genPfxFinalComAIA(t, "s", []string{"ldap://ac.exemplo.br/cn=ac"}, pki.inter, pki.interKey)
+		}, "esquema não suportado"},
+	}
+	for _, c := range casos {
+		t.Run(c.nome, func(t *testing.T) {
+			companyID, authed, cleanup := setupNFSeCertTest(t, db)
+			defer cleanup()
+			usarCadeiaTesteNFSe(t, services.CompletarCadeiaICPBrasil) // função real, raízes reais
+
+			inicio := time.Now()
+			rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+				"certificado_pfx": c.pfx(t), "certificado_senha": "s", "nome_arquivo": "real.pfx", "validade": "2027-01-01",
+			})
+			if d := time.Since(inicio); d > 5*time.Second {
+				t.Fatalf("deveria falhar rápido, sem rede: levou %s", d)
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("esperava 400, obteve %d: %s", rec.Code, rec.Body.String())
+			}
+			var body map[string]string
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("corpo não é JSON: %v", err)
+			}
+			if !strings.Contains(body["error"], c.contido) {
+				t.Errorf("mensagem %q deveria conter %q", body["error"], c.contido)
+			}
+			var n int
+			db.QueryRow(`SELECT COUNT(*) FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&n)
+			if n != 0 {
+				t.Fatal("certificado fora da ICP-Brasil nunca deveria ser salvo")
+			}
+		})
 	}
 }

@@ -677,3 +677,23 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-nfse-pkcs12-normalizacao.md`
   summary: sem limite de concorrência/rate-limit em quantos subprocessos openssl podem ser disparados simultaneamente — vetor de esgotamento de CPU/processos sob upload repetido.
   evidence: achado da revisão adversarial (Blind Hunter); rota já é admin-only e de uso infrequente (cadastro de certificado, não um endpoint de alto tráfego), risco prático baixo nesta fase.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-pkcs12-normalizacao.md`
+  summary: o workflow "Deploy to Cliente AWS (172.16.249.77:3006)" (.github/workflows/deploy-cliente-aws.yml, runs-on self-hosted/cliente-aws, disparado via workflow_run após "Deploy to Production" concluir) não tem NENHUMA execução registrada desde 23/03/2026 — apesar disso, o servidor AWS (fctax.fcxlabs.com) claramente está rodando código atualizado (confirmado por bundle JS e logs do scheduler NFS-e). Mecanismo real de atualização do AWS não está claro — pode ser um runner self-hosted que não está mais registrado/visível pro GitHub, substituído por outro processo (cron/pull manual?) sem esse workflow ter sido removido.
+  evidence: achado incidental ao investigar o deploy do fix de certificado NFS-e (26/10/2026) — `gh run list --workflow=deploy-cliente-aws.yml` retorna só execuções de março/2026; `gh run list` geral confirma que só "Deploy to Production (Coolify + Hostinger)" roda nos pushes recentes. Vale esclarecer com o usuário como o AWS está sendo atualizado de fato, já que a documentação/memória do projeto assume que é esse workflow.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cadeia-icp-brasil.md`
+  summary: sem limite de concorrência/rate limit por empresa na completação de cadeia AIA no upload (até 60s, vários downloads e forks de openssl por request).
+  evidence: revisão adversarial (Blind Hunter); rota admin-only e de uso raro — mesmo tratamento dado ao achado equivalente no #10.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cadeia-icp-brasil.md`
+  summary: `validade` exibida/armazenada continua sendo a informada pelo usuário, não min(NotAfter) da cadeia — uma AC intermediária (ou a raiz v5, que vence em 02/03/2029) pode vencer antes do certificado da empresa e o handshake quebrar com a tela mostrando "ativo".
+  evidence: revisão adversarial (Blind Hunter); mudar a semântica do campo validade é decisão de produto — vale sugerir ao usuário.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cadeia-icp-brasil.md`
+  summary: certificados salvos antes deste fix continuam sem a cadeia intermediária e não são reprocessados automaticamente (nem no load nem por job) — cada empresa precisa reenviar.
+  evidence: decisão explícita da spec ("migrar o certificado já salvo" está no Never); hoje é só 1 certificado de teste, mas em escala vale um job de reprocessamento.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cadeia-icp-brasil.md`
+  summary: o filtro anti-SSRF não bloqueia o próprio IP público do servidor (hairpin) — com a restrição de portas 80/443 aplicada, o alcance fica limitado ao que já é público nessas portas.
+  evidence: revisão adversarial (Blind Hunter); bloquear o IP público próprio exige descobrir dinamicamente os IPs do host — escopo maior.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cadeia-icp-brasil.md`
+  summary: ganchos de teste (`completarCadeiaNFSe`, `nfseAIAPermitirLoopback`, `nfseRaizesTeste`) são variáveis globais sem sincronização — viram data race se algum teste usar t.Parallel() no futuro.
+  evidence: revisão adversarial (Blind Hunter); sem uso paralelo hoje, e nenhum caminho de produção os altera.
