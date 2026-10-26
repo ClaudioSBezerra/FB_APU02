@@ -16,7 +16,7 @@ interface TipoDocumento {
 const TIPOS: TipoDocumento[] = [
   { key: 'nfe',     label: 'Nota Fiscal Eletrônica (NF-e)',     enabled: true },
   { key: 'cte',     label: 'Conhecimento de Frete (CT-e)',     enabled: true },
-  { key: 'nfse',    label: 'Nota Fiscal de Serviços (NFS-e)',   enabled: false },
+  { key: 'nfse',    label: 'Nota Fiscal de Serviços (NFS-e)',   enabled: true },
   { key: 'bpe',     label: 'Bilhete de Passagem (BP-e)',        enabled: false },
   { key: 'nf3e',    label: 'NF de Energia Elétrica (NF3e)',     enabled: false },
   { key: 'nfcom',   label: 'NF de Comunicação (NFCom)',         enabled: false },
@@ -52,15 +52,28 @@ const PANEL_CONFIG: Record<string, PanelConfig | undefined> = {
     description: 'CT-e (mod. 57) identificados pela Receita Federal que não foram importados nos registros da empresa.',
     rfbDisponivel: false,
   },
+  'nfse-entrada': {
+    tipo: 'nfse-entradas',
+    title: 'Malha Fina — NFS-e Tomadas',
+    description: 'NFS-e (chave de 50 dígitos) identificadas pela Receita Federal como crédito que não constam nas NFS-e tomadas capturadas do ADN.',
+    rfbDisponivel: true,
+  },
+  'nfse-saida': {
+    tipo: 'nfse-saidas',
+    title: 'Malha Fina — NFS-e Prestadas',
+    description: 'NFS-e (chave de 50 dígitos) identificadas pela Receita Federal como débito que não constam nas NFS-e prestadas capturadas do ADN.',
+    rfbDisponivel: true,
+  },
 };
 
 const DIRECOES_DISPONIVEIS: Record<string, Direcao[]> = {
   nfe: ['entrada', 'saida'],
   cte: ['entrada'],
+  nfse: ['entrada', 'saida'],
 };
 
 interface MalhaFinaModuloProps {
-  tipoInicial?: 'nfe' | 'cte';
+  tipoInicial?: 'nfe' | 'cte' | 'nfse';
   direcaoInicial?: Direcao;
 }
 

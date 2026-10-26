@@ -68,7 +68,7 @@ interface MalhaFinaResumoResponse {
   items: MalhaFinaResumoRow[];
 }
 
-export type MalhaFinaTipo = 'nfe-entradas' | 'nfe-saidas' | 'cte';
+export type MalhaFinaTipo = 'nfe-entradas' | 'nfe-saidas' | 'cte' | 'nfse-saidas' | 'nfse-entradas';
 
 interface Props {
   tipo: MalhaFinaTipo;
@@ -79,6 +79,8 @@ interface Props {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function extractNumero(chave: string): string {
+  // NFS-e (chave nacional de 50 dígitos): cMun(7) + ambGer(1) + tpInsc(1) + inscFed(14) + nNFSe(13) + ...
+  if (chave.length === 50) return String(parseInt(chave.slice(23, 36), 10));
   if (chave.length !== 44) return '—';
   return String(parseInt(chave.slice(25, 34), 10));
 }
@@ -219,7 +221,7 @@ function DetalheMalhaFina({ row, onClose }: {
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xs">
-            Documento {row.modelo_dfe} · Nº {row.numero_dfe || '—'}
+            Documento {row.modelo_dfe || (row.chave_dfe.length === 50 ? 'NFS-e' : '')} · Nº {row.numero_dfe || extractNumero(row.chave_dfe)}
             <div className="text-[11px] font-normal text-muted-foreground mt-0.5 break-all">
               Chave: {row.chave_dfe}
             </div>
@@ -249,12 +251,15 @@ function DetalheMalhaFina({ row, onClose }: {
             <DRBRL label="CBS Não Extinto" value={row.valor_cbs_nao_extinto} />
           </DS>
         </div>
-        <div className="flex justify-end pt-2 border-t">
-          <Button size="sm" variant="outline" onClick={openDanfe} disabled={danfeLoading} className="text-xs gap-1.5">
-            <FileText className="h-3.5 w-3.5" />
-            {danfeLoading ? 'Gerando...' : 'Ver DANFE'}
-          </Button>
-        </div>
+        {/* DANFE só existe para NF-e/CT-e (chave 44) — NFS-e (chave 50) não tem */}
+        {row.chave_dfe.length === 44 && (
+          <div className="flex justify-end pt-2 border-t">
+            <Button size="sm" variant="outline" onClick={openDanfe} disabled={danfeLoading} className="text-xs gap-1.5">
+              <FileText className="h-3.5 w-3.5" />
+              {danfeLoading ? 'Gerando...' : 'Ver DANFE'}
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -573,7 +578,7 @@ export default function MalhaFinaPanel({ tipo, title, description, rfbDisponivel
                             </button>
                           </div>
                         </TableCell>
-                        <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.modelo_dfe}</TableCell>
+                        <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{row.modelo_dfe || (row.chave_dfe.length === 50 ? 'NFS-e' : '')}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] text-center font-mono">{extractNumero(row.chave_dfe)}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px] whitespace-nowrap">{row.data_dfe_emissao || '—'}</TableCell>
                         <TableCell className="py-1 px-2 text-[11px]">

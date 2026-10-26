@@ -64,6 +64,24 @@ type MalhaFinaResponse struct {
 // situacaoCol:     "situacao_credito" | "situacao_debito" — nome de coluna que difere
 //                  entre as duas tabelas.
 func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDFe []string, excludeTable, excludeChaveCol, sourceTable, situacaoCol string) {
+	// Filtro de documento por modelo_dfe (NF-e/CT-e) — placeholders a partir de $2.
+	docFilter := func(args *[]interface{}) string {
+		modeloPlaceholders := make([]string, len(modelosDFe))
+		for i, m := range modelosDFe {
+			*args = append(*args, m)
+			modeloPlaceholders[i] = fmt.Sprintf("$%d", len(*args))
+		}
+		return fmt.Sprintf("rd.modelo_dfe IN (%s)", strings.Join(modeloPlaceholders, ","))
+	}
+	malhaFinaListBase(db, w, r, docFilter, excludeTable, excludeChaveCol, "COALESCE(excl.cancelado,'N') = 'S'", sourceTable, situacaoCol)
+}
+
+// malhaFinaListBase é o corpo comum dos endpoints de Malha Fina.
+// docFilter:     devolve o fragmento SQL que identifica o tipo de documento em rd (pode
+//                acrescentar args); NF-e/CT-e filtram por modelo_dfe, NFS-e pela chave de 50.
+// canceladoExpr: expressão SQL "documento cancelado na base própria" sobre excl —
+//                nfe_*/cte_* usam cancelado 'S'/'N'; nfse_* usam cancelada BOOLEAN.
+func malhaFinaListBase(db *sql.DB, w http.ResponseWriter, r *http.Request, docFilter func(args *[]interface{}) string, excludeTable, excludeChaveCol, canceladoExpr, sourceTable, situacaoCol string) {
 	// filialCol: qual coluna representa "a própria empresa" — papel fixo do documento
 	// fiscal (não redefinido por tabela): em rfb_debitos (vendas) a empresa é a
 	// emitente; em rfb_creditos (compras) a empresa é a adquirente. Derivado de
@@ -120,12 +138,7 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 
 	// ── Montar args, FROM e WHERE ─────────────────────────────────────────────
 	args := []interface{}{companyID}
-
-	modeloPlaceholders := make([]string, len(modelosDFe))
-	for i, m := range modelosDFe {
-		args = append(args, m)
-		modeloPlaceholders[i] = fmt.Sprintf("$%d", len(args))
-	}
+	docWhere := docFilter(&args)
 
 	// LEFT JOIN substitui duplo NOT EXISTS/EXISTS: 1 varredura em vez de 2 subconsultas por linha.
 	// UNIQUE constraint em (company_id, chave_nfe/chave_cte) garante no máximo 1 linha no JOIN.
@@ -135,9 +148,9 @@ func malhaFinaList(db *sql.DB, w http.ResponseWriter, r *http.Request, modelosDF
 	)
 
 	where := fmt.Sprintf(
-		"rd.company_id = $1 AND rd.modelo_dfe IN (%s) AND rd.chave_dfe != ''"+
-			" AND (excl.%s IS NULL OR COALESCE(excl.cancelado,'N') = 'S')",
-		strings.Join(modeloPlaceholders, ","), excludeChaveCol,
+		"rd.company_id = $1 AND %s AND rd.chave_dfe != ''"+
+			" AND (excl.%s IS NULL OR %s)",
+		docWhere, excludeChaveCol, canceladoExpr,
 	)
 
 	if dataDe != "" {
@@ -362,6 +375,34 @@ func MalhaFinaCTeHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+// ─── NFS-e ──────────────────────────────────────────────────────────────────
+// NFS-e na base RFB = chave de 50 dígitos (chave de acesso nacional da NFS-e). O
+// processador RFB (rfb_processor.go / rfb_creditos_processor.go) grava modelo_dfe como
+// veio da API e não há código de modelo específico para NFS-e no projeto — o
+// critério é só o tamanho da chave (chave 44 = NF-e/CT-e, continua nos blocos acima).
+// Comparação contra nfse_saidas/nfse_entradas.identificador_nfse (= ChaveAcesso do ADN).
+// Somente leitura: NFS-e nunca é gravada em rfb_*/cgibs_*.
+
+func malhaFinaNFSeDocFilter(args *[]interface{}) string {
+	return "length(rd.chave_dfe) = 50"
+}
+
+// MalhaFinaNFSeSaidasHandler — GET /api/malha-fina/nfse-saidas
+// Lado de DÉBITO (serviço prestado): rfb_debitos sem chave em nfse_saidas.
+func MalhaFinaNFSeSaidasHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		malhaFinaListBase(db, w, r, malhaFinaNFSeDocFilter, "nfse_saidas", "identificador_nfse", "excl.cancelada", "rfb_debitos", "situacao_debito")
+	}
+}
+
+// MalhaFinaNFSeEntradasHandler — GET /api/malha-fina/nfse-entradas
+// Lado de CRÉDITO (serviço tomado): rfb_creditos sem chave em nfse_entradas.
+func MalhaFinaNFSeEntradasHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		malhaFinaListBase(db, w, r, malhaFinaNFSeDocFilter, "nfse_entradas", "identificador_nfse", "excl.cancelada", "rfb_creditos", "situacao_credito")
+	}
+}
+
 // Handlers de resumo por tipo — consultam a MV (instantâneo)
 
 func MalhaFinaNFeEntradasResumoHandler(db *sql.DB) http.HandlerFunc {
@@ -372,6 +413,12 @@ func MalhaFinaNFeSaidasResumoHandler(db *sql.DB) http.HandlerFunc {
 }
 func MalhaFinaCTeResumoHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { malhaFinaResumoFromMV(db, w, r, "cte") }
+}
+func MalhaFinaNFSeSaidasResumoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { malhaFinaResumoFromMV(db, w, r, "nfse-saidas") }
+}
+func MalhaFinaNFSeEntradasResumoHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { malhaFinaResumoFromMV(db, w, r, "nfse-entradas") }
 }
 
 // MalhaFinaResumoGeralHandler — GET /api/malha-fina/resumo-geral

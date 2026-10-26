@@ -14,6 +14,13 @@ interface CBSResult {
   qtd_entradas: number
   credito_cte: number
   qtd_ctes: number
+  // NFS-e (prestadas = débito, tomadas = crédito) — base própria, XMLs do ADN
+  debito_nfse_total: number
+  qtd_nfse_prestadas: number
+  credito_nfse_total: number
+  qtd_nfse_tomadas: number
+  debito_geral: number
+  credito_geral: number
   saldo_total: number
 }
 
@@ -125,10 +132,10 @@ export default function PainelApuracaoCBS() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-red-600">
-              {loading ? "..." : fmt(cbs?.debito_total ?? 0)}
+              {loading ? "..." : fmt(cbs?.debito_geral ?? 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {cbs?.qtd_saidas ?? 0} NF-e de saída
+              {cbs?.qtd_saidas ?? 0} NF-e de saída + {cbs?.qtd_nfse_prestadas ?? 0} NFS-e prestadas
             </p>
           </CardContent>
         </Card>
@@ -142,10 +149,10 @@ export default function PainelApuracaoCBS() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-green-600">
-              {loading ? "..." : fmt((cbs?.credito_nfe_total ?? 0) + (cbs?.credito_cte ?? 0))}
+              {loading ? "..." : fmt(cbs?.credito_geral ?? 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {cbs?.qtd_entradas ?? 0} NF-e + {cbs?.qtd_ctes ?? 0} CT-e de entrada
+              {cbs?.qtd_entradas ?? 0} NF-e + {cbs?.qtd_ctes ?? 0} CT-e de entrada + {cbs?.qtd_nfse_tomadas ?? 0} NFS-e tomadas
             </p>
           </CardContent>
         </Card>
@@ -194,12 +201,20 @@ export default function PainelApuracaoCBS() {
                   <td className="py-2.5 pl-4 text-right font-mono font-medium">{fmtNum(cbs.debito_total)}</td>
                 </tr>
                 <tr>
+                  <td className="py-2.5 pr-4 text-muted-foreground">Débito — NFS-e Prestadas</td>
+                  <td className="py-2.5 pl-4 text-right font-mono font-medium">{fmtNum(cbs.debito_nfse_total)}</td>
+                </tr>
+                <tr>
                   <td className="py-2.5 pr-4 text-muted-foreground">Crédito — NF-e Entradas</td>
                   <td className="py-2.5 pl-4 text-right font-mono font-medium text-green-700">{fmtParen(cbs.credito_nfe_total)}</td>
                 </tr>
                 <tr>
                   <td className="py-2.5 pr-4 text-muted-foreground">Crédito — CT-e Entradas</td>
                   <td className="py-2.5 pl-4 text-right font-mono font-medium text-green-700">{fmtParen(cbs.credito_cte)}</td>
+                </tr>
+                <tr>
+                  <td className="py-2.5 pr-4 text-muted-foreground">Crédito — NFS-e Tomadas</td>
+                  <td className="py-2.5 pl-4 text-right font-mono font-medium text-green-700">{fmtParen(cbs.credito_nfse_total)}</td>
                 </tr>
               </tbody>
               <tfoot>
@@ -220,7 +235,7 @@ export default function PainelApuracaoCBS() {
         <strong>CBS</strong> = Contribuição sobre Bens e Serviços, tributo federal que substitui PIS e Cofins na Reforma Tributária. &nbsp;
         Saldo <span className="text-green-600 font-medium">verde</span> = crédito acumulado a favor da empresa. &nbsp;
         Saldo <span className="text-red-600 font-medium">vermelho</span> = CBS a recolher à Receita Federal. &nbsp;
-        Valores extraídos das tags <code>vCBS</code> nos XMLs das NF-e e CT-e importados.
+        Valores extraídos das tags <code>vCBS</code> nos XMLs das NF-e e CT-e importados e das NFS-e capturadas do ADN (canceladas fora, por competência).
       </p>
     </div>
   )

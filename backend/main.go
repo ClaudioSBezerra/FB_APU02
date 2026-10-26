@@ -670,6 +670,10 @@ func main() {
 	http.HandleFunc("/api/malha-fina/nfe-entradas/resumo", withAuth(handlers.MalhaFinaNFeEntradasResumoHandler, ""))
 	http.HandleFunc("/api/malha-fina/nfe-saidas/resumo", withAuth(handlers.MalhaFinaNFeSaidasResumoHandler, ""))
 	http.HandleFunc("/api/malha-fina/cte/resumo", withAuth(handlers.MalhaFinaCTeResumoHandler, ""))
+	http.HandleFunc("/api/malha-fina/nfse-saidas", withAuth(handlers.MalhaFinaNFSeSaidasHandler, ""))
+	http.HandleFunc("/api/malha-fina/nfse-entradas", withAuth(handlers.MalhaFinaNFSeEntradasHandler, ""))
+	http.HandleFunc("/api/malha-fina/nfse-saidas/resumo", withAuth(handlers.MalhaFinaNFSeSaidasResumoHandler, ""))
+	http.HandleFunc("/api/malha-fina/nfse-entradas/resumo", withAuth(handlers.MalhaFinaNFSeEntradasResumoHandler, ""))
 
 	// ERP Bridge — agendamento e histórico de execuções
 	http.HandleFunc("/api/erp-bridge/config", withAuth(handlers.ERPBridgeConfigHandler, ""))

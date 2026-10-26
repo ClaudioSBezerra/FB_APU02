@@ -18,6 +18,17 @@ interface IBSResult {
   qtd_entradas: number
   credito_cte: number
   qtd_ctes: number
+  // NFS-e (prestadas = débito, tomadas = crédito) — base própria, XMLs do ADN
+  debito_nfse_uf: number
+  debito_nfse_mun: number
+  debito_nfse_total: number
+  qtd_nfse_prestadas: number
+  credito_nfse_uf: number
+  credito_nfse_mun: number
+  credito_nfse_total: number
+  qtd_nfse_tomadas: number
+  debito_geral: number
+  credito_geral: number
   saldo_uf: number
   saldo_mun: number
   saldo_total: number
@@ -150,10 +161,10 @@ export default function CGIBSPainel() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-red-600">
-              {loading ? "..." : fmt(ibs?.debito_total ?? 0)}
+              {loading ? "..." : fmt(ibs?.debito_geral ?? 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {ibs?.qtd_saidas ?? 0} NF-e de saída
+              {ibs?.qtd_saidas ?? 0} NF-e de saída + {ibs?.qtd_nfse_prestadas ?? 0} NFS-e prestadas
             </p>
           </CardContent>
         </Card>
@@ -167,10 +178,10 @@ export default function CGIBSPainel() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold text-green-600">
-              {loading ? "..." : fmt((ibs?.credito_nfe_total ?? 0) + (ibs?.credito_cte ?? 0))}
+              {loading ? "..." : fmt(ibs?.credito_geral ?? 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {ibs?.qtd_entradas ?? 0} NF-e + {ibs?.qtd_ctes ?? 0} CT-e de entrada
+              {ibs?.qtd_entradas ?? 0} NF-e + {ibs?.qtd_ctes ?? 0} CT-e de entrada + {ibs?.qtd_nfse_tomadas ?? 0} NFS-e tomadas
             </p>
           </CardContent>
         </Card>
@@ -204,12 +215,20 @@ export default function CGIBSPainel() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Débito</span>
+              <span className="text-muted-foreground">Débito NF-e</span>
               <span className="font-mono font-medium text-red-600">{loading ? "..." : fmtNum(ibs?.debito_uf ?? 0)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Débito NFS-e</span>
+              <span className="font-mono font-medium text-red-600">{loading ? "..." : fmtNum(ibs?.debito_nfse_uf ?? 0)}</span>
             </div>
             <div className="flex justify-between items-center text-sm">
               <span className="text-muted-foreground">Crédito NF-e</span>
               <span className="font-mono font-medium text-green-700">{loading ? "..." : fmtParen(ibs?.credito_nfe_uf ?? 0)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Crédito NFS-e</span>
+              <span className="font-mono font-medium text-green-700">{loading ? "..." : fmtParen(ibs?.credito_nfse_uf ?? 0)}</span>
             </div>
             <div className="border-t pt-2 flex justify-between items-center">
               <span className="text-sm font-semibold">Saldo UF</span>
@@ -229,12 +248,20 @@ export default function CGIBSPainel() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex justify-between items-center text-sm">
-              <span className="text-muted-foreground">Débito</span>
+              <span className="text-muted-foreground">Débito NF-e</span>
               <span className="font-mono font-medium text-red-600">{loading ? "..." : fmtNum(ibs?.debito_mun ?? 0)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Débito NFS-e</span>
+              <span className="font-mono font-medium text-red-600">{loading ? "..." : fmtNum(ibs?.debito_nfse_mun ?? 0)}</span>
             </div>
             <div className="flex justify-between items-center text-sm">
               <span className="text-muted-foreground">Crédito NF-e</span>
               <span className="font-mono font-medium text-green-700">{loading ? "..." : fmtParen(ibs?.credito_nfe_mun ?? 0)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-muted-foreground">Crédito NFS-e</span>
+              <span className="font-mono font-medium text-green-700">{loading ? "..." : fmtParen(ibs?.credito_nfse_mun ?? 0)}</span>
             </div>
             <div className="border-t pt-2 flex justify-between items-center">
               <span className="text-sm font-semibold">Saldo Municipal</span>
@@ -276,6 +303,12 @@ export default function CGIBSPainel() {
                   <td className="py-2.5 pl-4 text-right font-mono font-medium">{fmtNum(ibs.debito_total)}</td>
                 </tr>
                 <tr>
+                  <td className="py-2.5 pr-4 text-muted-foreground">Débito — NFS-e Prestadas</td>
+                  <td className="py-2.5 px-4 text-right font-mono">{fmtNum(ibs.debito_nfse_uf)}</td>
+                  <td className="py-2.5 px-4 text-right font-mono">{fmtNum(ibs.debito_nfse_mun)}</td>
+                  <td className="py-2.5 pl-4 text-right font-mono font-medium">{fmtNum(ibs.debito_nfse_total)}</td>
+                </tr>
+                <tr>
                   <td className="py-2.5 pr-4 text-muted-foreground">Crédito — NF-e Entradas</td>
                   <td className="py-2.5 px-4 text-right font-mono text-green-700">{fmtParen(ibs.credito_nfe_uf)}</td>
                   <td className="py-2.5 px-4 text-right font-mono text-green-700">{fmtParen(ibs.credito_nfe_mun)}</td>
@@ -286,6 +319,12 @@ export default function CGIBSPainel() {
                   <td className="py-2.5 px-4 text-right text-muted-foreground/50">—</td>
                   <td className="py-2.5 px-4 text-right text-muted-foreground/50">—</td>
                   <td className="py-2.5 pl-4 text-right font-mono font-medium text-green-700">{fmtParen(ibs.credito_cte)}</td>
+                </tr>
+                <tr>
+                  <td className="py-2.5 pr-4 text-muted-foreground">Crédito — NFS-e Tomadas</td>
+                  <td className="py-2.5 px-4 text-right font-mono text-green-700">{fmtParen(ibs.credito_nfse_uf)}</td>
+                  <td className="py-2.5 px-4 text-right font-mono text-green-700">{fmtParen(ibs.credito_nfse_mun)}</td>
+                  <td className="py-2.5 pl-4 text-right font-mono font-medium text-green-700">{fmtParen(ibs.credito_nfse_total)}</td>
                 </tr>
               </tbody>
               <tfoot>
@@ -312,6 +351,7 @@ export default function CGIBSPainel() {
         <strong>IBS UF</strong> = parcela estadual — tag <code>vIBSUF</code> nas NF-e/CT-e. &nbsp;
         <strong>IBS Mun</strong> = parcela municipal — tag <code>vIBSMun</code>. &nbsp;
         CT-e não desagrega UF/Mun — apenas o total IBS é considerado no crédito. &nbsp;
+        NFS-e: grupo <code>IBSCBS</code> dos XMLs capturados do ADN (canceladas fora), por competência. &nbsp;
         Saldo <span className="text-green-600 font-medium">verde</span> = crédito a favor. &nbsp;
         Saldo <span className="text-red-600 font-medium">vermelho</span> = IBS a recolher ao CGIBS.
       </p>

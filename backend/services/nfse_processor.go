@@ -221,6 +221,13 @@ func ExecutarCicloNFSe(ctx context.Context, db *sql.DB, companyID string, opts N
 	out.Cancelamentos, out.CancelamentosPendentes, out.CamposInvalidos = total.cancelamentos, total.pendentes, total.camposInvalidos
 	out.Lotes, out.NSUFinal, out.Encerramento = res.Lotes, res.UltimoNSU, res.Encerramento
 
+	// Notas novas mudam os blocos NFS-e da Malha Fina (mv_malha_fina_resumo, migration 136:
+	// chave RFB ausente em nfse_*). Lotes já gravados valem mesmo se o ciclo falhar adiante —
+	// mesmo debounce usado pelo upload de XML e pelo ERP Bridge.
+	if total.novos > 0 {
+		RequestMVRefresh(db, "mv_malha_fina_resumo")
+	}
+
 	if aerr != nil {
 		switch {
 		case errors.Is(aerr, ErrNFSePersistencia):
