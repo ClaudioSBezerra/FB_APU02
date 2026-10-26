@@ -664,3 +664,16 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-nfse-frontend.md`
   summary: Nenhuma das 2 telas novas de consulta tem teste de frontend (filtros, ordenação, reset de página).
   evidence: projeto não tem nenhuma infraestrutura de teste de frontend hoje (nenhuma das ~15+ páginas tocadas nesta sessão tem teste) — não é uma lacuna introduzida por esta sub-spec, é convenção (ausência de convenção) já existente no projeto inteiro.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-pkcs12-normalizacao.md`
+  summary: normalização via openssl expõe bytes de certificado controlados pelo tenant ao parser nativo C de ASN.1/PKCS12 do OpenSSL (histórico de CVE conhecido, ex. CVE-2024-0727), não só ao pkcs12.Decode do Go (memory-safe).
+  evidence: achado da revisão adversarial (Blind Hunter); é um tradeoff inerente à abordagem escolhida (nenhuma lib Go lê BER, confirmado em pesquisa anterior) — mitigação prática é manter a versão do OpenSSL na imagem atualizada, não há alternativa sem abandonar a correção inteira.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-pkcs12-normalizacao.md`
+  summary: pacote `openssl` no Dockerfile não é pinado em versão exata, diferente da convenção do projeto para go.sum/package-lock.json.
+  evidence: achado da revisão adversarial (Blind Hunter); mesmo padrão já usado pros pacotes `tzdata`/`ca-certificates` já existentes no mesmo Dockerfile (não é uma regressão nova desta spec) — Alpine não tem um mecanismo de lockfile tão robusto quanto go.sum.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-pkcs12-normalizacao.md`
+  summary: arquivos temporários (incluindo o PEM intermediário com a chave privada em claro) são só removidos via os.RemoveAll, sem wipe seguro, e sem sweep de limpeza se o processo morrer (OOM/SIGKILL) entre a criação e a remoção — um diretório órfão com a chave em claro poderia ficar em disco indefinidamente sem alerta.
+  evidence: achado da revisão adversarial (Edge Case Hunter); janela de exposição é curta (segundos, só durante upload) e o disco não é exposto à rede; mitigação completa (wipe seguro + sweep de órfãos no boot) é escopo maior que esta sub-spec de correção pontual.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-pkcs12-normalizacao.md`
+  summary: sem limite de concorrência/rate-limit em quantos subprocessos openssl podem ser disparados simultaneamente — vetor de esgotamento de CPU/processos sob upload repetido.
+  evidence: achado da revisão adversarial (Blind Hunter); rota já é admin-only e de uso infrequente (cadastro de certificado, não um endpoint de alto tráfego), risco prático baixo nesta fase.

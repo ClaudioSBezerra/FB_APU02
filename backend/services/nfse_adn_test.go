@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -97,6 +98,19 @@ func buildTestPfxBase64(t *testing.T, cert *x509.Certificate, key *rsa.PrivateKe
 	pfxBytes, err := pkcs12.Encode(rand.Reader, key, cert, nil, senha)
 	if err != nil {
 		t.Fatalf("falha ao empacotar .pfx de teste: %v", err)
+	}
+	return base64.StdEncoding.EncodeToString(pfxBytes)
+}
+
+// buildTestPfxBase64ComCadeia é igual a buildTestPfxBase64, mas inclui a CA que assinou o leaf
+// no próprio .pfx (caCerts) — reproduz o formato comum em certificados ICP-Brasil A1 reais que
+// trazem a cadeia de CA intermediária embutida, caso que pkcs12.Decode rejeita com "expected
+// exactly two safe bags in the PFX PDU" (ver nfse_pkcs12_test.go).
+func buildTestPfxBase64ComCadeia(t *testing.T, cert, ca *x509.Certificate, key *rsa.PrivateKey, senha string) string {
+	t.Helper()
+	pfxBytes, err := pkcs12.Encode(rand.Reader, key, cert, []*x509.Certificate{ca}, senha)
+	if err != nil {
+		t.Fatalf("falha ao empacotar .pfx de teste com cadeia de CA: %v", err)
 	}
 	return base64.StdEncoding.EncodeToString(pfxBytes)
 }
@@ -229,6 +243,59 @@ func TestNFSeBuildNFSeMTLSClient_Valido_DecodificaCertEChave(t *testing.T) {
 	transport, ok := httpClient.Transport.(*http.Transport)
 	if !ok || len(transport.TLSClientConfig.Certificates) != 1 {
 		t.Fatal("esperava exatamente 1 certificado configurado no Transport TLS")
+	}
+}
+
+// TestNFSeBuildNFSeMTLSClient_ComCadeiaIntermediaria_AceitaEMontaCadeiaCompleta cobre o Patch 1
+// (CRÍTICO, revisão adversarial): certificados ICP-Brasil reais frequentemente trazem a CA
+// intermediária embutida no mesmo .pfx — pkcs12.Decode rejeita esse formato ("expected exactly
+// two safe bags in the PFX PDU"), por isso BuildNFSeMTLSClient usa pkcs12.DecodeChain. O
+// tls.Certificate.Certificate montado deve conter a cadeia completa (leaf primeiro, depois a
+// CA intermediária) — necessário para o handshake mTLS funcionar com certificados reais com
+// cadeia — e Leaf precisa continuar sendo só o certificado do titular (não a CA), já que é ele
+// que ExtractCNPJFromCertificateSubject usa.
+func TestNFSeBuildNFSeMTLSClient_ComCadeiaIntermediaria_AceitaEMontaCadeiaCompleta(t *testing.T) {
+	ca, caKey := genTestCA(t)
+	cert, key := genTestLeaf(t, ca, caKey, leafOpts{commonName: "EMPRESA TESTE LTDA:12345678000199"})
+	pfxB64 := buildTestPfxBase64ComCadeia(t, cert, ca, key, "senha-correta")
+
+	// Pré-condição: confirma que é justamente o cenário que pkcs12.Decode (sem Chain) rejeita.
+	pfxBytes, err := base64.StdEncoding.DecodeString(pfxB64)
+	if err != nil {
+		t.Fatalf("falha ao decodificar base64 de teste: %v", err)
+	}
+	if _, _, decErr := pkcs12.Decode(pfxBytes, "senha-correta"); decErr == nil {
+		t.Fatal("pré-condição falhou: pkcs12.Decode deveria rejeitar .pfx com cadeia de CA intermediária")
+	}
+
+	httpClient, x509Cert, err := BuildNFSeMTLSClient(NFSeADNCertificado{PfxBase64: pfxB64, Senha: "senha-correta"})
+	if err != nil {
+		t.Fatalf("esperava sucesso para .pfx com cadeia de CA intermediária, veio erro: %v", err)
+	}
+	if httpClient == nil || x509Cert == nil {
+		t.Fatal("esperava client e certificado não-nulos")
+	}
+	// Leaf continua sendo o certificado do titular, não a CA.
+	if x509Cert.Subject.CommonName != "EMPRESA TESTE LTDA:12345678000199" {
+		t.Errorf("CN inesperado (deveria ser o leaf, não a CA): %q", x509Cert.Subject.CommonName)
+	}
+
+	transport, ok := httpClient.Transport.(*http.Transport)
+	if !ok || len(transport.TLSClientConfig.Certificates) != 1 {
+		t.Fatal("esperava exatamente 1 tls.Certificate configurado no Transport TLS")
+	}
+	tlsCert := transport.TLSClientConfig.Certificates[0]
+	if len(tlsCert.Certificate) != 2 {
+		t.Fatalf("esperava cadeia completa com 2 certificados (leaf + CA intermediária) em tlsCert.Certificate, veio %d", len(tlsCert.Certificate))
+	}
+	if !bytes.Equal(tlsCert.Certificate[0], x509Cert.Raw) {
+		t.Error("esperava que o PRIMEIRO certificado da cadeia fosse o leaf (titular), não a CA")
+	}
+	if !bytes.Equal(tlsCert.Certificate[1], ca.Raw) {
+		t.Error("esperava que o SEGUNDO certificado da cadeia fosse a CA intermediária")
+	}
+	if tlsCert.Leaf.Subject.CommonName != "EMPRESA TESTE LTDA:12345678000199" {
+		t.Error("tlsCert.Leaf deveria continuar sendo o certificado do titular, não a CA")
 	}
 }
 

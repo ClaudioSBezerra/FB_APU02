@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"unicode"
 
 	"fb_apu02/crypto"
+	"fb_apu02/services"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -180,12 +182,17 @@ func SaveNFSeCertificadoHandler(db *sql.DB) http.HandlerFunc {
 		req.Validade = strings.TrimSpace(req.Validade)
 
 		// Valida que certificado_pfx é base64 decodificável (não valida que é um .pfx/PKCS#12
-		// de verdade — isso exigiria parsing de PKCS#12, fora de escopo desta sub-spec).
+		// de verdade — isso exigiria parsing de PKCS#12, fora de escopo desta sub-spec). O
+		// resultado decodificado é reaproveitado mais abaixo na normalização — nunca decodificado
+		// de novo.
+		var pfxBytesDecoded []byte
 		if req.CertificadoPfx != "" {
-			if _, decErr := base64.StdEncoding.DecodeString(req.CertificadoPfx); decErr != nil {
+			decoded, decErr := base64.StdEncoding.DecodeString(req.CertificadoPfx)
+			if decErr != nil {
 				jsonErr(w, http.StatusBadRequest, "certificado_pfx deve ser o arquivo .pfx codificado em base64 válido")
 				return
 			}
+			pfxBytesDecoded = decoded
 		}
 
 		// Round-trip check: time.Parse aceita datas de calendário inválidas (ex. 30/02)
@@ -238,6 +245,31 @@ func SaveNFSeCertificadoHandler(db *sql.DB) http.HandlerFunc {
 		if hasExisting && (req.CertificadoPfx == "") != (req.CertificadoSenha == "") {
 			jsonErr(w, http.StatusBadRequest, "Certificado (.pfx em base64) e senha devem ser enviados juntos ao trocar o certificado")
 			return
+		}
+
+		// Normalização BER->DER (ver spec-nfse-pkcs12-normalizacao.md): certificados A1 reais
+		// frequentemente vêm em BER, que encoding/asn1 (usado por pkcs12.Decode em
+		// BuildNFSeMTLSClient) não lê. Normaliza aqui, no upload — nunca no caminho de busca —
+		// para que o que fica em certificado_pfx já seja sempre DER-compatível.
+		if req.CertificadoPfx != "" {
+			normalizado, foiNormalizado, normErr := services.NormalizarPKCS12ParaDER(pfxBytesDecoded, req.CertificadoSenha)
+			if normErr != nil {
+				if errors.Is(normErr, services.ErrNFSeOpensslIndisponivel) || errors.Is(normErr, services.ErrNFSeAmbienteTemporarioIndisponivel) {
+					// Problema de ambiente/deploy (imagem sem openssl, ou disco/permissão do
+					// diretório temporário), nunca do usuário — nunca confundir com senha
+					// incorreta. 500 + log explícito pro operador.
+					log.Printf("[NFSeCertificado] ambiente do servidor indisponível ao normalizar certificado, companyID=%s: %v", companyID, normErr)
+					jsonErr(w, http.StatusInternalServerError, "Não foi possível processar o certificado — ambiente do servidor incompleto, contate o suporte")
+					return
+				}
+				log.Printf("[NFSeCertificado] falha ao normalizar certificado PKCS#12, companyID=%s: %v", companyID, normErr)
+				jsonErr(w, http.StatusBadRequest, "Não foi possível processar o certificado — verifique a senha ou o arquivo")
+				return
+			}
+			if foiNormalizado {
+				log.Printf("[NFSeCertificado] Certificado normalizado BER->DER no upload, companyID=%s", companyID)
+			}
+			req.CertificadoPfx = base64.StdEncoding.EncodeToString(normalizado)
 		}
 
 		pfxToSave := existingPfxEnc

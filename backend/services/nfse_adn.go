@@ -130,15 +130,29 @@ func BuildNFSeMTLSClient(cert NFSeADNCertificado) (*http.Client, *x509.Certifica
 		return nil, nil, fmt.Errorf("certificado_pfx não é base64 válido: %w", err)
 	}
 
-	privateKey, x509Cert, err := pkcs12.Decode(pfxBytes, cert.Senha)
+	// DecodeChain (não Decode) — certificados ICP-Brasil reais frequentemente vêm acompanhados
+	// da cadeia de CA intermediária no mesmo .pfx; Decode rejeita esse caso com "expected
+	// exactly two safe bags in the PFX PDU" (confirmado lendo vendor/.../pkcs12.go). caCerts só
+	// é usado para montar a cadeia completa do tls.Certificate abaixo (leaf primeiro, depois
+	// as intermediárias, nessa ordem) — necessário para o handshake mTLS funcionar quando o
+	// certificado real tem cadeia.
+	privateKey, x509Cert, caCerts, err := pkcs12.DecodeChain(pfxBytes, cert.Senha)
 	if err != nil {
 		return nil, nil, fmt.Errorf("falha ao decodificar .pfx (senha incorreta ou arquivo inválido): %w", err)
 	}
 
+	chain := make([][]byte, 0, 1+len(caCerts))
+	chain = append(chain, x509Cert.Raw)
+	for _, ca := range caCerts {
+		chain = append(chain, ca.Raw)
+	}
+
 	tlsCert := tls.Certificate{
-		Certificate: [][]byte{x509Cert.Raw},
+		Certificate: chain,
 		PrivateKey:  privateKey,
-		Leaf:        x509Cert,
+		// Leaf é o certificado do titular (não a CA) — é ele que
+		// ExtractCNPJFromCertificateSubject usa para extrair o CNPJ.
+		Leaf: x509Cert,
 	}
 
 	tlsConfig := &tls.Config{

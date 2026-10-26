@@ -27,7 +27,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -v -ldflags="-w -s" -o server 
 
 # Run Stage
 FROM alpine:latest
-RUN apk --no-cache add tzdata ca-certificates && \
+RUN apk --no-cache add tzdata ca-certificates openssl && \
     ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime
 # Usuário sem privilégio (21/10, migração de segurança) — o backend grava
 # em disco de verdade (uploads/, backend/handlers/admin.go). WORKDIR

@@ -3,18 +3,25 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"fb_apu02/crypto"
 
 	"github.com/golang-jwt/jwt/v5"
+	"software.sslmate.com/src/go-pkcs12"
 )
 
 // ---------------------------------------------------------------------------
@@ -24,10 +31,56 @@ import (
 // validPfxBase64 é um valor base64 válido (não precisa ser um .pfx/PKCS#12 real —
 // a validação do handler só confirma que é base64 decodificável, nunca faz parsing
 // de PKCS#12, que está fora de escopo desta sub-spec).
+//
+// NOTA (spec-nfse-pkcs12-normalizacao.md): desde que SaveNFSeCertificadoHandler passou a
+// chamar services.NormalizarPKCS12ParaDER — que de fato decodifica o PKCS#12 — este conteúdo
+// "fake" não é mais suficiente para os testes que esperam um upload aceito (201/200): nem
+// pkcs12.Decode nem o fallback via openssl conseguem processar texto arbitrário, então o
+// handler passaria a responder 400. Os testes abaixo que esperam sucesso usam
+// genValidPfxBase64(t, senha) (certificado de teste real, DER-compatível) em vez desta
+// constante. validPfxBase64Content/validPfxBase64() continuam existindo só para os poucos
+// testes que nunca chegam a invocar a normalização (ex.: validação de base64 malformado,
+// checagem de role via AuthMiddleware) ou que testam leitura de linhas já inseridas
+// diretamente no banco (insertNFSeCert), nunca passando pelo handler de upload.
 const validPfxBase64Content = "conteudo-fake-de-certificado-pfx-para-teste"
 
 func validPfxBase64() string {
 	return base64.StdEncoding.EncodeToString([]byte(validPfxBase64Content))
+}
+
+// genValidPfxBase64 gera um certificado .pfx (PKCS#12) de teste VÁLIDO e DER-compatível —
+// decodifica de primeira com pkcs12.Decode, sem precisar do fallback via openssl — empacotado
+// com a senha dada, em base64 (mesmo formato que SaveNFSeCertificadoHandler recebe no corpo
+// JSON). Usado pelos testes de SaveNFSeCertificadoHandler que precisam que o upload seja
+// ACEITO (201/200): desde a normalização automática (spec-nfse-pkcs12-normalizacao.md), o
+// handler decodifica o PKCS#12 de verdade, então certificado_senha precisa ser a senha que
+// realmente destranca o .pfx gerado aqui.
+func genValidPfxBase64(t *testing.T, senha string) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("falha ao gerar chave de teste: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: "certificado-teste-nfse"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("falha ao criar certificado de teste: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("falha ao parsear certificado de teste: %v", err)
+	}
+	pfxBytes, err := pkcs12.Modern.Encode(key, cert, nil, senha)
+	if err != nil {
+		t.Fatalf("falha ao empacotar .pfx de teste: %v", err)
+	}
+	return base64.StdEncoding.EncodeToString(pfxBytes)
 }
 
 // openNFSeTestDB abre conexão com o Postgres de teste (reaproveita openTestDB,
@@ -234,7 +287,7 @@ func TestSaveNFSeCertificadoHandler_PrimeiroCadastroValido_Retorna201ENaoExpoeSe
 	_, authed, cleanup := setupNFSeCertTest(t, db)
 	defer cleanup()
 
-	pfx := validPfxBase64()
+	pfx := genValidPfxBase64(t, "senha-secreta-123")
 	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
 		"certificado_pfx":   pfx,
 		"certificado_senha": "senha-secreta-123",
@@ -305,7 +358,7 @@ func TestSaveNFSeCertificadoHandler_ReUpload_SubstituiNaoDuplica(t *testing.T) {
 	defer cleanup()
 
 	rec1 := postSaveNFSeCert(t, db, authed, map[string]interface{}{
-		"certificado_pfx":   validPfxBase64(),
+		"certificado_pfx":   genValidPfxBase64(t, "senha-original"),
 		"certificado_senha": "senha-original",
 		"validade":          "2027-01-01",
 	})
@@ -314,7 +367,7 @@ func TestSaveNFSeCertificadoHandler_ReUpload_SubstituiNaoDuplica(t *testing.T) {
 	}
 
 	rec2 := postSaveNFSeCert(t, db, authed, map[string]interface{}{
-		"certificado_pfx":   base64.StdEncoding.EncodeToString([]byte("novo-certificado")),
+		"certificado_pfx":   genValidPfxBase64(t, "senha-NOVA"),
 		"certificado_senha": "senha-NOVA",
 		"validade":          "2028-01-01",
 	})
@@ -349,7 +402,7 @@ func TestSaveNFSeCertificadoHandler_ReUploadSemValidade_PreservaValidadeAnterior
 	defer cleanup()
 
 	rec1 := postSaveNFSeCert(t, db, authed, map[string]interface{}{
-		"certificado_pfx":   validPfxBase64(),
+		"certificado_pfx":   genValidPfxBase64(t, "senha-original"),
 		"certificado_senha": "senha-original",
 		"validade":          "2027-03-10",
 	})
@@ -359,7 +412,7 @@ func TestSaveNFSeCertificadoHandler_ReUploadSemValidade_PreservaValidadeAnterior
 
 	// Re-upload trocando só a senha, sem informar validade.
 	rec2 := postSaveNFSeCert(t, db, authed, map[string]interface{}{
-		"certificado_pfx":   validPfxBase64(),
+		"certificado_pfx":   genValidPfxBase64(t, "senha-rotacionada"),
 		"certificado_senha": "senha-rotacionada",
 		"validade":          "",
 	})
@@ -393,8 +446,9 @@ func TestSaveNFSeCertificadoHandler_ReUploadSemPfxSenha_PreservaValoresAnteriore
 	companyID, authed, cleanup := setupNFSeCertTest(t, db)
 	defer cleanup()
 
+	pfxOriginal := genValidPfxBase64(t, "senha-que-deve-sobreviver")
 	rec1 := postSaveNFSeCert(t, db, authed, map[string]interface{}{
-		"certificado_pfx":   validPfxBase64(),
+		"certificado_pfx":   pfxOriginal,
 		"certificado_senha": "senha-que-deve-sobreviver",
 		"nome_arquivo":      "original.pfx",
 		"validade":          "2027-05-05",
@@ -418,7 +472,7 @@ func TestSaveNFSeCertificadoHandler_ReUploadSemPfxSenha_PreservaValoresAnteriore
 		Scan(&pfxEnc, &senhaEnc); err != nil {
 		t.Fatalf("falha ao ler campos persistidos: %v", err)
 	}
-	if crypto.DecryptFieldWithFallback(pfxEnc) != validPfxBase64() {
+	if crypto.DecryptFieldWithFallback(pfxEnc) != pfxOriginal {
 		t.Error("certificado_pfx foi sobrescrito por um save com o campo vazio — deveria preservar")
 	}
 	if crypto.DecryptFieldWithFallback(senhaEnc) != "senha-que-deve-sobreviver" {
@@ -544,7 +598,7 @@ func TestNFSeCertificado_IsolamentoEntreTenants_EmpresaBNaoAcessaCertificadoDaEm
 	defer cleanupB()
 
 	recSave := postSaveNFSeCert(t, db, authedA, map[string]interface{}{
-		"certificado_pfx":   validPfxBase64(),
+		"certificado_pfx":   genValidPfxBase64(t, "segredo-da-empresa-a"),
 		"certificado_senha": "segredo-da-empresa-a",
 		"nome_arquivo":      "empresa-a.pfx",
 		"validade":          "2027-07-07",
@@ -615,7 +669,7 @@ func TestSaveNFSeCertificadoHandler_IsolamentoEntreTenants_SaveForjadoNaoAfetaCe
 	defer cleanupB()
 
 	recSave := postSaveNFSeCert(t, db, authedA, map[string]interface{}{
-		"certificado_pfx":   validPfxBase64(),
+		"certificado_pfx":   genValidPfxBase64(t, "segredo-da-empresa-a"),
 		"certificado_senha": "segredo-da-empresa-a",
 		"nome_arquivo":      "empresa-a.pfx",
 		"validade":          "2027-07-07",
@@ -631,7 +685,7 @@ func TestSaveNFSeCertificadoHandler_IsolamentoEntreTenants_SaveForjadoNaoAfetaCe
 	}
 
 	recForjado := postSaveNFSeCert(t, db, forjado, map[string]interface{}{
-		"certificado_pfx":   base64.StdEncoding.EncodeToString([]byte("certificado-forjado-pela-empresa-b")),
+		"certificado_pfx":   genValidPfxBase64(t, "senha-forjada-pela-empresa-b"),
 		"certificado_senha": "senha-forjada-pela-empresa-b",
 		"nome_arquivo":      "forjado.pfx",
 		"validade":          "2030-01-01",
@@ -708,5 +762,185 @@ func TestSaveNFSeCertificadoHandler_AuthMiddlewareNaoAdmin_Retorna403(t *testing
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("esperava 403 (role não-admin via AuthMiddleware), obteve %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Testes — normalização PKCS#12 BER->DER no upload (spec-nfse-pkcs12-normalizacao.md)
+// ---------------------------------------------------------------------------
+
+// mangleToIndefiniteLengthBER reescreve o byte de comprimento da SEQUENCE externa de um .pfx
+// DER válido para "indefinite length" (0x80 BER) e adiciona o marcador de fim-de-conteúdo
+// (0x00 0x00) — reproduz o erro real de produção ("asn1: syntax error: indefinite length found
+// (not DER)") sem depender de uma fixture de certificado real. Mesma técnica usada e validada
+// em services/nfse_pkcs12_test.go (duplicada aqui porque é um helper não-exportado do outro
+// pacote — ver convenção do projeto de não criar barris cross-package).
+func mangleToIndefiniteLengthBER(t *testing.T, pfxBytes []byte) []byte {
+	t.Helper()
+	if len(pfxBytes) < 2 || pfxBytes[0] != 0x30 {
+		t.Fatalf("esperava .pfx começando com SEQUENCE (0x30), veio %x", pfxBytes[:2])
+	}
+	var headerLen int
+	if pfxBytes[1]&0x80 == 0 {
+		headerLen = 2
+	} else {
+		numLenBytes := int(pfxBytes[1] & 0x7F)
+		headerLen = 2 + numLenBytes
+	}
+	content := pfxBytes[headerLen:]
+	mangled := append([]byte{0x30, 0x80}, content...)
+	mangled = append(mangled, 0x00, 0x00)
+	return mangled
+}
+
+// genBERPfxBase64 gera um .pfx de teste válido e o transforma em BER sintético (indefinite
+// length), devolvendo em base64 — mesmo formato aceito no corpo JSON do upload. Usado para
+// testar, através do handler de ponta a ponta, a mesma normalização BER->DER que corrigiu o
+// certificado real da Ferreira Costa (ver Intent da spec).
+func genBERPfxBase64(t *testing.T, senha string) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("falha ao gerar chave de teste: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: "certificado-teste-ber"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("falha ao criar certificado de teste: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("falha ao parsear certificado de teste: %v", err)
+	}
+	pfxBytes, err := pkcs12.Modern.Encode(key, cert, nil, senha)
+	if err != nil {
+		t.Fatalf("falha ao empacotar .pfx de teste: %v", err)
+	}
+	if _, _, err := pkcs12.Decode(pfxBytes, senha); err != nil {
+		t.Fatalf("pré-condição falhou: .pfx original deveria decodificar direto: %v", err)
+	}
+	ber := mangleToIndefiniteLengthBER(t, pfxBytes)
+	if _, _, err := pkcs12.Decode(ber, senha); err == nil {
+		t.Fatal("pré-condição falhou: .pfx BER sintético deveria falhar no pkcs12.Decode direto")
+	}
+	return base64.StdEncoding.EncodeToString(ber)
+}
+
+// TestSaveNFSeCertificadoHandler_CertificadoBER_NormalizaEPersisteDER cobre o 1º Acceptance
+// Criterion de ponta a ponta através do handler real: um certificado .pfx BER-encoded válido
+// (senha correta) é aceito (201) e o valor persistido em certificado_pfx já decodifica direto
+// com pkcs12.Decode — ou seja, já normalizado para DER — exatamente o cenário do certificado
+// real da Ferreira Costa que motivou esta spec.
+func TestSaveNFSeCertificadoHandler_CertificadoBER_NormalizaEPersisteDER(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	senha := "senha-do-certificado-ber"
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx":   genBERPfxBase64(t, senha),
+		"certificado_senha": senha,
+		"nome_arquivo":      "certificado-ber.pfx",
+		"validade":          "2027-09-09",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("upload de certificado BER: esperava 201, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var pfxEnc string
+	if err := db.QueryRow(`SELECT certificado_pfx FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&pfxEnc); err != nil {
+		t.Fatalf("falha ao ler certificado_pfx persistido: %v", err)
+	}
+	pfxPersistidoB64 := crypto.DecryptFieldWithFallback(pfxEnc)
+	pfxPersistido, err := base64.StdEncoding.DecodeString(pfxPersistidoB64)
+	if err != nil {
+		t.Fatalf("certificado_pfx persistido não é base64 válido: %v", err)
+	}
+	if _, _, err := pkcs12.Decode(pfxPersistido, senha); err != nil {
+		t.Fatalf("certificado_pfx persistido deveria decodificar DIRETO com pkcs12.Decode (já normalizado para DER), veio erro: %v", err)
+	}
+}
+
+// TestSaveNFSeCertificadoHandler_CertificadoJaDER_NaoRegride cobre o 4º Acceptance Criterion:
+// um certificado já DER-compatível continua funcionando exatamente como antes (sem regressão),
+// sem precisar do fallback via openssl — a normalização aqui é só o caminho rápido
+// (pkcs12.Decode direto).
+func TestSaveNFSeCertificadoHandler_CertificadoJaDER_NaoRegride(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	_, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx":   genValidPfxBase64(t, "senha-der-compativel"),
+		"certificado_senha": "senha-der-compativel",
+		"nome_arquivo":      "ja-der.pfx",
+		"validade":          "2027-10-10",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("certificado já DER-compatível: esperava 201 (sem regressão), obteve %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSaveNFSeCertificadoHandler_SenhaIncorreta_Retorna400 cobre o 2º Acceptance Criterion:
+// senha incorreta (pkcs12.Decode falha E o fallback via openssl também falha, por MAC/senha)
+// deve retornar 400 com mensagem clara, nunca 500 nem confundir com "openssl ausente" — exercita
+// diretamente a chamada real a services.NormalizarPKCS12ParaDER feita por
+// SaveNFSeCertificadoHandler (não um mock), usando um .pfx de teste de verdade.
+func TestSaveNFSeCertificadoHandler_SenhaIncorreta_Retorna400(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	_, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	pfx := genValidPfxBase64(t, "senha-verdadeira")
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx":   pfx,
+		"certificado_senha": "senha-ERRADA-de-proposito",
+		"nome_arquivo":      "senha-errada.pfx",
+		"validade":          "2027-01-01",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("senha incorreta: esperava 400, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("falha ao decodificar corpo do erro: %v", err)
+	}
+	if strings.Contains(strings.ToLower(body["error"]), "openssl") {
+		t.Errorf("mensagem de senha incorreta nunca deveria mencionar openssl (confundiria o usuário com um problema de ambiente): %q", body["error"])
+	}
+}
+
+// TestSaveNFSeCertificadoHandler_OpensslAusente_Retorna500 cobre o 3º Acceptance Criterion: com
+// o binário openssl ausente do ambiente (simulado via PATH vazio, sem desinstalar o openssl do
+// ambiente de CI/dev de verdade) e um certificado BER (que precisaria do fallback), o handler
+// responde 500 — nunca confundido com senha incorreta (400).
+func TestSaveNFSeCertificadoHandler_OpensslAusente_Retorna500(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	_, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	senha := "senha-sem-openssl"
+	pfxBase64 := genBERPfxBase64(t, senha) // BER de propósito: precisaria do fallback via openssl
+
+	t.Setenv("PATH", "")
+
+	rec := postSaveNFSeCert(t, db, authed, map[string]interface{}{
+		"certificado_pfx":   pfxBase64,
+		"certificado_senha": senha,
+		"nome_arquivo":      "sem-openssl.pfx",
+		"validade":          "2027-01-01",
+	})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("openssl ausente: esperava 500 (problema de ambiente, não do usuário), obteve %d: %s", rec.Code, rec.Body.String())
 	}
 }
