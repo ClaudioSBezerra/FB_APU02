@@ -290,6 +290,8 @@ func runNFSeSchedulerCycleComEstado(db *sql.DB, estado *nfseSchedulerEstado, now
 // parcial por backlog continua no tick seguinte; erro/parcial por falha retenta depois de
 // nfseSchedulerIntervaloRetentativa.
 //
+// Com o banco pronto, dispara uma vez IniciarReprocessamentoXMLNFSe (nfse_reprocessar.go).
+//
 // Deve ser chamado como goroutine no startup (main.go, logo após
 // `go services.StartRFBScheduler(getDB)`). Usa dbFn para obter o DB após ele estar pronto.
 func StartNFSeScheduler(dbFn func() *sql.DB) {
@@ -314,6 +316,10 @@ func StartNFSeScheduler(dbFn func() *sql.DB) {
 		time.Sleep(5 * time.Second)
 	}
 	log.Println("[NFSe Scheduler] Banco pronto. Scheduler NFS-e iniciado.")
+
+	// Reextrai do XML gravado as notas capturadas por uma versão anterior do parser (ex.: sem
+	// IBS/CBS) — uma vez por boot, em goroutine própria (não atrasa o ticker).
+	IniciarReprocessamentoXMLNFSe(db)
 
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()

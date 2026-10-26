@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -342,5 +343,79 @@ func TestNFSeEntradasListHandler_CanceladaListadaMasForaDosTotais(t *testing.T) 
 				t.Errorf("item ativo não deveria estar cancelado: %+v", it)
 			}
 		}
+	}
+}
+
+// spec-nfse-ibscbs-xml.md: campos IBS/CBS expostos na listagem (null = grupo ausente, distinto de
+// 0) e totais total_ibs/total_cbs excluindo canceladas e ignorando NULL.
+func TestNFSeSaidasListHandler_IBSCBS_CamposETotais(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	insertNFSeDoc(t, db, "nfse_saidas", companyID, "nfse-ibscbs", "38149716000128", "10230480001960", "10/2026", 24000, 720)
+	insertNFSeDoc(t, db, "nfse_saidas", companyID, "nfse-ibscbs-cancelada", "38149716000128", "10230480001960", "10/2026", 1000, 30)
+	insertNFSeDoc(t, db, "nfse_saidas", companyID, "nfse-sem-grupo", "38149716000128", "10230480001960", "10/2026", 500, 15)
+	if _, err := db.Exec(`UPDATE nfse_saidas SET base_iss = 24000, aliquota_iss = 3,
+			ibscbs_cod_localidade_incid = '2611606', ibscbs_base = 23280, ibs_uf_aliquota = 0.10, ibs_uf_aliquota_efetiva = 0.10,
+			ibs_mun_aliquota = 0, ibs_mun_aliquota_efetiva = 0, cbs_aliquota = 0.90, cbs_aliquota_efetiva = 0.90,
+			ibscbs_valor_total_nf = 24000, ibs_total = 23.28, ibs_uf = 23.28, ibs_mun = 0, cbs = 209.52,
+			ibscbs_fin_nfse = '0', ibscbs_ind_op = '100301', ibscbs_ind_dest = '0', ibscbs_cst = '000', ibscbs_cclass_trib = '000001',
+			xml_parser_versao = 2
+		WHERE company_id = $1 AND identificador_nfse = 'nfse-ibscbs'`, companyID); err != nil {
+		t.Fatalf("preencher IBS/CBS: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE nfse_saidas SET ibs_total = 1, cbs = 9, cancelada = true
+		WHERE company_id = $1 AND identificador_nfse = 'nfse-ibscbs-cancelada'`, companyID); err != nil {
+		t.Fatalf("marcar cancelada: %v", err)
+	}
+
+	rec := getNFSeList(t, db, authed, "/api/nfse-saidas?mes_ano=10/2026", NFSeSaidasListHandler)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperava HTTP 200, obteve %d — corpo: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeNFSeList(t, rec)
+	if body.Total != 3 {
+		t.Fatalf("esperava 3 itens, veio %d", body.Total)
+	}
+	if body.Totals["total_ibs"] != 23.28 || body.Totals["total_cbs"] != 209.52 {
+		t.Errorf("totais IBS/CBS deveriam excluir a cancelada (23.28/209.52), veio %+v", body.Totals)
+	}
+	f := func(p *float64) interface{} {
+		if p == nil {
+			return nil
+		}
+		return *p
+	}
+	s := func(p *string) interface{} {
+		if p == nil {
+			return nil
+		}
+		return *p
+	}
+	for _, it := range body.Items {
+		switch it.IdentificadorNFSe {
+		case "nfse-ibscbs":
+			got := []interface{}{it.BaseISS, it.AliquotaISS, s(it.IBSCBSCodLocalidadeIncid), f(it.IBSCBSBase),
+				f(it.IBSUFAliquota), f(it.IBSUFAliquotaEfetiva), f(it.IBSMunAliquota), f(it.IBSMunAliquotaEfetiva),
+				f(it.CBSAliquota), f(it.CBSAliquotaEfetiva), f(it.IBSCBSValorTotalNF), f(it.IBSTotal), f(it.IBSUF), f(it.IBSMun), f(it.CBS),
+				s(it.IBSCBSFinNFSe), s(it.IBSCBSIndOp), s(it.IBSCBSIndDest), s(it.IBSCBSCST), s(it.IBSCBSCClassTrib)}
+			want := []interface{}{24000.0, 3.0, "2611606", 23280.0, 0.10, 0.10, 0.0, 0.0, 0.90, 0.90, 24000.0, 23.28, 23.28, 0.0, 209.52,
+				"0", "100301", "0", "000", "000001"}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Errorf("campo %d: veio %v, esperado %v", i, got[i], want[i])
+				}
+			}
+		case "nfse-sem-grupo":
+			if it.IBSTotal != nil || it.CBS != nil || it.IBSCBSBase != nil || it.IBSCBSCST != nil {
+				t.Errorf("nota sem grupo IBSCBS deveria vir com null: %+v", it)
+			}
+		}
+	}
+	// JSON: ausente = null (não 0).
+	if !strings.Contains(rec.Body.String(), `"ibs_total":null`) {
+		t.Errorf("esperava \"ibs_total\":null para a nota sem grupo IBSCBS no JSON")
 	}
 }

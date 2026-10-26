@@ -88,9 +88,12 @@ type nfseXMLDoc struct {
 			CPF  string `xml:"CPF"`
 		} `xml:"emit"`
 		Valores struct {
-			VISSQN string `xml:"vISSQN"`
+			VBC        string `xml:"vBC"`
+			PAliqAplic string `xml:"pAliqAplic"`
+			VISSQN     string `xml:"vISSQN"`
 		} `xml:"valores"`
-		DPS struct {
+		IBSCBS *nfseXMLIBSCBSNota `xml:"IBSCBS"`
+		DPS    struct {
 			Inf struct {
 				DhEmi   string `xml:"dhEmi"`
 				DCompet string `xml:"dCompet"`
@@ -121,12 +124,93 @@ type nfseXMLDoc struct {
 						} `xml:"tribFed"`
 					} `xml:"trib"`
 				} `xml:"valores"`
+				IBSCBS *nfseXMLIBSCBSDPS `xml:"IBSCBS"`
 			} `xml:"infDPS"`
 		} `xml:"DPS"`
 	} `xml:"infNFSe"`
 }
 
-// NFSeDadosXML são os campos fiscais extraídos de uma NFS-e. Campo ausente = "" / 0.
+// nfseXMLIBSCBSNota é o grupo infNFSe/IBSCBS (leiaute 1.01): valores de IBS/CBS calculados pelo
+// emissor/ADN. Ponteiro no nfseXMLDoc: nil = grupo ausente (nota anterior à reforma).
+type nfseXMLIBSCBSNota struct {
+	CLocalidadeIncid string `xml:"cLocalidadeIncid"`
+	Valores          struct {
+		VBC string `xml:"vBC"`
+		UF  struct {
+			PIBSUF      string `xml:"pIBSUF"`
+			PAliqEfetUF string `xml:"pAliqEfetUF"`
+		} `xml:"uf"`
+		Mun struct {
+			PIBSMun      string `xml:"pIBSMun"`
+			PAliqEfetMun string `xml:"pAliqEfetMun"`
+		} `xml:"mun"`
+		Fed struct {
+			PCBS         string `xml:"pCBS"`
+			PAliqEfetCBS string `xml:"pAliqEfetCBS"`
+		} `xml:"fed"`
+	} `xml:"valores"`
+	TotCIBS struct {
+		VTotNF string `xml:"vTotNF"`
+		GIBS   struct {
+			VIBSTot   string `xml:"vIBSTot"`
+			GIBSUFTot struct {
+				VIBSUF string `xml:"vIBSUF"`
+			} `xml:"gIBSUFTot"`
+			GIBSMunTot struct {
+				VIBSMun string `xml:"vIBSMun"`
+			} `xml:"gIBSMunTot"`
+		} `xml:"gIBS"`
+		GCBS struct {
+			VCBS string `xml:"vCBS"`
+		} `xml:"gCBS"`
+	} `xml:"totCIBS"`
+}
+
+// nfseXMLIBSCBSDPS é o grupo infNFSe/DPS/infDPS/IBSCBS: classificação informada na DPS.
+type nfseXMLIBSCBSDPS struct {
+	FinNFSe string `xml:"finNFSe"`
+	CIndOp  string `xml:"cIndOp"`
+	IndDest string `xml:"indDest"`
+	Valores struct {
+		Trib struct {
+			GIBSCBS struct {
+				CST        string `xml:"CST"`
+				CClassTrib string `xml:"cClassTrib"`
+			} `xml:"gIBSCBS"`
+		} `xml:"trib"`
+	} `xml:"valores"`
+}
+
+// NFSeXMLParserVersao é a versão do parser gravada em xml_parser_versao (migration 135): linhas
+// com versão menor são reextraídas de xml_gzip_b64 no boot (ReprocessarXMLNFSe). Versão 2 = IBS/CBS
+// e base/alíquota do ISS (spec-nfse-ibscbs-xml.md).
+const NFSeXMLParserVersao = 2
+
+// NFSeIBSCBSDados são os campos de IBS/CBS da NFS-e. nil = elemento (ou grupo IBSCBS inteiro)
+// ausente no XML, ou valor presente mas não interpretável — gravado como NULL, distinto de 0.
+type NFSeIBSCBSDados struct {
+	CodLocalidadeIncid    *string  // infNFSe/IBSCBS/cLocalidadeIncid
+	Base                  *float64 // IBSCBS/valores/vBC
+	IBSUFAliquota         *float64 // valores/uf/pIBSUF
+	IBSUFAliquotaEfetiva  *float64 // valores/uf/pAliqEfetUF
+	IBSMunAliquota        *float64 // valores/mun/pIBSMun
+	IBSMunAliquotaEfetiva *float64 // valores/mun/pAliqEfetMun
+	CBSAliquota           *float64 // valores/fed/pCBS
+	CBSAliquotaEfetiva    *float64 // valores/fed/pAliqEfetCBS
+	ValorTotalNF          *float64 // totCIBS/vTotNF
+	IBSTotal              *float64 // totCIBS/gIBS/vIBSTot
+	IBSUF                 *float64 // gIBS/gIBSUFTot/vIBSUF
+	IBSMun                *float64 // gIBS/gIBSMunTot/vIBSMun
+	CBS                   *float64 // totCIBS/gCBS/vCBS
+	FinNFSe               *string  // infDPS/IBSCBS/finNFSe
+	IndOp                 *string  // infDPS/IBSCBS/cIndOp
+	IndDest               *string  // infDPS/IBSCBS/indDest
+	CST                   *string  // infDPS/IBSCBS/valores/trib/gIBSCBS/CST
+	CClassTrib            *string  // infDPS/IBSCBS/valores/trib/gIBSCBS/cClassTrib
+}
+
+// NFSeDadosXML são os campos fiscais extraídos de uma NFS-e. Campo ausente = "" / 0 (exceto
+// IBSCBS, em que ausente = nil).
 type NFSeDadosXML struct {
 	IDInfNFSe     string // atributo Id de infNFSe ("NFS" + chave de acesso)
 	NumeroNFSe    string // infNFSe/nNFSe
@@ -146,6 +230,9 @@ type NFSeDadosXML struct {
 	IRRF          float64
 	CSLL          float64
 	INSS          float64 // tribFed/vRetCP
+	BaseISS       float64 // infNFSe/valores/vBC
+	AliquotaISS   float64 // infNFSe/valores/pAliqAplic
+	IBSCBS        NFSeIBSCBSDados
 }
 
 // extrairDadosNFSeXML interpreta o XML de uma NFS-e. Erro só quando o XML é malformado ou a raiz
@@ -157,8 +244,8 @@ func extrairDadosNFSeXML(xmlBytes []byte) (NFSeDadosXML, error) {
 }
 
 // extrairDadosNFSeXMLDetalhado é extrairDadosNFSeXML devolvendo também os nomes dos campos
-// decimais PRESENTES mas não interpretáveis (gravados como 0) — o processor loga com o NSU e
-// conta, em vez de zerar valores fiscais em silêncio.
+// decimais PRESENTES mas não interpretáveis (gravados como 0; nos campos IBS/CBS, como NULL) — o
+// processor loga com o NSU e conta, em vez de zerar valores fiscais em silêncio.
 func extrairDadosNFSeXMLDetalhado(xmlBytes []byte) (NFSeDadosXML, []string, error) {
 	var doc nfseXMLDoc
 	dec := xml.NewDecoder(bytes.NewReader(xmlBytes))
@@ -194,6 +281,47 @@ func extrairDadosNFSeXMLDetalhado(xmlBytes []byte) (NFSeDadosXML, []string, erro
 		IRRF:          dec64("vRetIRRF", dps.Valores.Trib.TribFed.VRetIRRF),
 		CSLL:          dec64("vRetCSLL", dps.Valores.Trib.TribFed.VRetCSLL),
 		INSS:          dec64("vRetCP", dps.Valores.Trib.TribFed.VRetCP),
+		BaseISS:       dec64("vBC", inf.Valores.VBC),
+		AliquotaISS:   dec64("pAliqAplic", inf.Valores.PAliqAplic),
+	}
+
+	// IBS/CBS: elemento ausente ou vazio = nil (NULL); presente mas inválido (ou fora da precisão
+	// da coluna, que faria o INSERT falhar) = nil + campo em invalidos.
+	decPtr := func(campo, v string, limite float64) *float64 {
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		f, ok := decimalNFSeOK(v)
+		if !ok || math.Abs(f) >= limite {
+			invalidos = append(invalidos, campo)
+			return nil
+		}
+		return &f
+	}
+	valor := func(campo, v string) *float64 { return decPtr(campo, v, nfseLimiteValor) }
+	aliq := func(campo, v string) *float64 { return decPtr(campo, v, nfseLimiteAliquota) }
+	if g := inf.IBSCBS; g != nil {
+		v, tot := &g.Valores, &g.TotCIBS
+		d.IBSCBS.CodLocalidadeIncid = textoNFSePtr(g.CLocalidadeIncid)
+		d.IBSCBS.Base = valor("IBSCBS/vBC", v.VBC)
+		d.IBSCBS.IBSUFAliquota = aliq("pIBSUF", v.UF.PIBSUF)
+		d.IBSCBS.IBSUFAliquotaEfetiva = aliq("pAliqEfetUF", v.UF.PAliqEfetUF)
+		d.IBSCBS.IBSMunAliquota = aliq("pIBSMun", v.Mun.PIBSMun)
+		d.IBSCBS.IBSMunAliquotaEfetiva = aliq("pAliqEfetMun", v.Mun.PAliqEfetMun)
+		d.IBSCBS.CBSAliquota = aliq("pCBS", v.Fed.PCBS)
+		d.IBSCBS.CBSAliquotaEfetiva = aliq("pAliqEfetCBS", v.Fed.PAliqEfetCBS)
+		d.IBSCBS.ValorTotalNF = valor("vTotNF", tot.VTotNF)
+		d.IBSCBS.IBSTotal = valor("vIBSTot", tot.GIBS.VIBSTot)
+		d.IBSCBS.IBSUF = valor("vIBSUF", tot.GIBS.GIBSUFTot.VIBSUF)
+		d.IBSCBS.IBSMun = valor("vIBSMun", tot.GIBS.GIBSMunTot.VIBSMun)
+		d.IBSCBS.CBS = valor("vCBS", tot.GCBS.VCBS)
+	}
+	if g := dps.IBSCBS; g != nil {
+		d.IBSCBS.FinNFSe = textoNFSePtr(g.FinNFSe)
+		d.IBSCBS.IndOp = textoNFSePtr(g.CIndOp)
+		d.IBSCBS.IndDest = textoNFSePtr(g.IndDest)
+		d.IBSCBS.CST = textoNFSePtr(g.Valores.Trib.GIBSCBS.CST)
+		d.IBSCBS.CClassTrib = textoNFSePtr(g.Valores.Trib.GIBSCBS.CClassTrib)
 	}
 	switch strings.TrimSpace(dps.Valores.Trib.TribMun.TpRetISSQN) {
 	case "2", "3":
@@ -211,6 +339,27 @@ func extrairDadosNFSeXMLDetalhado(xmlBytes []byte) (NFSeDadosXML, []string, erro
 		d.MesAno = emissao.Format("01/2006")
 	}
 	return d, invalidos, nil
+}
+
+// Limites de magnitude dos campos IBS/CBS (migration 135): valores NUMERIC(15,2) e alíquotas
+// NUMERIC(7,4). Acima disso o Postgres recusaria o INSERT (e o documento iria para a quarentena por
+// um único campo) — o valor é tratado como inválido (NULL + log).
+const (
+	nfseLimiteValor    = 1e13
+	nfseLimiteAliquota = 1e3
+)
+
+// nfseMaxCodigoIBSCBS é o tamanho das colunas VARCHAR de códigos IBS/CBS (migration 135).
+const nfseMaxCodigoIBSCBS = 20
+
+// textoNFSePtr devolve nil para texto vazio; senão o texto aparado (truncado ao tamanho da coluna).
+func textoNFSePtr(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	v = TruncateRunes(v, nfseMaxCodigoIBSCBS)
+	return &v
 }
 
 // ─── Charset ────────────────────────────────────────────────────────────────

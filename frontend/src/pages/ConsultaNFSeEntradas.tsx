@@ -25,8 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { X, AlertTriangle, ChevronLeft, ChevronRight, Copy, Check, ChevronUp, ChevronDown as ChevronDownIcon, ChevronsUpDown } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Copy, Check, ChevronUp, ChevronDown as ChevronDownIcon, ChevronsUpDown } from 'lucide-react';
 
 const PAGE_SIZE = 100;
 
@@ -42,6 +41,16 @@ interface NFSeRow {
   base_iss: number; iss: number; aliquota_iss: number; iss_retido: number;
   base_pis: number; pis: number; base_cofins: number; cofins: number;
   inss: number; irrf: number; csll: number;
+  // IBS/CBS (leiaute 1.01) — null = grupo IBSCBS ausente no XML (distinto de 0).
+  ibscbs_cod_localidade_incid: string | null;
+  ibscbs_base: number | null;
+  ibs_uf_aliquota: number | null; ibs_uf_aliquota_efetiva: number | null;
+  ibs_mun_aliquota: number | null; ibs_mun_aliquota_efetiva: number | null;
+  cbs_aliquota: number | null; cbs_aliquota_efetiva: number | null;
+  ibscbs_valor_total_nf: number | null;
+  ibs_total: number | null; ibs_uf: number | null; ibs_mun: number | null; cbs: number | null;
+  ibscbs_fin_nfse: string | null; ibscbs_ind_op: string | null; ibscbs_ind_dest: string | null;
+  ibscbs_cst: string | null; ibscbs_cclass_trib: string | null;
 }
 
 interface NFSeResponse {
@@ -49,6 +58,7 @@ interface NFSeResponse {
   totals: {
     valor_servicos: number; iss: number; pis: number; cofins: number;
     inss: number; irrf: number; csll: number;
+    total_ibs: number; total_cbs: number;
   };
   items: NFSeRow[];
 }
@@ -182,6 +192,24 @@ function DetalheNFSe({ nfse, onClose }: { nfse: NFSeRow; onClose: () => void }) 
             <LinhaBRL label="IRRF" value={nfse.irrf} />
             <LinhaBRL label="CSLL" value={nfse.csll} />
           </Secao>
+          <Secao title="IBS / CBS">
+            <LinhaBRL label="Base IBS/CBS" value={nfse.ibscbs_base} />
+            <Linha label="Alíq. IBS UF (%)" value={fmtNum(nfse.ibs_uf_aliquota)} />
+            <Linha label="Alíq. Efetiva IBS UF (%)" value={fmtNum(nfse.ibs_uf_aliquota_efetiva)} />
+            <Linha label="Alíq. IBS Mun (%)" value={fmtNum(nfse.ibs_mun_aliquota)} />
+            <Linha label="Alíq. Efetiva IBS Mun (%)" value={fmtNum(nfse.ibs_mun_aliquota_efetiva)} />
+            <Linha label="Alíq. CBS (%)" value={fmtNum(nfse.cbs_aliquota)} />
+            <Linha label="Alíq. Efetiva CBS (%)" value={fmtNum(nfse.cbs_aliquota_efetiva)} />
+            <LinhaBRL label="IBS UF" value={nfse.ibs_uf} />
+            <LinhaBRL label="IBS Municipal" value={nfse.ibs_mun} />
+            <LinhaBRL label="IBS Total" value={nfse.ibs_total} />
+            <LinhaBRL label="CBS" value={nfse.cbs} />
+            <LinhaBRL label="Valor Total NF" value={nfse.ibscbs_valor_total_nf} />
+            <Linha label="CST" value={nfse.ibscbs_cst ?? '—'} />
+            <Linha label="cClassTrib" value={nfse.ibscbs_cclass_trib ?? '—'} />
+            <Linha label="Indicador Operação" value={nfse.ibscbs_ind_op ?? '—'} />
+            <Linha label="Local Incidência (IBGE)" value={nfse.ibscbs_cod_localidade_incid ?? '—'} />
+          </Secao>
         </div>
       </DialogContent>
     </Dialog>
@@ -275,7 +303,7 @@ export default function ConsultaNFSeEntradas() {
   const items      = data?.items      ?? [];
   const total      = data?.total      ?? 0;
   const totalPages = data?.total_pages ?? 1;
-  const totals     = data?.totals     ?? { valor_servicos: 0, iss: 0, pis: 0, cofins: 0, inss: 0, irrf: 0, csll: 0 };
+  const totals     = data?.totals     ?? { valor_servicos: 0, iss: 0, pis: 0, cofins: 0, inss: 0, irrf: 0, csll: 0, total_ibs: 0, total_cbs: 0 };
 
   const hasFilters = !!(filterPrestador || filterDataDe || filterDataAte);
 
@@ -293,16 +321,6 @@ export default function ConsultaNFSeEntradas() {
           Consulta de NFS-e de serviços tomados, capturadas via Portal Nacional ADN. Clique em uma linha para ver todos os dados.
         </p>
       </div>
-
-      <Alert variant="destructive" className="border-amber-300 bg-amber-50 text-amber-900 [&>svg]:text-amber-600">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>Valores tributários ainda não confirmados</AlertTitle>
-        <AlertDescription>
-          ISS, PIS, COFINS, INSS, IRRF e CSLL aparecem zerados até o formato real do payload do
-          Portal Nacional ADN ser confirmado e o parser ser ajustado. Zero aqui significa "captura
-          ainda não validada", não "sem crédito".
-        </AlertDescription>
-      </Alert>
 
       <Card>
         <CardContent className="pt-4 space-y-3">
@@ -368,6 +386,8 @@ export default function ConsultaNFSeEntradas() {
             { label: 'Total INSS',     value: totals.inss },
             { label: 'Total IRRF',     value: totals.irrf },
             { label: 'Total CSLL',     value: totals.csll },
+            { label: 'Total IBS',      value: totals.total_ibs },
+            { label: 'Total CBS',      value: totals.total_cbs },
           ].map(c => (
             <Card key={c.label} className="p-2">
               <p className="text-[10px] text-muted-foreground">{c.label}</p>
@@ -415,6 +435,8 @@ export default function ConsultaNFSeEntradas() {
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap cursor-pointer select-none hover:text-foreground" onClick={() => handleSort('cofins')}>
                         COFINS (R$) <SortIcon col="cofins" />
                       </TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IBS (R$)</TableHead>
+                      <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">CBS (R$)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">INSS (R$)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">IRRF (R$)</TableHead>
                       <TableHead className="py-1.5 px-2 text-[11px] text-right whitespace-nowrap">CSLL (R$)</TableHead>
@@ -440,6 +462,8 @@ export default function ConsultaNFSeEntradas() {
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.iss_retido)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.pis)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.cofins)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.ibs_total)}</TableCell>
+                        <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.cbs)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.inss)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.irrf)}</TableCell>
                         <TableCell className="py-0.5 px-2 text-[11px] text-right whitespace-nowrap tabular-nums">{fmtNum(row.csll)}</TableCell>

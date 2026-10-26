@@ -18,6 +18,8 @@ import (
 // cancelada/numero_nfse/data_cancelamento (migration 134) foram ACRESCENTADOS ao contrato —
 // nenhum campo anterior mudou. Notas canceladas aparecem na listagem (com cancelada=true) mas
 // ficam FORA dos totais.
+// Campos IBS/CBS (migration 135, spec-nfse-ibscbs-xml.md) também ACRESCENTADOS: ponteiros —
+// null no JSON = grupo IBSCBS (ou o elemento) ausente no XML, distinto de 0.
 // ---------------------------------------------------------------------------
 
 type nfseRow struct {
@@ -42,6 +44,25 @@ type nfseRow struct {
 	NumeroNFSe        string  `json:"numero_nfse"`
 	Cancelada         bool    `json:"cancelada"`
 	DataCancelamento  string  `json:"data_cancelamento"` // DD/MM/YYYY ou "" (mesmo formato de data_emissao)
+
+	IBSCBSCodLocalidadeIncid *string  `json:"ibscbs_cod_localidade_incid"`
+	IBSCBSBase               *float64 `json:"ibscbs_base"`
+	IBSUFAliquota            *float64 `json:"ibs_uf_aliquota"`
+	IBSUFAliquotaEfetiva     *float64 `json:"ibs_uf_aliquota_efetiva"`
+	IBSMunAliquota           *float64 `json:"ibs_mun_aliquota"`
+	IBSMunAliquotaEfetiva    *float64 `json:"ibs_mun_aliquota_efetiva"`
+	CBSAliquota              *float64 `json:"cbs_aliquota"`
+	CBSAliquotaEfetiva       *float64 `json:"cbs_aliquota_efetiva"`
+	IBSCBSValorTotalNF       *float64 `json:"ibscbs_valor_total_nf"`
+	IBSTotal                 *float64 `json:"ibs_total"`
+	IBSUF                    *float64 `json:"ibs_uf"`
+	IBSMun                   *float64 `json:"ibs_mun"`
+	CBS                      *float64 `json:"cbs"`
+	IBSCBSFinNFSe            *string  `json:"ibscbs_fin_nfse"`
+	IBSCBSIndOp              *string  `json:"ibscbs_ind_op"`
+	IBSCBSIndDest            *string  `json:"ibscbs_ind_dest"`
+	IBSCBSCST                *string  `json:"ibscbs_cst"`
+	IBSCBSCClassTrib         *string  `json:"ibscbs_cclass_trib"`
 }
 
 // nfseSafeSortCols — colunas aceitas em sort_by, mesmo princípio de allowlist já usado em
@@ -61,6 +82,24 @@ func nfseSanitizeFloat(v float64) float64 {
 		return 0
 	}
 	return v
+}
+
+// nfseFloatPtr converte um NUMERIC anulável em *float64 (nil = NULL); NaN/Inf viram nil.
+func nfseFloatPtr(v sql.NullFloat64) *float64 {
+	if !v.Valid || math.IsNaN(v.Float64) || math.IsInf(v.Float64, 0) {
+		return nil
+	}
+	f := v.Float64
+	return &f
+}
+
+// nfseStrPtr converte um VARCHAR anulável em *string (nil = NULL).
+func nfseStrPtr(v sql.NullString) *string {
+	if !v.Valid {
+		return nil
+	}
+	s := v.String
+	return &s
 }
 
 // nfseCompetencias é o corpo compartilhado de NFSeEntradasCompetenciasHandler/
@@ -237,15 +276,17 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 			return
 		}
 
-		// Totais excluem notas canceladas (a contagem/listagem acima continua incluindo-as).
-		var totValorServicos, totISS, totPIS, totCOFINS, totINSS, totIRRF, totCSLL float64
+		// Totais excluem notas canceladas (a contagem/listagem acima continua incluindo-as). IBS/CBS
+		// NULL (nota sem grupo IBSCBS) não soma (SUM ignora NULL).
+		var totValorServicos, totISS, totPIS, totCOFINS, totINSS, totIRRF, totCSLL, totIBS, totCBS float64
 		if err := db.QueryRow(
 			"SELECT COALESCE(SUM(valor_servicos) FILTER (WHERE NOT cancelada),0), COALESCE(SUM(iss) FILTER (WHERE NOT cancelada),0), "+
 				"COALESCE(SUM(pis) FILTER (WHERE NOT cancelada),0), COALESCE(SUM(cofins) FILTER (WHERE NOT cancelada),0), "+
 				"COALESCE(SUM(inss) FILTER (WHERE NOT cancelada),0), COALESCE(SUM(irrf) FILTER (WHERE NOT cancelada),0), "+
-				"COALESCE(SUM(csll) FILTER (WHERE NOT cancelada),0) FROM "+table+" "+where,
+				"COALESCE(SUM(csll) FILTER (WHERE NOT cancelada),0), "+
+				"COALESCE(SUM(ibs_total) FILTER (WHERE NOT cancelada),0), COALESCE(SUM(cbs) FILTER (WHERE NOT cancelada),0) FROM "+table+" "+where,
 			args...,
-		).Scan(&totValorServicos, &totISS, &totPIS, &totCOFINS, &totINSS, &totIRRF, &totCSLL); err != nil {
+		).Scan(&totValorServicos, &totISS, &totPIS, &totCOFINS, &totINSS, &totIRRF, &totCSLL, &totIBS, &totCBS); err != nil {
 			log.Printf("%s sum error: %v", logPrefix, err)
 			jsonErr(w, http.StatusInternalServerError, "Erro ao consultar banco")
 			return
@@ -257,6 +298,8 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 		totINSS = nfseSanitizeFloat(totINSS)
 		totIRRF = nfseSanitizeFloat(totIRRF)
 		totCSLL = nfseSanitizeFloat(totCSLL)
+		totIBS = nfseSanitizeFloat(totIBS)
+		totCBS = nfseSanitizeFloat(totCBS)
 
 		offset := (page - 1) * pageSize
 		if offset < 0 {
@@ -274,7 +317,12 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 				COALESCE(base_pis, 0), COALESCE(pis, 0), COALESCE(base_cofins, 0), COALESCE(cofins, 0),
 				COALESCE(inss, 0), COALESCE(irrf, 0), COALESCE(csll, 0),
 				COALESCE(numero_nfse, ''), cancelada,
-				COALESCE(TO_CHAR(data_cancelamento AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY'), '')
+				COALESCE(TO_CHAR(data_cancelamento AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY'), ''),
+				ibscbs_cod_localidade_incid, ibscbs_base,
+				ibs_uf_aliquota, ibs_uf_aliquota_efetiva, ibs_mun_aliquota, ibs_mun_aliquota_efetiva,
+				cbs_aliquota, cbs_aliquota_efetiva,
+				ibscbs_valor_total_nf, ibs_total, ibs_uf, ibs_mun, cbs,
+				ibscbs_fin_nfse, ibscbs_ind_op, ibscbs_ind_dest, ibscbs_cst, ibscbs_cclass_trib
 			FROM ` + table + " " + where +
 			fmt.Sprintf(" ORDER BY %s %s, identificador_nfse DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
@@ -290,6 +338,10 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 		list := []nfseRow{}
 		for rows.Next() {
 			var row nfseRow
+			var (
+				locIncid, finNFSe, indOp, indDest, cst, cClass                            sql.NullString
+				base, pUF, pUFEf, pMun, pMunEf, pCBS, pCBSEf, vTot, vIBS, vUF, vMun, vCBS sql.NullFloat64
+			)
 			if err := rows.Scan(
 				&row.ID, &row.IdentificadorNFSe,
 				&row.CNPJPrestador, &row.CNPJTomador,
@@ -299,6 +351,11 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 				&row.BasePIS, &row.PIS, &row.BaseCOFINS, &row.COFINS,
 				&row.INSS, &row.IRRF, &row.CSLL,
 				&row.NumeroNFSe, &row.Cancelada, &row.DataCancelamento,
+				&locIncid, &base,
+				&pUF, &pUFEf, &pMun, &pMunEf,
+				&pCBS, &pCBSEf,
+				&vTot, &vIBS, &vUF, &vMun, &vCBS,
+				&finNFSe, &indOp, &indDest, &cst, &cClass,
 			); err != nil {
 				log.Printf("%s scan error: %v", logPrefix, err)
 				continue
@@ -315,6 +372,15 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 			row.INSS = nfseSanitizeFloat(row.INSS)
 			row.IRRF = nfseSanitizeFloat(row.IRRF)
 			row.CSLL = nfseSanitizeFloat(row.CSLL)
+			row.IBSCBSCodLocalidadeIncid = nfseStrPtr(locIncid)
+			row.IBSCBSBase = nfseFloatPtr(base)
+			row.IBSUFAliquota, row.IBSUFAliquotaEfetiva = nfseFloatPtr(pUF), nfseFloatPtr(pUFEf)
+			row.IBSMunAliquota, row.IBSMunAliquotaEfetiva = nfseFloatPtr(pMun), nfseFloatPtr(pMunEf)
+			row.CBSAliquota, row.CBSAliquotaEfetiva = nfseFloatPtr(pCBS), nfseFloatPtr(pCBSEf)
+			row.IBSCBSValorTotalNF = nfseFloatPtr(vTot)
+			row.IBSTotal, row.IBSUF, row.IBSMun, row.CBS = nfseFloatPtr(vIBS), nfseFloatPtr(vUF), nfseFloatPtr(vMun), nfseFloatPtr(vCBS)
+			row.IBSCBSFinNFSe, row.IBSCBSIndOp, row.IBSCBSIndDest = nfseStrPtr(finNFSe), nfseStrPtr(indOp), nfseStrPtr(indDest)
+			row.IBSCBSCST, row.IBSCBSCClassTrib = nfseStrPtr(cst), nfseStrPtr(cClass)
 			list = append(list, row)
 		}
 		if err := rows.Err(); err != nil {
@@ -337,6 +403,8 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 				"inss":           totINSS,
 				"irrf":           totIRRF,
 				"csll":           totCSLL,
+				"total_ibs":      totIBS,
+				"total_cbs":      totCBS,
 			},
 			"items": list,
 		})

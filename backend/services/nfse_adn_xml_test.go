@@ -46,6 +46,7 @@ func TestNFSeExtrairDadosNFSeXML_TodosOsCampos(t *testing.T) {
 		MesAno:        "09/2026",
 		ValorServicos: 10000, ISS: 500, ISSRetido: 500,
 		PIS: 65, COFINS: 300, INSS: 1100, IRRF: 150, CSLL: 100,
+		BaseISS: 10000, AliquotaISS: 5, // infNFSe/valores/vBC e pAliqAplic; sem grupo IBSCBS = nil
 	}
 	if d != want {
 		t.Errorf("extração divergiu:\n veio %+v\nesperado %+v", d, want)

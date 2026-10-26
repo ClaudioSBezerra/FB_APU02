@@ -317,36 +317,74 @@ var nfseADNEventosNaoCancelamento = map[string]bool{
 	"DESBLOQUEIO_POR_OFICIO":                  true,
 }
 
+// nfseColunasXML são as colunas de nfse_entradas/nfse_saidas cujo valor sai do XML da NFS-e (na
+// mesma ordem de valoresXMLNFSe) — compartilhadas pelo upsert da captura e pelo reprocessamento
+// (ReprocessarXMLNFSe), que nunca toca cancelada/data_cancelamento/nsu/xml_gzip_b64.
+var nfseColunasXML = []string{
+	"cnpj_prestador", "cnpj_tomador", "data_emissao", "mes_ano", "valor_servicos",
+	"iss", "iss_retido", "pis", "cofins", "irrf", "csll", "inss", "numero_nfse",
+	"base_iss", "aliquota_iss",
+	"ibscbs_cod_localidade_incid", "ibscbs_base",
+	"ibs_uf_aliquota", "ibs_uf_aliquota_efetiva", "ibs_mun_aliquota", "ibs_mun_aliquota_efetiva",
+	"cbs_aliquota", "cbs_aliquota_efetiva",
+	"ibscbs_valor_total_nf", "ibs_total", "ibs_uf", "ibs_mun", "cbs",
+	"ibscbs_fin_nfse", "ibscbs_ind_op", "ibscbs_ind_dest", "ibscbs_cst", "ibscbs_cclass_trib",
+	"xml_parser_versao",
+}
+
+// valoresXMLNFSe devolve os valores de nfseColunasXML (mesma ordem) para os dados extraídos.
+// Campos IBS/CBS nil viram NULL. xml_parser_versao = NFSeXMLParserVersao.
+func valoresXMLNFSe(d NFSeDadosXML) []interface{} {
+	numero := d.NumeroNFSe
+	if len(numero) > 20 {
+		numero = numero[:20]
+	}
+	g := d.IBSCBS
+	return []interface{}{
+		nullableNFSeCNPJ(documentoParteNFSe([]string{d.CNPJPrestador, d.CNPJEmitente}, firstNonEmpty(d.CPFPrestador, d.CPFEmitente))),
+		nullableNFSeCNPJ(documentoParteNFSe([]string{d.CNPJTomador}, d.CPFTomador)),
+		nullableNFSeTexto(d.DataEmissao), nullableNFSeTexto(d.MesAno), d.ValorServicos,
+		d.ISS, d.ISSRetido, d.PIS, d.COFINS, d.IRRF, d.CSLL, d.INSS, nullableNFSeTexto(numero),
+		d.BaseISS, d.AliquotaISS,
+		nullableNFSeStrPtr(g.CodLocalidadeIncid), nullableNFSeFloatPtr(g.Base),
+		nullableNFSeFloatPtr(g.IBSUFAliquota), nullableNFSeFloatPtr(g.IBSUFAliquotaEfetiva),
+		nullableNFSeFloatPtr(g.IBSMunAliquota), nullableNFSeFloatPtr(g.IBSMunAliquotaEfetiva),
+		nullableNFSeFloatPtr(g.CBSAliquota), nullableNFSeFloatPtr(g.CBSAliquotaEfetiva),
+		nullableNFSeFloatPtr(g.ValorTotalNF), nullableNFSeFloatPtr(g.IBSTotal),
+		nullableNFSeFloatPtr(g.IBSUF), nullableNFSeFloatPtr(g.IBSMun), nullableNFSeFloatPtr(g.CBS),
+		nullableNFSeStrPtr(g.FinNFSe), nullableNFSeStrPtr(g.IndOp), nullableNFSeStrPtr(g.IndDest),
+		nullableNFSeStrPtr(g.CST), nullableNFSeStrPtr(g.CClassTrib),
+		NFSeXMLParserVersao,
+	}
+}
+
 // DECISÃO (spec-nfse-adn-parser-real.md): no conflito (mesma ChaveAcesso já gravada pra
 // empresa) os campos extraídos, o XML, o NSU e o número são ATUALIZADOS — uma nota reenviada
 // pelo ADN corrige dados — mas SÓ quando o NSU recebido não é menor que o gravado (um replay
 // antigo, ex.: cursor zerado, nunca regride valores). `cancelada`/`data_cancelamento` NUNCA
 // entram no SET: reenvio jamais desmarca um cancelamento. RETURNING (xmax = 0) distingue
 // inserção (true) de atualização; sem linha devolvida = conflito barrado pela guarda de NSU.
-const nfseUpsertColunas = `(company_id, identificador_nfse, cnpj_prestador, cnpj_tomador, data_emissao, mes_ano, valor_servicos,
-		iss, iss_retido, pis, cofins, irrf, csll, inss, xml_gzip_b64, nsu, numero_nfse)
-	VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-	ON CONFLICT (company_id, identificador_nfse) DO UPDATE SET
-		cnpj_prestador = EXCLUDED.cnpj_prestador,
-		cnpj_tomador   = EXCLUDED.cnpj_tomador,
-		data_emissao   = EXCLUDED.data_emissao,
-		mes_ano        = EXCLUDED.mes_ano,
-		valor_servicos = EXCLUDED.valor_servicos,
-		iss            = EXCLUDED.iss,
-		iss_retido     = EXCLUDED.iss_retido,
-		pis            = EXCLUDED.pis,
-		cofins         = EXCLUDED.cofins,
-		irrf           = EXCLUDED.irrf,
-		csll           = EXCLUDED.csll,
-		inss           = EXCLUDED.inss,
-		xml_gzip_b64   = EXCLUDED.xml_gzip_b64,
-		nsu            = EXCLUDED.nsu,
-		numero_nfse    = EXCLUDED.numero_nfse`
+//
+// Montada a partir de nfseColunasXML (nomes fixos do código, nunca entrada externa):
+// $1 company_id, $2 identificador_nfse, $3 xml_gzip_b64, $4 nsu, $5.. nfseColunasXML.
+var nfseUpsertColunas = func() string {
+	cols := append([]string{"company_id", "identificador_nfse", "xml_gzip_b64", "nsu"}, nfseColunasXML...)
+	params := make([]string, len(cols))
+	for i := range cols {
+		params[i] = fmt.Sprintf("$%d", i+1)
+	}
+	sets := make([]string, 0, len(cols)-2)
+	for _, c := range cols[2:] {
+		sets = append(sets, c+" = EXCLUDED."+c)
+	}
+	return "(" + strings.Join(cols, ", ") + ")\n\tVALUES (" + strings.Join(params, ", ") + ")\n\t" +
+		"ON CONFLICT (company_id, identificador_nfse) DO UPDATE SET\n\t\t" + strings.Join(sets, ",\n\t\t")
+}()
 
-const nfseUpsertEntradasQuery = `INSERT INTO nfse_entradas ` + nfseUpsertColunas + `
+var nfseUpsertEntradasQuery = `INSERT INTO nfse_entradas ` + nfseUpsertColunas + `
 	WHERE EXCLUDED.nsu >= nfse_entradas.nsu OR nfse_entradas.nsu IS NULL
 	RETURNING (xmax = 0)`
-const nfseUpsertSaidasQuery = `INSERT INTO nfse_saidas ` + nfseUpsertColunas + `
+var nfseUpsertSaidasQuery = `INSERT INTO nfse_saidas ` + nfseUpsertColunas + `
 	WHERE EXCLUDED.nsu >= nfse_saidas.nsu OR nfse_saidas.nsu IS NULL
 	RETURNING (xmax = 0)`
 
@@ -383,8 +421,6 @@ const nfseHerdarCancelamentoSaidasQuery = `UPDATE nfse_saidas t
 // nfseDocumentoGravar reúne o que vai para uma linha de nfse_entradas/nfse_saidas.
 type nfseDocumentoGravar struct {
 	identificador string
-	cnpjPrestador string
-	cnpjTomador   string
 	nsu           int64
 	arquivoXml    string
 	dados         NFSeDadosXML
@@ -410,18 +446,9 @@ func upsertNFSeDocumento(tx *sql.Tx, tabela nfseTabela, companyID string, doc nf
 	default:
 		return 0, fmt.Errorf("tabela NFS-e desconhecida: %v", tabela)
 	}
-	d := doc.dados
-	numero := d.NumeroNFSe
-	if len(numero) > 20 {
-		numero = numero[:20]
-	}
+	args := append([]interface{}{companyID, doc.identificador, doc.arquivoXml, doc.nsu}, valoresXMLNFSe(doc.dados)...)
 	var inserido bool
-	err := tx.QueryRow(query,
-		companyID, doc.identificador, nullableNFSeCNPJ(doc.cnpjPrestador), nullableNFSeCNPJ(doc.cnpjTomador),
-		nullableNFSeTexto(d.DataEmissao), nullableNFSeTexto(d.MesAno), d.ValorServicos,
-		d.ISS, d.ISSRetido, d.PIS, d.COFINS, d.IRRF, d.CSLL, d.INSS,
-		doc.arquivoXml, doc.nsu, nullableNFSeTexto(numero),
-	).Scan(&inserido)
+	err := tx.QueryRow(query, args...).Scan(&inserido)
 	if err == sql.ErrNoRows {
 		return nfseUpsertObsoleto, nil
 	}
@@ -564,7 +591,7 @@ func processarDocumentoNFSe(tx *sql.Tx, companyID, raizEmpresa string, item NFSe
 			return "NFS-e sem ChaveAcesso nem Id em infNFSe", nil
 		}
 		if len(invalidos) > 0 {
-			log.Printf("[NFSeProcessor] NSU=%d campo(s) decimal(is) não interpretável(is) gravado(s) como 0: %q", nsu, invalidos)
+			log.Printf("[NFSeProcessor] NSU=%d campo(s) decimal(is) não interpretável(is) gravado(s) como 0 (IBS/CBS: NULL): %q", nsu, invalidos)
 			c.camposInvalidos += len(invalidos)
 		}
 
@@ -579,8 +606,6 @@ func processarDocumentoNFSe(tx *sql.Tx, companyID, raizEmpresa string, item NFSe
 
 		doc := nfseDocumentoGravar{
 			identificador: chave,
-			cnpjPrestador: documentoParteNFSe([]string{dados.CNPJPrestador, dados.CNPJEmitente}, firstNonEmpty(dados.CPFPrestador, dados.CPFEmitente)),
-			cnpjTomador:   documentoParteNFSe([]string{dados.CNPJTomador}, dados.CPFTomador),
 			nsu:           nsu,
 			arquivoXml:    item.ArquivoXml,
 			dados:         dados,
@@ -737,4 +762,18 @@ func nullableNFSeTexto(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+func nullableNFSeFloatPtr(f *float64) interface{} {
+	if f == nil {
+		return nil
+	}
+	return *f
+}
+
+func nullableNFSeStrPtr(s *string) interface{} {
+	if s == nil {
+		return nil
+	}
+	return *s
 }

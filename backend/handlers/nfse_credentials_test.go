@@ -242,6 +242,11 @@ func openNFSeTestDB(t *testing.T) *sql.DB {
 		db.Close()
 		t.Skip("tabela nfse_adn_falhas não existe — rode a versão atual da migration 134 antes deste teste")
 	}
+	// Migration 135 (IBS/CBS + xml_parser_versao): gravada pelo processor e lida pela listagem.
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'nfse_saidas' AND column_name = 'xml_parser_versao')`).Scan(&exists); err != nil || !exists {
+		db.Close()
+		t.Skip("coluna nfse_saidas.xml_parser_versao não existe — rode a migration 135 antes deste teste")
+	}
 	return db
 }
 
