@@ -236,9 +236,18 @@ export default function NFSeCertificado() {
       const recebidos = data.documentos_recebidos
       const novos = data.documentos_novos
       const ignorados = data.documentos_ignorados
-      toast.success(
-        `Busca concluída: ${recebidos} recebido(s), ${novos} novo(s), ${ignorados} ignorado(s)`
-      )
+      const atualizados = typeof data.documentos_atualizados === 'number' ? data.documentos_atualizados : 0
+      const falhas = typeof data.documentos_falhas === 'number' ? data.documentos_falhas : 0
+      const resumo =
+        `${recebidos} recebido(s), ${novos} novo(s), ${atualizados} atualizado(s), ` +
+        `${ignorados} ignorado(s), ${falhas} com falha`
+      // Parcial: a fila do ADN não foi esgotada neste ciclo (limite de lotes/tempo ou instabilidade);
+      // o próximo ciclo continua do último NSU gravado.
+      if (data.parcial) {
+        toast.warning(`Busca parcial (${data.motivo_encerramento || 'fila não esgotada'}): ${resumo}. Clique novamente para continuar.`)
+      } else {
+        toast.success(`Busca concluída: ${resumo}`)
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         toast.error('A busca demorou mais que o esperado — tente novamente')

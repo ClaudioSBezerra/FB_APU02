@@ -966,7 +966,7 @@ func TestNFSeBuildNFSeMTLSClient_CadeiaCompletada_ServidorListandoSoARaiz_Conect
 		if len(r.TLS.PeerCertificates) > 0 {
 			recebido.Store(r.TLS.PeerCertificates[0].Subject.CommonName)
 		}
-		w.Write([]byte(`{"loteVazio":true,"documentos":[]}`))
+		escreverFimTeste(w)
 	}), tls.Certificate{Certificate: [][]byte{serverLeaf.Raw}, PrivateKey: serverKey}, clientCAs)
 	defer ts.Close()
 
@@ -975,7 +975,7 @@ func TestNFSeBuildNFSeMTLSClient_CadeiaCompletada_ServidorListandoSoARaiz_Conect
 		t.Fatalf("BuildNFSeMTLSClient: %v", err)
 	}
 	trustServerCA(t, client, serverCA)
-	if _, err := BuscarDFeADN(context.Background(), client, ts.URL, "0"); err != nil {
+	if _, err := BuscarLoteDFeADN(context.Background(), client, ts.URL, 0); err != nil {
 		t.Fatalf("handshake mTLS deveria funcionar com a cadeia completada: %v", err)
 	}
 	if recebido.Load() != "EMPRESA TESTE LTDA:12345678000199" {
@@ -1002,7 +1002,7 @@ func TestNFSeBuildNFSeMTLSClient_ListaDeCAsNaoCasa_EnviaCertificadoMesmoAssim(t 
 		if len(r.TLS.PeerCertificates) > 0 {
 			recebido.Store(r.TLS.PeerCertificates[0].Subject.CommonName)
 		}
-		w.Write([]byte(`{"loteVazio":true,"documentos":[]}`))
+		escreverFimTeste(w)
 	}))
 	ts.TLS = &tls.Config{
 		Certificates: []tls.Certificate{{Certificate: [][]byte{serverLeaf.Raw}, PrivateKey: serverKey}},
@@ -1017,7 +1017,7 @@ func TestNFSeBuildNFSeMTLSClient_ListaDeCAsNaoCasa_EnviaCertificadoMesmoAssim(t 
 		t.Fatalf("BuildNFSeMTLSClient: %v", err)
 	}
 	trustServerCA(t, client, serverCA)
-	if _, err := BuscarDFeADN(context.Background(), client, ts.URL, "0"); err != nil {
+	if _, err := BuscarLoteDFeADN(context.Background(), client, ts.URL, 0); err != nil {
 		t.Fatalf("certificado deveria ter sido enviado mesmo com lista de CAs que não casa: %v", err)
 	}
 	if recebido.Load() != "EMPRESA TESTE LTDA:12345678000199" {

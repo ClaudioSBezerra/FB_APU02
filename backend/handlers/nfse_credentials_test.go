@@ -59,6 +59,13 @@ func validPfxBase64() string {
 // realmente destranca o .pfx gerado aqui.
 func genValidPfxBase64(t *testing.T, senha string) string {
 	t.Helper()
+	return genValidPfxBase64CN(t, senha, "certificado-teste-nfse")
+}
+
+// genValidPfxBase64CN é genValidPfxBase64 com o Common Name dado (ex.: "EMPRESA:CNPJ", formato
+// ICP-Brasil de onde o upload extrai cnpj_titular).
+func genValidPfxBase64CN(t *testing.T, senha, cn string) string {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("falha ao gerar chave de teste: %v", err)
@@ -66,7 +73,7 @@ func genValidPfxBase64(t *testing.T, senha string) string {
 	pki := pkiTesteNFSe(t)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject:      pkix.Name{CommonName: "certificado-teste-nfse"},
+		Subject:      pkix.Name{CommonName: cn},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -224,6 +231,16 @@ func openNFSeTestDB(t *testing.T) *sql.DB {
 	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'nfse_certificados')`).Scan(&exists); err != nil || !exists {
 		db.Close()
 		t.Skip("tabela nfse_certificados não existe — rode as migrations (133) antes deste teste")
+	}
+	// Migration 134 (cursor NSU/XML/cancelamento): lida por services.ExecutarCicloNFSe e pela
+	// listagem (nfse_list.go).
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'nfse_certificados' AND column_name = 'ultimo_nsu')`).Scan(&exists); err != nil || !exists {
+		db.Close()
+		t.Skip("coluna nfse_certificados.ultimo_nsu não existe — rode a migration 134 antes deste teste")
+	}
+	if err := db.QueryRow(`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'nfse_adn_falhas')`).Scan(&exists); err != nil || !exists {
+		db.Close()
+		t.Skip("tabela nfse_adn_falhas não existe — rode a versão atual da migration 134 antes deste teste")
 	}
 	return db
 }
@@ -1409,5 +1426,60 @@ func TestSaveNFSeCertificadoHandler_CadeiaReal_SemStub_Retorna400(t *testing.T) 
 				t.Fatal("certificado fora da ICP-Brasil nunca deveria ser salvo")
 			}
 		})
+	}
+}
+
+// Troca do certificado por outro TITULAR (CNPJ diferente) zera o cursor ultimo_nsu; renovação do
+// mesmo titular e atualização sem novo .pfx preservam o cursor.
+func TestSaveNFSeCertificadoHandler_TrocaDeCNPJ_ZeraCursor(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	salvar := func(body map[string]interface{}, wantStatus int) {
+		t.Helper()
+		if rec := postSaveNFSeCert(t, db, authed, body); rec.Code != wantStatus {
+			t.Fatalf("save: esperava %d, obteve %d: %s", wantStatus, rec.Code, rec.Body.String())
+		}
+	}
+	setCursor := func(n int64) {
+		t.Helper()
+		if _, err := db.Exec(`UPDATE nfse_certificados SET ultimo_nsu = $2 WHERE company_id = $1`, companyID, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lerEstado := func() (int64, string) {
+		t.Helper()
+		var n int64
+		var cnpj sql.NullString
+		if err := db.QueryRow(`SELECT ultimo_nsu, cnpj_titular FROM nfse_certificados WHERE company_id = $1`, companyID).Scan(&n, &cnpj); err != nil {
+			t.Fatal(err)
+		}
+		return n, cnpj.String
+	}
+
+	salvar(map[string]interface{}{"certificado_pfx": genValidPfxBase64CN(t, "s1", "EMPRESA A:11111111000191"), "certificado_senha": "s1", "validade": "2027-01-01"}, http.StatusCreated)
+	if n, cnpj := lerEstado(); n != 0 || cnpj != "11111111000191" {
+		t.Fatalf("1º upload: ultimo_nsu=%d cnpj_titular=%q", n, cnpj)
+	}
+
+	// Renovação do MESMO titular: cursor preservado.
+	setCursor(500)
+	salvar(map[string]interface{}{"certificado_pfx": genValidPfxBase64CN(t, "s2", "EMPRESA A:11111111000191"), "certificado_senha": "s2", "validade": "2028-01-01"}, http.StatusOK)
+	if n, _ := lerEstado(); n != 500 {
+		t.Errorf("renovação do mesmo CNPJ não deveria zerar o cursor, veio %d", n)
+	}
+
+	// Só validade (sem novo .pfx): cursor e CNPJ preservados.
+	salvar(map[string]interface{}{"validade": "2029-01-01"}, http.StatusOK)
+	if n, cnpj := lerEstado(); n != 500 || cnpj != "11111111000191" {
+		t.Errorf("atualização sem .pfx: ultimo_nsu=%d cnpj_titular=%q", n, cnpj)
+	}
+
+	// Outro titular: cursor volta a 0.
+	salvar(map[string]interface{}{"certificado_pfx": genValidPfxBase64CN(t, "s3", "EMPRESA B:22222222000192"), "certificado_senha": "s3", "validade": "2028-01-01"}, http.StatusOK)
+	if n, cnpj := lerEstado(); n != 0 || cnpj != "22222222000192" {
+		t.Errorf("troca de CNPJ deveria zerar o cursor: ultimo_nsu=%d cnpj_titular=%q", n, cnpj)
 	}
 }

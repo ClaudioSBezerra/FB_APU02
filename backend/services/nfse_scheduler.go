@@ -3,6 +3,8 @@ package services
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -74,19 +76,116 @@ func deveExecutarCicloNFSe(nowHHMM, horarioConfigurado, hojeYYYYMMDD, ultimaExec
 	return ultimaExecucaoData != hojeYYYYMMDD
 }
 
+// nfseSchedulerIntervaloRetentativa é a espera mínima antes de tentar de novo, no MESMO dia, uma
+// empresa cujo ciclo terminou com erro ou parcial por falha (transitório esgotado, cursor sem
+// avanço, cancelamento) — evita martelar o ADN a cada tick com um certificado recusado. Parcial
+// por backlog (limite de lotes/tempo) tenta de novo já no tick seguinte.
+const nfseSchedulerIntervaloRetentativa = 15 * time.Minute
+
+// nfseSchedulerEstado guarda, em memória (reinicia a cada restart do processo — aceitável
+// conforme a spec), por empresa: a data (YYYY-MM-DD) em que o ciclo do dia foi CONCLUÍDO e o
+// instante mínimo da próxima tentativa. Um ciclo parcial ou com erro não marca o dia como feito.
+type nfseSchedulerEstado struct {
+	mu               sync.Mutex
+	concluidoEm      map[string]string    // companyID → hojeYYYYMMDD
+	proximaTentativa map[string]time.Time // companyID → não disparar antes disto
+	emExecucao       map[string]bool      // companyID → goroutine do scheduler ainda rodando
+}
+
+func novoNFSeSchedulerEstado() *nfseSchedulerEstado {
+	return &nfseSchedulerEstado{
+		concluidoEm:      map[string]string{},
+		proximaTentativa: map[string]time.Time{},
+		emExecucao:       map[string]bool{},
+	}
+}
+
+// reservar decide (e marca) se a empresa deve ser disparada neste tick.
+func (e *nfseSchedulerEstado) reservar(companyID, nowHHMM, horario, hoje string, agora time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.emExecucao[companyID] {
+		return false
+	}
+	if !deveExecutarCicloNFSe(nowHHMM, horario, hoje, e.concluidoEm[companyID]) {
+		return false
+	}
+	if t, ok := e.proximaTentativa[companyID]; ok && agora.Before(t) {
+		return false
+	}
+	e.emExecucao[companyID] = true
+	return true
+}
+
+// registrar anota o desfecho do ciclo de uma empresa (ver nfseSchedulerDesfecho).
+func (e *nfseSchedulerEstado) registrar(companyID, hoje string, agora time.Time, res NFSeResultadoCiclo, executou bool, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.emExecucao, companyID)
+	switch nfseSchedulerDesfecho(res, executou, err) {
+	case nfseDesfechoConcluido:
+		e.concluidoEm[companyID] = hoje
+		delete(e.proximaTentativa, companyID)
+	case nfseDesfechoBacklog:
+		delete(e.proximaTentativa, companyID) // continua já no próximo tick
+	case nfseDesfechoRetentar:
+		e.proximaTentativa[companyID] = agora.Add(nfseSchedulerIntervaloRetentativa)
+	case nfseDesfechoPulado:
+		// ocupado/rate limit: nada a registrar, tenta no próximo tick
+	}
+}
+
+type nfseDesfechoScheduler int
+
+const (
+	nfseDesfechoConcluido nfseDesfechoScheduler = iota // fila esgotada — dia feito
+	nfseDesfechoBacklog                                // limite de lotes/tempo — continuar já
+	nfseDesfechoRetentar                               // erro ou parcial por falha — retentar mais tarde
+	nfseDesfechoPulado                                 // não chegou a rodar (ocupado/rate limit)
+)
+
+// nfseSchedulerDesfecho classifica o resultado de um ciclo agendado. Certificado ausente/vencido
+// conta como concluído (nada a fazer hoje; a empresa nem deveria estar elegível).
+func nfseSchedulerDesfecho(res NFSeResultadoCiclo, executou bool, err error) nfseDesfechoScheduler {
+	switch {
+	case !executou || errors.Is(err, ErrNFSeCicloEmAndamento):
+		return nfseDesfechoPulado
+	case errors.Is(err, ErrNFSeCertificadoNaoCadastrado) || errors.Is(err, ErrNFSeCertificadoIndisponivel):
+		return nfseDesfechoConcluido
+	case err != nil:
+		return nfseDesfechoRetentar
+	case !res.Parcial():
+		return nfseDesfechoConcluido
+	case res.PorBacklog():
+		return nfseDesfechoBacklog
+	default:
+		return nfseDesfechoRetentar
+	}
+}
+
 // nfseSchedulerProcessCompany executa UM ciclo de ExecutarCicloNFSe para UMA empresa — extraída
 // do laço de goroutines de runNFSeSchedulerCycle para ser testável isoladamente (ex.: forçar um
 // panic passando db=nil, ver TestNfseSchedulerProcessCompany_PanicNaoDerrubaOProcesso em
-// nfse_scheduler_test.go).
+// nfse_scheduler_test.go). aoTerminar (opcional) recebe o resultado; executou=false quando o
+// ciclo nem foi tentado (rate limit). Um panic é reportado a aoTerminar como erro.
 //
 // O recover() de panic é o PRIMEIRO defer registrado, antes de qualquer outra lógica — a
 // Boundaries da spec já garantia que um erro numa empresa não interrompe as demais; um panic
 // (não só um error) numa goroutine sem recover() derrubaria o PROCESSO INTEIRO, contradizendo
 // essa garantia (ver Spec Change Log, loopback 1, item 3).
-func nfseSchedulerProcessCompany(db *sql.DB, companyID string) {
+func nfseSchedulerProcessCompany(db *sql.DB, companyID string, aoTerminar func(res NFSeResultadoCiclo, executou bool, err error)) {
+	var (
+		res      NFSeResultadoCiclo
+		executou bool
+		runErr   error
+	)
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[NFSe Scheduler] PANIC recuperado ao processar companyID=%s: %v", companyID, r)
+			executou, runErr = true, fmt.Errorf("panic: %v", r)
+		}
+		if aoTerminar != nil {
+			aoTerminar(res, executou, runErr)
 		}
 	}()
 
@@ -101,28 +200,39 @@ func nfseSchedulerProcessCompany(db *sql.DB, companyID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), nfseSchedulerCicloTimeout)
 	defer cancel()
 
-	recebidos, novos, ignorados, runErr := ExecutarCicloNFSe(ctx, db, companyID)
-	if runErr != nil {
-		log.Printf("[NFSe Scheduler] [ERRO] companyID=%s: %v", companyID, runErr)
-		return
+	executou = true
+	res, runErr = ExecutarCicloNFSe(ctx, db, companyID, NFSeCicloOpcoes{})
+	switch {
+	case errors.Is(runErr, ErrNFSeCicloEmAndamento):
+		log.Printf("[NFSe Scheduler] companyID=%s pulado — captura já em andamento (busca manual?)", companyID)
+	case runErr != nil:
+		log.Printf("[NFSe Scheduler] [ERRO] companyID=%s: %v (recebidos=%d novos=%d falhas=%d)", companyID, runErr, res.Recebidos, res.Novos, res.Falhas)
+	default:
+		log.Printf("[NFSe Scheduler] [OK] companyID=%s — encerramento=%s parcial=%t documentosRecebidos=%d documentosNovos=%d documentosAtualizados=%d documentosIgnorados=%d documentosFalhas=%d",
+			companyID, res.Encerramento, res.Parcial(), res.Recebidos, res.Novos, res.Atualizados, res.Ignorados, res.Falhas)
 	}
-	log.Printf("[NFSe Scheduler] [OK] companyID=%s — documentosRecebidos=%d documentosNovos=%d documentosIgnorados=%d",
-		companyID, recebidos, novos, ignorados)
 }
 
-// runNFSeSchedulerCycle executa UM ciclo do agendamento: busca as empresas cujo certificado
-// NFS-e tem status calculado 'ativo' (mesma expressão CASE usada em
+// runNFSeSchedulerCycle executa UM ciclo do agendamento para TODAS as empresas elegíveis, sem
+// estado de dia (usado pelos testes). Ver runNFSeSchedulerCycleComEstado.
+func runNFSeSchedulerCycle(db *sql.DB) ([]string, *sync.WaitGroup) {
+	return runNFSeSchedulerCycleComEstado(db, nil, "", "", "", time.Time{})
+}
+
+// runNFSeSchedulerCycleComEstado executa UM tick do agendamento: busca as empresas cujo
+// certificado NFS-e tem status calculado 'ativo' (mesma expressão CASE usada em
 // handlers/nfse_credentials.go, handlers/nfse_busca.go e ExecutarCicloNFSe) e dispara
 // nfseSchedulerProcessCompany em uma goroutine por empresa (que aplica o MESMO NFSeBuscaRL usado
-// pelo disparo manual e o semáforo de concorrência, ver nfseSchedulerSemaphore). Uma empresa sem
-// certificado ou com status != 'ativo' nunca aparece na lista devolvida — é pulada
-// silenciosamente, não é um erro.
+// pelo disparo manual e o semáforo de concorrência, ver nfseSchedulerSemaphore). Com estado != nil,
+// só dispara as empresas que estado.reservar aceitar (dia não concluído, fora do intervalo de
+// retentativa, não em execução) e registra o desfecho ao terminar. Uma empresa sem certificado ou
+// com status != 'ativo' nunca aparece na lista — é pulada silenciosamente, não é um erro.
 //
 // Devolve a lista de empresas despachadas e o *sync.WaitGroup usado internamente. O loop de
 // produção (StartNFSeScheduler) NÃO espera por ele — dispara e segue para o próximo tick, mesmo
 // princípio não-bloqueante de StartRFBScheduler (rfb_scheduler.go:359-368). Os testes usam o
 // WaitGroup pra esperar deterministicamente o fim das goroutines antes de checar o resultado.
-func runNFSeSchedulerCycle(db *sql.DB) ([]string, *sync.WaitGroup) {
+func runNFSeSchedulerCycleComEstado(db *sql.DB, estado *nfseSchedulerEstado, nowHHMM, horario, hoje string, agora time.Time) ([]string, *sync.WaitGroup) {
 	var wg sync.WaitGroup
 
 	rows, err := db.Query(`
@@ -142,6 +252,9 @@ func runNFSeSchedulerCycle(db *sql.DB) ([]string, *sync.WaitGroup) {
 			log.Printf("[NFSe Scheduler] erro ao ler company_id de uma linha do resultado: %v", scanErr)
 			continue
 		}
+		if estado != nil && !estado.reservar(cid, nowHHMM, horario, hoje, agora) {
+			continue
+		}
 		companies = append(companies, cid)
 	}
 	if iterErr := rows.Err(); iterErr != nil {
@@ -151,10 +264,16 @@ func runNFSeSchedulerCycle(db *sql.DB) ([]string, *sync.WaitGroup) {
 
 	for _, companyID := range companies {
 		cid := companyID
+		var aoTerminar func(NFSeResultadoCiclo, bool, error)
+		if estado != nil {
+			aoTerminar = func(res NFSeResultadoCiclo, executou bool, err error) {
+				estado.registrar(cid, hoje, time.Now(), res, executou, err)
+			}
+		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			nfseSchedulerProcessCompany(db, cid)
+			nfseSchedulerProcessCompany(db, cid, aoTerminar)
 		}()
 	}
 
@@ -166,6 +285,10 @@ func runNFSeSchedulerCycle(db *sql.DB) ([]string, *sync.WaitGroup) {
 // minuto, compara o horário atual (America/Sao_Paulo) contra um horário fixo (em vez de por
 // empresa, como no RFB), dispara uma goroutine por empresa elegível, erro de uma empresa não
 // aborta o ciclo das demais.
+//
+// O dia só é marcado como feito POR EMPRESA e só quando a fila foi esgotada (nfseSchedulerEstado):
+// parcial por backlog continua no tick seguinte; erro/parcial por falha retenta depois de
+// nfseSchedulerIntervaloRetentativa.
 //
 // Deve ser chamado como goroutine no startup (main.go, logo após
 // `go services.StartRFBScheduler(getDB)`). Usa dbFn para obter o DB após ele estar pronto.
@@ -195,25 +318,17 @@ func StartNFSeScheduler(dbFn func() *sql.DB) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	// ultimaExecucaoData rastreia (só em memória — reinicia a cada restart do processo, aceitável
-	// conforme a spec) a data (YYYY-MM-DD) do último ciclo disparado, usada por
-	// deveExecutarCicloNFSe para o catch-up dentro do mesmo dia.
-	var ultimaExecucaoData string
+	estado := novoNFSeSchedulerEstado()
 
 	for range ticker.C {
 		now := time.Now().In(loc)
-		hoje := now.Format("2006-01-02")
-
-		if !deveExecutarCicloNFSe(now.Format("15:04"), horario, hoje, ultimaExecucaoData) {
+		nowHHMM := now.Format("15:04")
+		if nowHHMM < horario {
 			continue
 		}
-		ultimaExecucaoData = hoje
-
-		companies, _ := runNFSeSchedulerCycle(db)
-		if len(companies) == 0 {
-			log.Printf("[NFSe Scheduler] %s — nenhuma empresa com certificado NFS-e ativo — ciclo encerrado", now.Format("2006-01-02 15:04"))
-			continue
+		companies, _ := runNFSeSchedulerCycleComEstado(db, estado, nowHHMM, horario, now.Format("2006-01-02"), now)
+		if len(companies) > 0 {
+			log.Printf("[NFSe Scheduler] %s — %d empresa(s) com certificado NFS-e ativo e ciclo pendente — buscas disparadas", now.Format("2006-01-02 15:04"), len(companies))
 		}
-		log.Printf("[NFSe Scheduler] %s — %d empresa(s) com certificado NFS-e ativo — buscas disparadas", now.Format("2006-01-02 15:04"), len(companies))
 	}
 }

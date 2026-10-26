@@ -1,14 +1,12 @@
 // Package services — cliente mTLS do Portal Nacional ADN (NFS-e).
 //
-// O contrato real da API do ADN NÃO está totalmente confirmado por fonte primária
-// (pesquisa de 2026-10-23 — ver spec-nfse-cliente-adn.md, bloco Boundaries). O endpoint em
-// si é confirmado (manual oficial "APIs ADN Sistema Nacional NFS-e" v1.0, gov.br/nfse):
-// GET /contribuintes/DFe/{NSU} — mas autenticação (mTLS puro vs. mTLS + token adicional),
-// paginação (nome do parâmetro de NSU/CNPJ, tamanho de lote) e formato de resposta
-// (JSON/XML, schema do payload) são suposições. Este arquivo é o PONTO ÚNICO de ajuste:
-// quando um certificado de teste real permitir inspecionar o Swagger de Produção Restrita
-// (https://adn.producaorestrita.nfse.gov.br/contribuintes/docs/index.html), as correções
-// entram aqui — não espalhar suposições de formato para handlers/persistência.
+// Contrato da API (confirmado pelo Swagger oficial "API NFS-e - ADN Contribuinte" v1 —
+// spec-nfse-adn-parser-real.md): GET {base}/contribuintes/DFe/{NSU}?lote=true, autenticação por
+// mTLS, resposta JSON PascalCase LoteDistribuicaoNSUResponse. HTTP 200 DOCUMENTOS_LOCALIZADOS =
+// lote; HTTP 404 NENHUM_DOCUMENTO_LOCALIZADO = fim da fila; HTTP 400 REJEICAO = erro. Cada item
+// (DistribuicaoNSU) traz o XML (gzip + base64) em ArquivoXml — decodificação e extração dos
+// campos fiscais em nfse_adn_xml.go. Este arquivo (+ nfse_adn_xml.go) é o PONTO ÚNICO que
+// conhece o formato do ADN — não espalhar detalhes de formato para handlers/persistência.
 package services
 
 import (
@@ -21,10 +19,12 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
-	"net/url"
 	"os"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"fb_apu02/crypto"
@@ -57,31 +57,194 @@ const nfseADNHTTPTimeout = 30 * time.Second
 
 // nfseADNMaxBodyBytes limita a leitura do corpo da resposta do ADN (defesa contra resposta
 // anormalmente grande — mesmo princípio de readBodyLimited/rfbMaxJSONBodyBytes em rfb.go).
-const nfseADNMaxBodyBytes = 20 << 20 // 20 MiB
+// Passou do limite, a resposta é REJEITADA como formato inesperado (nunca truncada em silêncio —
+// um JSON cortado poderia até decodificar parcialmente). Variável só para os testes reduzirem.
+var nfseADNMaxBodyBytes int64 = 20 << 20 // 20 MiB
 
-// nfseADNMaxLotes limita o número de lotes buscados num único ciclo manual — protege contra
-// loop infinito caso o ADN nunca devolva loteVazio=true (ex.: por divergência do formato real
-// de paginação, suposição documentada abaixo). Alto o bastante para não truncar capturas
-// normais de um ciclo manual.
-const nfseADNMaxLotes = 1000
+// Status de processamento (enum StatusProcessamentoDistribuicao do Swagger).
+const (
+	NFSeADNStatusDocumentosLocalizados = "DOCUMENTOS_LOCALIZADOS"
+	NFSeADNStatusNenhumDocumento       = "NENHUM_DOCUMENTO_LOCALIZADO"
+	NFSeADNStatusRejeicao              = "REJEICAO"
+)
 
-// Erros sentinela — permitem ao handler escolher a mensagem HTTP certa (ambos os casos abaixo
-// mapeiam para 502, mas com mensagens diferentes, ver I/O Matrix da spec) sem acoplar o handler
+// Tipos de documento (enum TipoDocumentoRequisicao do Swagger: NENHUM, DPS,
+// PEDIDO_REGISTRO_EVENTO, NFSE, EVENTO, CNC). Só NFSE e EVENTO (de cancelamento) são
+// processados; os demais são ignorados (contados).
+const (
+	NFSeADNTipoDocumentoNFSe   = "NFSE"
+	NFSeADNTipoDocumentoEvento = "EVENTO"
+)
+
+// nfseADNEventosCancelamento são os valores do enum TipoEvento do Swagger que EFETIVAM o
+// cancelamento da nota. Ficam de fora, de propósito: SOLICITACAO_CANCELAMENTO_ANALISE_FISCAL
+// (só um pedido, ainda em análise) e CANCELAMENTO_INDEFERIDO_ANALISE_FISCAL (pedido negado — a
+// nota continua válida).
+var nfseADNEventosCancelamento = map[string]bool{
+	"CANCELAMENTO":                         true,
+	"CANCELAMENTO_POR_SUBSTITUICAO":        true,
+	"CANCELAMENTO_DEFERIDO_ANALISE_FISCAL": true,
+	"CANCELAMENTO_POR_OFICIO":              true,
+}
+
+// EhEventoCancelamentoNFSe informa se o TipoEvento (enum do Swagger) efetiva o cancelamento.
+func EhEventoCancelamentoNFSe(tipoEvento string) bool {
+	return nfseADNEventosCancelamento[strings.ToUpper(strings.TrimSpace(tipoEvento))]
+}
+
+// nfseADNFilaConfig reúne os limites do percurso da fila de distribuição. Variável de pacote
+// (nfseADNFilaConfigPadrao) para que os testes zerem pausas/backoff sem esperar de verdade.
+type nfseADNFilaConfig struct {
+	// MaxLotes: lotes por ciclo; ao atingir, o ciclo encerra com SUCESSO PARCIAL (o cursor
+	// já está salvo — o próximo ciclo continua dali).
+	MaxLotes int
+	// MaxDuracao: tempo máximo do ciclo; idem, sucesso parcial.
+	MaxDuracao time.Duration
+	// PausaEntreLotes: espera entre um lote e o próximo, para não provocar 429.
+	PausaEntreLotes time.Duration
+	// MaxTentativas: tentativas (total) de um mesmo lote diante de 429/5xx; esgotadas, o ciclo
+	// encerra com sucesso parcial.
+	MaxTentativas int
+	// BackoffBase: espera da 1ª retentativa sem Retry-After (dobra a cada tentativa).
+	BackoffBase time.Duration
+	// EsperaMax: teto de qualquer espera (Retry-After ou backoff).
+	EsperaMax time.Duration
+	// Sleep espera d respeitando ctx (injetável nos testes).
+	Sleep func(ctx context.Context, d time.Duration) error
+}
+
+var nfseADNFilaConfigPadrao = nfseADNFilaConfig{
+	MaxLotes:        200,
+	MaxDuracao:      5 * time.Minute,
+	PausaEntreLotes: time.Second,
+	MaxTentativas:   3,
+	BackoffBase:     2 * time.Second,
+	EsperaMax:       60 * time.Second,
+	Sleep:           nfseSleepCtx,
+}
+
+// nfseSleepCtx espera d ou até ctx terminar (devolve ctx.Err() nesse caso).
+func nfseSleepCtx(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// Erros sentinela — permitem ao handler escolher a mensagem HTTP certa sem acoplar o handler
 // aos detalhes de formato/transporte tratados aqui.
 var (
 	// ErrNFSeADNAutenticacaoFalhou cobre tanto falha de handshake mTLS (certificado
 	// rejeitado antes de qualquer resposta HTTP) quanto HTTP 401/403 do ADN.
 	ErrNFSeADNAutenticacaoFalhou = errors.New("autenticação mTLS recusada pelo Portal Nacional ADN")
-	// ErrNFSeADNFormatoInesperado cobre corpo de resposta que o parser (suposição de
-	// formato, ver parseNFSeADNPayload) não reconhece.
+	// ErrNFSeADNFormatoInesperado cobre corpo de resposta que não é o
+	// LoteDistribuicaoNSUResponse esperado (ver parseNFSeADNLote).
 	ErrNFSeADNFormatoInesperado = errors.New("formato de resposta inesperado do Portal Nacional ADN")
-	// ErrNFSeADNComunicacaoFalhou cobre qualquer outra falha de comunicação (HTTP
-	// diferente de 200/401/403) que não seja nem falha de autenticação nem de formato.
+	// ErrNFSeADNComunicacaoFalhou cobre qualquer outra falha de comunicação que não seja
+	// autenticação, formato, rejeição ou transitório.
 	ErrNFSeADNComunicacaoFalhou = errors.New("falha ao comunicar com o Portal Nacional ADN")
-	// ErrNFSeADNLimiteLotes cobre o esgotamento de nfseADNMaxLotes sem o ADN jamais sinalizar
-	// loteVazio=true — captura pode estar incompleta (ver BuscarTodosDocumentosADN).
-	ErrNFSeADNLimiteLotes = errors.New("limite de lotes de paginação atingido sem conclusão — captura pode estar incompleta")
+	// ErrNFSeADNRejeicao: HTTP 400 StatusProcessamento=REJEICAO (códigos de Erros no log).
+	ErrNFSeADNRejeicao = errors.New("consulta rejeitada pelo Portal Nacional ADN")
+	// ErrNFSeADNTransitorio: HTTP 429 ou 5xx, ou falha de rede transitória (timeout, conexão
+	// recusada/resetada, DNS, EOF no meio da resposta — ver ehErroRedeTransitorioADN) — o
+	// chamador pode tentar de novo (ver NFSeADNErroTransitorio.RetryAfter). PercorrerFilaADN nunca
+	// devolve este erro: esgotadas as tentativas, encerra o ciclo com sucesso parcial.
+	ErrNFSeADNTransitorio = errors.New("Portal Nacional ADN temporariamente indisponível (429/5xx/rede)")
 )
+
+// NFSeADNErroTransitorio detalha um ErrNFSeADNTransitorio (errors.Is funciona).
+type NFSeADNErroTransitorio struct {
+	// StatusHTTP é 0 quando a falha foi de rede (sem resposta HTTP) — ver Causa.
+	StatusHTTP int
+	// RetryAfter é o valor do cabeçalho Retry-After (segundos ou data HTTP) já convertido em
+	// duração; 0 quando ausente/inválido.
+	RetryAfter time.Duration
+	// Causa é o erro de rede original (só quando StatusHTTP == 0).
+	Causa error
+}
+
+func (e *NFSeADNErroTransitorio) Error() string {
+	if e.StatusHTTP == 0 {
+		return fmt.Sprintf("%v (falha de rede: %v)", ErrNFSeADNTransitorio, e.Causa)
+	}
+	return fmt.Sprintf("%v (HTTP %d, Retry-After=%s)", ErrNFSeADNTransitorio, e.StatusHTTP, e.RetryAfter)
+}
+
+// descricao resume o transitório para log ("HTTP 503" ou "falha de rede").
+func (e *NFSeADNErroTransitorio) descricao() string {
+	if e.StatusHTTP == 0 {
+		return "falha de rede"
+	}
+	return fmt.Sprintf("HTTP %d", e.StatusHTTP)
+}
+
+// ehErroRedeTransitorioADN classifica um erro de transporte (sem resposta HTTP, ou na leitura
+// do corpo) como TRANSITÓRIO — timeout, conexão recusada/resetada/abortada, rede/host
+// inalcançável, falha de DNS, EOF inesperado — para seguir o caminho de retentativa em vez de
+// ser reportado como falha de autenticação. Erros de TLS (alerta do servidor — "remote error:
+// tls: ..." —, falha local de handshake, verificação de certificado) NUNCA são transitórios: no
+// mTLS do ADN são a forma de o servidor recusar o certificado do cliente.
+func ehErroRedeTransitorioADN(err error) bool {
+	if err == nil {
+		return false
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && (opErr.Op == "remote error" || opErr.Op == "local error") {
+		return false
+	}
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return false
+	}
+	var recErr tls.RecordHeaderError
+	if errors.As(err, &recErr) {
+		return false
+	}
+	var unkAuth x509.UnknownAuthorityError
+	var hostErr x509.HostnameError
+	var invErr x509.CertificateInvalidError
+	if errors.As(err, &unkAuth) || errors.As(err, &hostErr) || errors.As(err, &invErr) {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "remote error: tls") || strings.Contains(msg, "bad record MAC") || strings.Contains(msg, "handshake failure") {
+		return false
+	}
+
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	for _, errno := range []syscall.Errno{syscall.ECONNRESET, syscall.ECONNREFUSED, syscall.ECONNABORTED, syscall.EPIPE,
+		syscall.ETIMEDOUT, syscall.EHOSTUNREACH, syscall.ENETUNREACH, syscall.ENETDOWN, syscall.EHOSTDOWN} {
+		if errors.Is(err, errno) {
+			return true
+		}
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	if opErr != nil && opErr.Op == "dial" {
+		return true
+	}
+	return false
+}
+
+func (e *NFSeADNErroTransitorio) Unwrap() error { return ErrNFSeADNTransitorio }
 
 // ResolveNFSeADNBaseURL resolve a base URL do Portal Nacional ADN. NFSE_ADN_BASE_URL
 // sobrescreve diretamente (usado pelos testes para apontar para o httptest.Server local);
@@ -225,53 +388,146 @@ func OnlyDigits(s string) string {
 	return b.String()
 }
 
-// NFSeADNDocumento representa UM documento NFS-e devolvido pelo Portal Nacional ADN.
-//
-// SUPOSIÇÃO DE FORMATO (sem exemplo de payload real disponível — ver Boundaries da spec):
-// JSON com os metadados do documento e o XML da NFS-e assinada embutido em base64, por
-// analogia ao DF-e da NF-e. Os campos tributários (ISS/PIS/COFINS/...) de nfse_entradas e
-// nfse_saidas NÃO são preenchidos a partir daqui nesta sub-spec — extraí-los exigiria parsear
-// o XML embutido assinado, cujo schema real também não está confirmado; ficam no valor padrão
-// 0 da migration 133 até uma sub-spec futura com acesso a um payload real para ajustar este
-// parser. PRECISA DE AJUSTE quando houver confirmação do contrato real.
-type NFSeADNDocumento struct {
-	NSU               string  `json:"nsu"`
-	IdentificadorNFSe string  `json:"identificadorNfse"`
-	CNPJPrestador     string  `json:"cnpjPrestador"`
-	CNPJTomador       string  `json:"cnpjTomador"`
-	DataEmissao       string  `json:"dataEmissao"` // suposição: "AAAA-MM-DD"
-	ValorServicos     float64 `json:"valorServicos"`
-	XMLBase64         string  `json:"xml"` // XML da NFS-e assinada embutido em base64 — suposição
-}
+// nfseADNEnum aceita um enum do ADN serializado como string (forma documentada no Swagger) ou,
+// defensivamente, como número (serialização padrão de enum .NET) — nesse caso guarda os dígitos
+// como string, e o valor aparece no log de diagnóstico em vez de quebrar o lote inteiro.
+type nfseADNEnum string
 
-// NFSeADNResponse é a resposta assumida de GET /contribuintes/DFe/{NSU}.
-//
-// SUPOSIÇÃO DE PAGINAÇÃO (não confirmada — ver Boundaries da spec): implementada por analogia
-// ao padrão já usado no DF-e da NF-e — "loteVazio" indica que não há mais documentos a buscar;
-// "ultimoNSU" é o maior NSU retornado no lote, usado como NSU do próximo lote (ver
-// BuscarTodosDocumentosADN). PRECISA DE AJUSTE quando houver confirmação do contrato real.
-type NFSeADNResponse struct {
-	LoteVazio  bool               `json:"loteVazio"`
-	UltimoNSU  string             `json:"ultimoNSU"`
-	Documentos []NFSeADNDocumento `json:"documentos"`
-}
-
-// parseNFSeADNPayload decodifica o corpo da resposta do ADN. ÚNICA função que conhece o
-// formato assumido do payload (ver NFSeADNResponse/NFSeADNDocumento acima) — isolada aqui
-// para ser o ponto único de ajuste quando o formato real for confirmado. Qualquer corpo que
-// não decodifique como o JSON assumido, ou que contenha um documento sem identificador, é
-// tratado como formato inesperado (nunca grava "lixo").
-func parseNFSeADNPayload(body []byte) (NFSeADNResponse, error) {
-	var resp NFSeADNResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return NFSeADNResponse{}, fmt.Errorf("corpo não é o JSON esperado: %w", err)
+func (e *nfseADNEnum) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if s == "null" || s == "" {
+		*e = ""
+		return nil
 	}
-	for i, doc := range resp.Documentos {
-		if strings.TrimSpace(doc.IdentificadorNFSe) == "" {
-			return NFSeADNResponse{}, fmt.Errorf("documento #%d do lote sem identificadorNfse", i)
+	if strings.HasPrefix(s, `"`) {
+		var v string
+		if err := json.Unmarshal(b, &v); err != nil {
+			return err
+		}
+		*e = nfseADNEnum(strings.ToUpper(strings.TrimSpace(v)))
+		return nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("enum do ADN em formato inesperado: %s", TruncateRunes(s, 50))
+	}
+	*e = nfseADNEnum(n.String())
+	return nil
+}
+
+// NFSeADNMensagem é o MensagemProcessamento do Swagger (itens de Alertas/Erros). Mensagem é um
+// objeto opaco no Swagger ("Enum" sem propriedades) — guardado cru, nunca interpretado.
+type NFSeADNMensagem struct {
+	Codigo      string          `json:"Codigo"`
+	Descricao   string          `json:"Descricao"`
+	Complemento string          `json:"Complemento"`
+	Mensagem    json.RawMessage `json:"Mensagem"`
+	Parametros  []string        `json:"Parametros"`
+}
+
+// NFSeADNDistribuicao é o DistribuicaoNSU do Swagger: UM documento da fila.
+type NFSeADNDistribuicao struct {
+	NSU             *int64      `json:"NSU"`
+	ChaveAcesso     string      `json:"ChaveAcesso"`
+	TipoDocumento   nfseADNEnum `json:"TipoDocumento"`
+	TipoEvento      nfseADNEnum `json:"TipoEvento"`
+	ArquivoXml      string      `json:"ArquivoXml"` // XML em gzip + base64 (ver nfse_adn_xml.go)
+	DataHoraGeracao string      `json:"DataHoraGeracao"`
+}
+
+// NSUValor devolve o NSU (0 quando ausente).
+func (d NFSeADNDistribuicao) NSUValor() int64 {
+	if d.NSU == nil {
+		return 0
+	}
+	return *d.NSU
+}
+
+// NFSeADNLote é o LoteDistribuicaoNSUResponse do Swagger.
+type NFSeADNLote struct {
+	StatusProcessamento   nfseADNEnum           `json:"StatusProcessamento"`
+	LoteDFe               []NFSeADNDistribuicao `json:"LoteDFe"`
+	Alertas               []NFSeADNMensagem     `json:"Alertas"`
+	Erros                 []NFSeADNMensagem     `json:"Erros"`
+	TipoAmbiente          nfseADNEnum           `json:"TipoAmbiente"`
+	VersaoAplicativo      string                `json:"VersaoAplicativo"`
+	DataHoraProcessamento string                `json:"DataHoraProcessamento"`
+}
+
+// FimDaFila indica que o ADN não tem mais documentos a partir do NSU consultado.
+func (l NFSeADNLote) FimDaFila() bool {
+	return string(l.StatusProcessamento) == NFSeADNStatusNenhumDocumento
+}
+
+// FaixaNSU devolve o menor e o maior NSU do lote (0,0 se nenhum item tiver NSU).
+func (l NFSeADNLote) FaixaNSU() (menor, maior int64) {
+	primeiro := true
+	for _, d := range l.LoteDFe {
+		if d.NSU == nil {
+			continue
+		}
+		n := *d.NSU
+		if primeiro || n < menor {
+			menor = n
+		}
+		if primeiro || n > maior {
+			maior = n
+		}
+		primeiro = false
+	}
+	return menor, maior
+}
+
+// codigosMensagensADN devolve "Codigo: Descricao" de cada mensagem (para log com %q — nunca XML).
+func codigosMensagensADN(msgs []NFSeADNMensagem) []string {
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		s := strings.TrimSpace(m.Codigo)
+		if d := strings.TrimSpace(m.Descricao); d != "" {
+			s += ": " + TruncateRunes(d, 200)
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// parseNFSeADNLote decodifica o corpo da resposta do ADN (LoteDistribuicaoNSUResponse). Um corpo
+// que não é JSON, ou sem StatusProcessamento, é formato inesperado — nunca grava "lixo" (foi
+// exatamente o que aconteceu com o formato suposto anterior: o JSON real decodificava pra uma
+// struct vazia sem erro).
+func parseNFSeADNLote(body []byte) (NFSeADNLote, error) {
+	var lote NFSeADNLote
+	if err := json.Unmarshal(body, &lote); err != nil {
+		return NFSeADNLote{}, fmt.Errorf("corpo não é o LoteDistribuicaoNSUResponse esperado: %w", err)
+	}
+	if lote.StatusProcessamento == "" {
+		return NFSeADNLote{}, errors.New("corpo sem StatusProcessamento")
+	}
+	return lote, nil
+}
+
+// parseRetryAfter interpreta o cabeçalho Retry-After (segundos ou data HTTP). 0 se ausente ou
+// inválido; nunca negativo.
+func parseRetryAfter(v string, agora time.Time) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if secs, err := strconv.ParseInt(v, 10, 64); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		if secs > 24*3600 {
+			secs = 24 * 3600
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		if d := t.Sub(agora); d > 0 {
+			return d
 		}
 	}
-	return resp, nil
+	return 0
 }
 
 // explicarErroHandshakeADN devolve uma explicação para o operador (SÓ para o log) quando o erro
@@ -290,85 +546,257 @@ func explicarErroHandshakeADN(err error) string {
 		"confira a habilitação do CNPJ e, se persistir, o caminho de rede até o ADN"
 }
 
-// BuscarDFeADN chama GET {baseURL}/contribuintes/DFe/{nsu} usando o client mTLS fornecido.
-// Endpoint confirmado por fonte oficial; autenticação além do mTLS, parâmetros de paginação e
-// formato de resposta exatos NÃO são confirmados — ver comentários de NFSeADNResponse e
-// parseNFSeADNPayload acima, os pontos únicos de ajuste quando o contrato real for conhecido.
-func BuscarDFeADN(ctx context.Context, httpClient *http.Client, baseURL, nsu string) (NFSeADNResponse, error) {
-	if strings.TrimSpace(nsu) == "" {
-		nsu = "0"
+// BuscarLoteDFeADN chama GET {baseURL}/contribuintes/DFe/{nsu}?lote=true UMA vez (sem retry).
+//
+//   - 200 DOCUMENTOS_LOCALIZADOS → lote (FimDaFila()=false);
+//   - 200/404 NENHUM_DOCUMENTO_LOCALIZADO → lote com FimDaFila()=true, SEM erro;
+//   - 400 REJEICAO → ErrNFSeADNRejeicao (códigos de Erros no log com %q);
+//   - 401/403 ou handshake mTLS recusado → ErrNFSeADNAutenticacaoFalhou;
+//   - 429/5xx → *NFSeADNErroTransitorio (errors.Is ErrNFSeADNTransitorio), com Retry-After;
+//   - falha de rede transitória (ehErroRedeTransitorioADN) → *NFSeADNErroTransitorio (StatusHTTP 0);
+//   - corpo acima de nfseADNMaxBodyBytes → ErrNFSeADNFormatoInesperado;
+//   - ctx cancelado/expirado → ErrNFSeADNComunicacaoFalhou envolvendo ctx.Err();
+//   - corpo irreconhecível → ErrNFSeADNFormatoInesperado; demais → ErrNFSeADNComunicacaoFalhou.
+func BuscarLoteDFeADN(ctx context.Context, httpClient *http.Client, baseURL string, nsu int64) (NFSeADNLote, error) {
+	if nsu < 0 {
+		nsu = 0
 	}
-	endpoint := fmt.Sprintf("%s/contribuintes/DFe/%s", strings.TrimRight(baseURL, "/"), url.PathEscape(nsu))
+	endpoint := fmt.Sprintf("%s/contribuintes/DFe/%d?lote=true", strings.TrimRight(baseURL, "/"), nsu)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return NFSeADNResponse{}, fmt.Errorf("falha ao montar requisição ao Portal Nacional ADN: %w", err)
+		return NFSeADNLote{}, fmt.Errorf("falha ao montar requisição ao Portal Nacional ADN: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		// Sem resposta HTTP nenhuma: handshake mTLS falhou (certificado rejeitado pelo
-		// servidor) ou falha de rede. Tratado como falha de autenticação — é o cenário mais
-		// provável contra um servidor que exige certificado de cliente.
+		if cerr := ctx.Err(); cerr != nil {
+			return NFSeADNLote{}, fmt.Errorf("%w: chamada interrompida: %w", ErrNFSeADNComunicacaoFalhou, cerr)
+		}
+		// Falha de rede transitória (timeout, conexão recusada/resetada, DNS, EOF) → retentativa,
+		// nunca "autenticação".
+		if ehErroRedeTransitorioADN(err) {
+			return NFSeADNLote{}, &NFSeADNErroTransitorio{Causa: err}
+		}
+		// Sem resposta HTTP nenhuma e não transitório: handshake mTLS falhou (certificado
+		// rejeitado pelo servidor). Tratado como falha de autenticação.
 		if explicacao := explicarErroHandshakeADN(err); explicacao != "" {
 			// Explicação (causa provável) só no log do operador — o erro devolvido e as
 			// mensagens HTTP fixas do handler não mudam.
 			log.Printf("[NFSeADN] chamada a %q falhou: %q — %s", endpoint, err.Error(), explicacao)
 		}
-		return NFSeADNResponse{}, fmt.Errorf("%w: %v", ErrNFSeADNAutenticacaoFalhou, err)
+		return NFSeADNLote{}, fmt.Errorf("%w: %v", ErrNFSeADNAutenticacaoFalhou, err)
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, nfseADNMaxBodyBytes))
+	// Lê até limite+1 bytes: passar do limite é DETECTADO (formato inesperado), nunca truncado.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, nfseADNMaxBodyBytes+1))
 	if err != nil {
-		return NFSeADNResponse{}, fmt.Errorf("%w: falha ao ler corpo da resposta: %v", ErrNFSeADNComunicacaoFalhou, err)
+		if cerr := ctx.Err(); cerr != nil {
+			return NFSeADNLote{}, fmt.Errorf("%w: leitura interrompida: %w", ErrNFSeADNComunicacaoFalhou, cerr)
+		}
+		if ehErroRedeTransitorioADN(err) {
+			return NFSeADNLote{}, &NFSeADNErroTransitorio{Causa: err}
+		}
+		return NFSeADNLote{}, fmt.Errorf("%w: falha ao ler corpo da resposta: %v", ErrNFSeADNComunicacaoFalhou, err)
+	}
+	if int64(len(body)) > nfseADNMaxBodyBytes {
+		return NFSeADNLote{}, fmt.Errorf("%w: corpo da resposta (HTTP %d) excede o limite de %d bytes", ErrNFSeADNFormatoInesperado, resp.StatusCode, nfseADNMaxBodyBytes)
 	}
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return NFSeADNResponse{}, fmt.Errorf("%w (HTTP %d): %s", ErrNFSeADNAutenticacaoFalhou, resp.StatusCode, TruncateRunes(string(body), 300))
-	}
-	if resp.StatusCode != http.StatusOK {
-		return NFSeADNResponse{}, fmt.Errorf("%w (HTTP %d): %s", ErrNFSeADNComunicacaoFalhou, resp.StatusCode, TruncateRunes(string(body), 300))
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		return NFSeADNLote{}, fmt.Errorf("%w (HTTP %d): %s", ErrNFSeADNAutenticacaoFalhou, resp.StatusCode, TruncateRunes(string(body), 300))
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		return NFSeADNLote{}, &NFSeADNErroTransitorio{
+			StatusHTTP: resp.StatusCode,
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+		}
 	}
 
-	parsed, perr := parseNFSeADNPayload(body)
-	if perr != nil {
-		return NFSeADNResponse{}, fmt.Errorf("%w: %v", ErrNFSeADNFormatoInesperado, perr)
+	lote, perr := parseNFSeADNLote(body)
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		if perr != nil {
+			return NFSeADNLote{}, fmt.Errorf("%w: %v", ErrNFSeADNFormatoInesperado, perr)
+		}
+		switch string(lote.StatusProcessamento) {
+		case NFSeADNStatusDocumentosLocalizados, NFSeADNStatusNenhumDocumento:
+			return lote, nil
+		case NFSeADNStatusRejeicao:
+			return NFSeADNLote{}, rejeicaoADN(resp.StatusCode, nsu, lote)
+		default:
+			return NFSeADNLote{}, fmt.Errorf("%w: StatusProcessamento desconhecido %q", ErrNFSeADNFormatoInesperado, lote.StatusProcessamento)
+		}
+	case http.StatusNotFound:
+		// Fim da fila SÓ com o corpo documentado — um 404 sem esse corpo (rota errada, proxy) é
+		// falha de comunicação, nunca "nada a buscar" silencioso.
+		if perr == nil && lote.FimDaFila() {
+			return lote, nil
+		}
+		return NFSeADNLote{}, fmt.Errorf("%w (HTTP 404 sem NENHUM_DOCUMENTO_LOCALIZADO): %s", ErrNFSeADNComunicacaoFalhou, TruncateRunes(string(body), 300))
+	case http.StatusBadRequest:
+		if perr == nil {
+			return NFSeADNLote{}, rejeicaoADN(resp.StatusCode, nsu, lote)
+		}
+		return NFSeADNLote{}, fmt.Errorf("%w (HTTP 400): %s", ErrNFSeADNRejeicao, TruncateRunes(string(body), 300))
 	}
-	return parsed, nil
+	return NFSeADNLote{}, fmt.Errorf("%w (HTTP %d): %s", ErrNFSeADNComunicacaoFalhou, resp.StatusCode, TruncateRunes(string(body), 300))
 }
 
-// BuscarTodosDocumentosADN executa UM ciclo de busca manual ("Buscar Agora"): chama
-// BuscarDFeADN repetidamente (NSU inicial "0", depois o ultimoNSU de cada resposta) até
-// loteVazio=true, agregando todos os documentos retornados. Não há persistência de "último
-// NSU processado" entre ciclos nesta sub-spec — não existe coluna dedicada no schema
-// (migration 133 está congelada) e o escopo aqui é só o ciclo manual, sem agendamento
-// automático (próxima sub-spec). Duplicação entre ciclos é prevenida na PERSISTÊNCIA
-// (UNIQUE(company_id, identificador_nfse)), não aqui.
-func BuscarTodosDocumentosADN(ctx context.Context, httpClient *http.Client, baseURL string) ([]NFSeADNDocumento, error) {
-	// Timeout geral do ciclo inteiro de paginação — protege contra um ADN que responde
-	// devagar por muitas páginas em sequência, deixando o ciclo manual rodando por tempo
-	// desproporcional (cada chamada individual já tem seu próprio timeout menor, ver
-	// nfseADNHTTPTimeout, mas isso não limita a soma de várias chamadas em sequência).
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
+// rejeicaoADN loga e devolve o erro de uma REJEICAO, com os códigos de Erros/Alertas (%q).
+func rejeicaoADN(status int, nsu int64, lote NFSeADNLote) error {
+	erros := codigosMensagensADN(lote.Erros)
+	log.Printf("[NFSeADN] REJEICAO HTTP %d NSU=%d ambiente=%q erros=%q alertas=%q",
+		status, nsu, lote.TipoAmbiente, erros, codigosMensagensADN(lote.Alertas))
+	return fmt.Errorf("%w (HTTP %d, NSU %d): erros=%q", ErrNFSeADNRejeicao, status, nsu, erros)
+}
 
-	var todos []NFSeADNDocumento
-	nsu := "0"
-	for i := 0; i < nfseADNMaxLotes; i++ {
-		resp, err := BuscarDFeADN(ctx, httpClient, baseURL, nsu)
-		if err != nil {
-			return todos, err
-		}
-		todos = append(todos, resp.Documentos...)
-		if resp.LoteVazio || resp.UltimoNSU == "" || resp.UltimoNSU == nsu {
-			return todos, nil
-		}
-		nsu = resp.UltimoNSU
+// buscarLoteComRetry chama BuscarLoteDFeADN repetindo diante de 429/5xx: espera o Retry-After
+// (se houver) ou backoff exponencial a partir de cfg.BackoffBase, ambos limitados a
+// cfg.EsperaMax, até cfg.MaxTentativas tentativas. Esgotadas, devolve o último
+// *NFSeADNErroTransitorio. Toda espera respeita ctx.
+func buscarLoteComRetry(ctx context.Context, httpClient *http.Client, baseURL string, nsu int64, cfg nfseADNFilaConfig) (NFSeADNLote, error) {
+	tentativas := cfg.MaxTentativas
+	if tentativas < 1 {
+		tentativas = 1
 	}
-	// Limite de lotes atingido sem o ADN jamais sinalizar loteVazio=true — devolver os
-	// documentos já coletados como se fosse uma captura completa esconderia uma captura
-	// incompleta (ver nfseADNMaxLotes acima).
-	return todos, fmt.Errorf("%w: limite de %d lotes atingido sem loteVazio=true", ErrNFSeADNLimiteLotes, nfseADNMaxLotes)
+	var ultimoErr error
+	for i := 1; i <= tentativas; i++ {
+		lote, err := BuscarLoteDFeADN(ctx, httpClient, baseURL, nsu)
+		var trans *NFSeADNErroTransitorio
+		if err == nil || !errors.As(err, &trans) {
+			return lote, err
+		}
+		ultimoErr = err
+		if i == tentativas {
+			break
+		}
+		espera := trans.RetryAfter
+		if espera <= 0 {
+			espera = cfg.BackoffBase << (i - 1)
+		}
+		if cfg.EsperaMax > 0 && espera > cfg.EsperaMax {
+			espera = cfg.EsperaMax
+		}
+		log.Printf("[NFSeADN] %s no NSU=%d (tentativa %d/%d) — nova tentativa em %s: %v", trans.descricao(), nsu, i, tentativas, espera, err)
+		if serr := cfg.Sleep(ctx, espera); serr != nil {
+			return NFSeADNLote{}, fmt.Errorf("%w: espera interrompida: %w", ErrNFSeADNComunicacaoFalhou, serr)
+		}
+	}
+	return NFSeADNLote{}, ultimoErr
+}
+
+// Motivos de encerramento de PercorrerFilaADN (NFSeADNResultadoFila.Encerramento).
+const (
+	NFSeADNEncerramentoFimDaFila       = "fim_da_fila"
+	NFSeADNEncerramentoLimiteLotes     = "limite_lotes"
+	NFSeADNEncerramentoLimiteTempo     = "limite_tempo"
+	NFSeADNEncerramentoTransitorio     = "transitorio_esgotado"
+	NFSeADNEncerramentoCancelado       = "cancelado"
+	NFSeADNEncerramentoCursorSemAvanco = "cursor_sem_avanco"
+)
+
+// NFSeADNResultadoFila resume um percurso da fila. Lotes/Documentos contam só lotes já
+// PROCESSADOS com sucesso (processar devolveu nil); UltimoNSU é o cursor após o último deles.
+type NFSeADNResultadoFila struct {
+	Lotes        int
+	Documentos   int
+	UltimoNSU    int64
+	Encerramento string
+}
+
+// Parcial indica que a fila NÃO foi esgotada (limite/transitório/cancelamento) — o próximo
+// ciclo continua do UltimoNSU salvo.
+func (r NFSeADNResultadoFila) Parcial() bool {
+	return r.Encerramento != NFSeADNEncerramentoFimDaFila
+}
+
+// PercorrerFilaADN percorre a fila de distribuição a partir de nsuInicial (exclusivo — o ADN
+// devolve os documentos com NSU maior que o informado), chamando processar(lote, maiorNSU) a
+// cada lote com documentos; o próximo lote começa no maior NSU do anterior. processar é quem
+// grava o lote e o cursor numa transação: se devolver erro, o percurso para e devolve esse erro
+// (lotes anteriores continuam gravados).
+//
+// Encerra SEM erro (sucesso, possivelmente parcial — ver Encerramento) em: fim da fila (404
+// NENHUM_DOCUMENTO_LOCALIZADO), cfg.MaxLotes atingido, cfg.MaxDuracao atingida, 429/5xx com
+// tentativas esgotadas, ctx cancelado, ou lote cujo maior NSU não avança o cursor (proteção
+// contra loop). Encerra COM erro em rejeição (400), autenticação, formato inesperado e demais
+// falhas de comunicação.
+func PercorrerFilaADN(ctx context.Context, httpClient *http.Client, baseURL string, nsuInicial int64, cfg nfseADNFilaConfig,
+	processar func(lote NFSeADNLote, maiorNSU int64) error) (NFSeADNResultadoFila, error) {
+
+	if cfg.Sleep == nil {
+		cfg.Sleep = nfseSleepCtx
+	}
+	parentCtx := ctx
+	if cfg.MaxDuracao > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, cfg.MaxDuracao)
+		defer cancel()
+	}
+	encerramentoPorCtx := func() string {
+		if parentCtx.Err() != nil {
+			return NFSeADNEncerramentoCancelado
+		}
+		return NFSeADNEncerramentoLimiteTempo
+	}
+
+	res := NFSeADNResultadoFila{UltimoNSU: nsuInicial}
+	nsu := nsuInicial
+	for {
+		if cfg.MaxLotes > 0 && res.Lotes >= cfg.MaxLotes {
+			res.Encerramento = NFSeADNEncerramentoLimiteLotes
+			return res, nil
+		}
+		if ctx.Err() != nil {
+			res.Encerramento = encerramentoPorCtx()
+			return res, nil
+		}
+		if res.Lotes > 0 && cfg.PausaEntreLotes > 0 {
+			if err := cfg.Sleep(ctx, cfg.PausaEntreLotes); err != nil {
+				res.Encerramento = encerramentoPorCtx()
+				return res, nil
+			}
+		}
+
+		lote, err := buscarLoteComRetry(ctx, httpClient, baseURL, nsu, cfg)
+		if err != nil {
+			if errors.Is(err, ErrNFSeADNTransitorio) {
+				log.Printf("[NFSeADN] tentativas esgotadas no NSU=%d (%v) — ciclo encerrado com progresso salvo", nsu, err)
+				res.Encerramento = NFSeADNEncerramentoTransitorio
+				return res, nil
+			}
+			if ctx.Err() != nil {
+				res.Encerramento = encerramentoPorCtx()
+				return res, nil
+			}
+			return res, err
+		}
+
+		menor, maior := lote.FaixaNSU()
+		log.Printf("[NFSeADN] lote NSU>%d status=%q ambiente=%q versao=%q documentos=%d faixaNSU=%d..%d alertas=%q erros=%q",
+			nsu, lote.StatusProcessamento, lote.TipoAmbiente, lote.VersaoAplicativo, len(lote.LoteDFe), menor, maior,
+			codigosMensagensADN(lote.Alertas), codigosMensagensADN(lote.Erros))
+
+		if lote.FimDaFila() {
+			res.Encerramento = NFSeADNEncerramentoFimDaFila
+			return res, nil
+		}
+		if len(lote.LoteDFe) == 0 || maior <= nsu {
+			log.Printf("[NFSeADN] lote sem NSU maior que %d (documentos=%d, maior=%d) — encerrando para não repetir a mesma consulta", nsu, len(lote.LoteDFe), maior)
+			res.Encerramento = NFSeADNEncerramentoCursorSemAvanco
+			return res, nil
+		}
+
+		if err := processar(lote, maior); err != nil {
+			return res, err
+		}
+		res.Lotes++
+		res.Documentos += len(lote.LoteDFe)
+		res.UltimoNSU = maior
+		nsu = maior
+	}
 }

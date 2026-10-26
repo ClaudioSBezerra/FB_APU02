@@ -14,10 +14,10 @@ import (
 
 // ---------------------------------------------------------------------------
 // nfseRow — linha de nfse_entradas/nfse_saidas (schema idêntico nas duas tabelas,
-// migration 133). Valores tributários (iss/pis/cofins/inss/irrf/csll) ficam
-// zerados até o parser de services/nfse_adn.go ser ajustado com um payload real
-// confirmado (ver Design Notes de spec-nfse-frontend.md) — a listagem só reflete
-// o que está persistido, não finge um valor diferente de zero.
+// migrations 133/134). Valores tributários vêm do XML da NFS-e (services/nfse_adn_xml.go).
+// cancelada/numero_nfse/data_cancelamento (migration 134) foram ACRESCENTADOS ao contrato —
+// nenhum campo anterior mudou. Notas canceladas aparecem na listagem (com cancelada=true) mas
+// ficam FORA dos totais.
 // ---------------------------------------------------------------------------
 
 type nfseRow struct {
@@ -39,6 +39,9 @@ type nfseRow struct {
 	INSS              float64 `json:"inss"`
 	IRRF              float64 `json:"irrf"`
 	CSLL              float64 `json:"csll"`
+	NumeroNFSe        string  `json:"numero_nfse"`
+	Cancelada         bool    `json:"cancelada"`
+	DataCancelamento  string  `json:"data_cancelamento"` // DD/MM/YYYY ou "" (mesmo formato de data_emissao)
 }
 
 // nfseSafeSortCols — colunas aceitas em sort_by, mesmo princípio de allowlist já usado em
@@ -234,9 +237,13 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 			return
 		}
 
+		// Totais excluem notas canceladas (a contagem/listagem acima continua incluindo-as).
 		var totValorServicos, totISS, totPIS, totCOFINS, totINSS, totIRRF, totCSLL float64
 		if err := db.QueryRow(
-			"SELECT COALESCE(SUM(valor_servicos),0), COALESCE(SUM(iss),0), COALESCE(SUM(pis),0), COALESCE(SUM(cofins),0), COALESCE(SUM(inss),0), COALESCE(SUM(irrf),0), COALESCE(SUM(csll),0) FROM "+table+" "+where,
+			"SELECT COALESCE(SUM(valor_servicos) FILTER (WHERE NOT cancelada),0), COALESCE(SUM(iss) FILTER (WHERE NOT cancelada),0), "+
+				"COALESCE(SUM(pis) FILTER (WHERE NOT cancelada),0), COALESCE(SUM(cofins) FILTER (WHERE NOT cancelada),0), "+
+				"COALESCE(SUM(inss) FILTER (WHERE NOT cancelada),0), COALESCE(SUM(irrf) FILTER (WHERE NOT cancelada),0), "+
+				"COALESCE(SUM(csll) FILTER (WHERE NOT cancelada),0) FROM "+table+" "+where,
 			args...,
 		).Scan(&totValorServicos, &totISS, &totPIS, &totCOFINS, &totINSS, &totIRRF, &totCSLL); err != nil {
 			log.Printf("%s sum error: %v", logPrefix, err)
@@ -265,7 +272,9 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 				COALESCE(valor_servicos, 0),
 				COALESCE(base_iss, 0), COALESCE(iss, 0), COALESCE(aliquota_iss, 0), COALESCE(iss_retido, 0),
 				COALESCE(base_pis, 0), COALESCE(pis, 0), COALESCE(base_cofins, 0), COALESCE(cofins, 0),
-				COALESCE(inss, 0), COALESCE(irrf, 0), COALESCE(csll, 0)
+				COALESCE(inss, 0), COALESCE(irrf, 0), COALESCE(csll, 0),
+				COALESCE(numero_nfse, ''), cancelada,
+				COALESCE(TO_CHAR(data_cancelamento AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY'), '')
 			FROM ` + table + " " + where +
 			fmt.Sprintf(" ORDER BY %s %s, identificador_nfse DESC LIMIT $%d OFFSET $%d", sortCol, sortDir, idx, idx+1)
 		pageArgs := append(args, pageSize, offset)
@@ -289,6 +298,7 @@ func nfseList(db *sql.DB, table, logPrefix string) http.HandlerFunc {
 				&row.BaseISS, &row.ISS, &row.AliquotaISS, &row.ISSRetido,
 				&row.BasePIS, &row.PIS, &row.BaseCOFINS, &row.COFINS,
 				&row.INSS, &row.IRRF, &row.CSLL,
+				&row.NumeroNFSe, &row.Cancelada, &row.DataCancelamento,
 			); err != nil {
 				log.Printf("%s scan error: %v", logPrefix, err)
 				continue

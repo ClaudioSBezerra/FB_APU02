@@ -254,6 +254,7 @@ func SaveNFSeCertificadoHandler(db *sql.DB) http.HandlerFunc {
 		// frequentemente vêm em BER, que encoding/asn1 (usado por pkcs12.Decode em
 		// BuildNFSeMTLSClient) não lê. Normaliza aqui, no upload — nunca no caminho de busca —
 		// para que o que fica em certificado_pfx já seja sempre DER-compatível.
+		var cnpjTitular string
 		if req.CertificadoPfx != "" {
 			normalizado, foiNormalizado, normErr := services.NormalizarPKCS12ParaDER(pfxBytesDecoded, req.CertificadoSenha)
 			if normErr != nil {
@@ -296,6 +297,14 @@ func SaveNFSeCertificadoHandler(db *sql.DB) http.HandlerFunc {
 			}
 			if baixadas := contarCertificadosNovos(intermediarias, intermediariasOriginais); baixadas > 0 {
 				log.Printf("[NFSeCertificado] Cadeia ICP-Brasil completada via AIA no upload, companyID=%s: %d certificado(s) baixado(s), cadeia final com %d intermediária(s)", companyID, baixadas, len(intermediarias))
+			}
+			// CNPJ titular (Subject ICP-Brasil "NOME:CNPJ"): guardado para zerar o cursor de NSU
+			// quando o certificado trocar de titular (ver o upsert abaixo). Sem CNPJ no Subject,
+			// fica NULL — a busca reporta o erro (ErrNFSeCNPJNaoIdentificado) na hora de usar.
+			if c, cnpjErr := services.ExtractCNPJFromCertificateSubject(certFinal); cnpjErr == nil {
+				cnpjTitular = c
+			} else {
+				log.Printf("[NFSeCertificado] CNPJ titular não identificado no Subject do certificado, companyID=%s: %q", companyID, cnpjErr.Error())
 			}
 			comCadeia, encErr := pkcs12.Modern.Encode(chave, certFinal, intermediarias, req.CertificadoSenha)
 			if encErr != nil {
@@ -343,19 +352,31 @@ func SaveNFSeCertificadoHandler(db *sql.DB) http.HandlerFunc {
 			validadeParam = nil
 		}
 
+		// cnpj_titular: só muda quando um novo .pfx veio (NULL = preserva). Trocou de titular →
+		// ultimo_nsu volta a 0: a fila de distribuição do ADN é por CNPJ, o cursor do titular
+		// anterior não vale para o novo (pularia documentos dele). Mesmo titular (renovação do
+		// certificado) preserva o cursor.
+		var cnpjParam interface{}
+		if cnpjTitular != "" {
+			cnpjParam = cnpjTitular
+		}
 		var id string
 		err = db.QueryRow(`
-			INSERT INTO nfse_certificados (company_id, certificado_pfx, certificado_senha, nome_arquivo, validade, status)
-			VALUES ($1, $2, $3, $4, $5, 'ativo')
+			INSERT INTO nfse_certificados (company_id, certificado_pfx, certificado_senha, nome_arquivo, validade, status, cnpj_titular)
+			VALUES ($1, $2, $3, $4, $5, 'ativo', $6)
 			ON CONFLICT (company_id) DO UPDATE SET
 				certificado_pfx   = $2,
 				certificado_senha = $3,
 				nome_arquivo      = $4,
 				validade          = $5,
 				status            = 'ativo',
+				ultimo_nsu        = CASE WHEN EXCLUDED.cnpj_titular IS NOT NULL
+				                              AND nfse_certificados.cnpj_titular IS DISTINCT FROM EXCLUDED.cnpj_titular
+				                         THEN 0 ELSE nfse_certificados.ultimo_nsu END,
+				cnpj_titular      = COALESCE(EXCLUDED.cnpj_titular, nfse_certificados.cnpj_titular),
 				updated_at        = NOW()
 			RETURNING id
-		`, companyID, pfxToSave, senhaToSave, nomeArquivoToSave, validadeParam).Scan(&id)
+		`, companyID, pfxToSave, senhaToSave, nomeArquivoToSave, validadeParam, cnpjParam).Scan(&id)
 		if err != nil {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao salvar certificado NFS-e", err, "[NFSeCertificado]")
 			return

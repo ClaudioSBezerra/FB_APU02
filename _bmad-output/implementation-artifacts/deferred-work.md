@@ -697,3 +697,28 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-nfse-cadeia-icp-brasil.md`
   summary: ganchos de teste (`completarCadeiaNFSe`, `nfseAIAPermitirLoopback`, `nfseRaizesTeste`) são variáveis globais sem sincronização — viram data race se algum teste usar t.Parallel() no futuro.
   evidence: revisão adversarial (Blind Hunter); sem uso paralelo hoje, e nenhum caminho de produção os altera.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: valores monetários trafegam como float64 (ParseFloat → NUMERIC(15,2) e SUM escaneado em float64) — totais mensais grandes podem errar centavos.
+  evidence: revisão adversarial (Blind Hunter); trocar por string decimal ponta a ponta afeta handlers de lista e frontend.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: colunas base_iss, aliquota_iss, base_pis, base_cofins ficam zeradas — o layout nacional tem vBC/pAliqAplic e base/alíquota no bloco piscofins.
+  evidence: revisão adversarial (Blind Hunter); preencher depois do primeiro XML real confirmar os caminhos.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: vPis/vCofins gravados sem olhar tpRetPisCofins — coluna mistura PIS/COFINS apurado e retido.
+  evidence: revisão adversarial (Blind Hunter); já listado como incerteza na spec, depende do XML real.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: regra de direção por raiz de CNPJ (8 dígitos) — tenants com a mesma raiz (ex.: empresa MASTER de teste, filiais como empresas separadas) recebem as mesmas notas; intermediário (infDPS/interm) ignorado; tomador estrangeiro (NIF) grava cnpj_tomador NULL.
+  evidence: revisão adversarial (Blind Hunter); regra aceita pelo usuário na spec, revisar quando houver mais de um tenant com mesma raiz.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: data_cancelamento vem do DataHoraGeracao do envelope, não do XML do evento; tipo do evento e ChaveAcesso confiados no JSON sem conferir o XML assinado.
+  evidence: revisão adversarial (Blind Hunter); confirmar com o primeiro evento real.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: contagem novos/atualizados usa RETURNING (xmax = 0) — detalhe interno do Postgres.
+  evidence: revisão adversarial (Blind Hunter); funciona no PG15, troca barata se der problema.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: captura manual é síncrona no request HTTP (até 4 min) — ideal seria job assíncrono com status; trava de concorrência é só in-process (múltiplas réplicas não protegidas).
+  evidence: revisão adversarial (Blind Hunter); hoje 1 réplica por ambiente.
+- source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
+  summary: linhas gravadas pelo parser antigo (formato chutado) não são limpas/rechaveadas; não há reprocessamento automático da tabela nfse_adn_falhas.
+  evidence: revisão adversarial; parser antigo nunca gravou nada (0 recebidos), reprocessar falhas fica para quando houver volume.

@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/json"
 	"log"
 	"net"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -99,7 +97,7 @@ func TestNfseSchedulerProcessCompany_PanicNaoDerrubaOProcesso(t *testing.T) {
 				t.Fatalf("panic vazou de nfseSchedulerProcessCompany (recover() interno não funcionou): %v", r)
 			}
 		}()
-		nfseSchedulerProcessCompany(nil, companyID)
+		nfseSchedulerProcessCompany(nil, companyID, nil)
 	}()
 
 	if !strings.Contains(logBuf.String(), "PANIC recuperado") {
@@ -172,21 +170,14 @@ func TestRunNFSeSchedulerCycle_ErroEmUmaEmpresaNaoImpedeAsDemais(t *testing.T) {
 	const cnpjB = "22222222000192"
 	clientCertB, clientKeyB := genTestLeaf(t, untrustedCA, untrustedCAKey, leafOpts{commonName: "EMPRESA B:" + cnpjB})
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/contribuintes/DFe/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"loteVazio": true,
-			"ultimoNSU": "1",
-			"documentos": []map[string]interface{}{
-				{
-					"nsu": "1", "identificadorNfse": "NFSE-SCHED-001",
-					"cnpjPrestador": "99999999000199", "cnpjTomador": cnpjA,
-					"dataEmissao": "2026-10-10", "valorServicos": 150.0,
-				},
-			},
-		})
-	})
+	// Fila do ADN no formato real: 1 NFS-e tomada pela empresa A, depois 404 (fim da fila).
+	semEsperasNoProcessor(t)
+	mux := &filaADNTeste{t: t, tamanhoLote: 50, docs: []map[string]interface{}{
+		itemNFSeTeste(t, 1, chaveTeste("5", 1), nfseXMLOpts{
+			NNFSe: "1", EmitCNPJ: "99999999000199", PrestCNPJ: "99999999000199", TomaCNPJ: cnpjA,
+			DhEmi: "2026-10-10T10:00:00-03:00", DCompet: "2026-10-01", VServ: "150.00",
+		}),
+	}}
 	ts := startNFSeADNTestServer(t, mux, serverTLSCert, clientCAPool)
 	defer ts.Close()
 
@@ -229,5 +220,69 @@ func TestRunNFSeSchedulerCycle_ErroEmUmaEmpresaNaoImpedeAsDemais(t *testing.T) {
 	}
 	if n := countNFSeRowsTeste(t, db, "nfse_entradas", companyB); n != 0 {
 		t.Errorf("empresa B (mTLS rejeitado) não deveria persistir nada, veio %d", n)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// nfseSchedulerEstado — o dia só é marcado como feito quando a fila foi esgotada.
+// ---------------------------------------------------------------------------
+
+func TestNFSeSchedulerDesfecho_Classificacao(t *testing.T) {
+	casos := []struct {
+		nome     string
+		res      NFSeResultadoCiclo
+		executou bool
+		err      error
+		want     nfseDesfechoScheduler
+	}{
+		{"fila esgotada", NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoFimDaFila}, true, nil, nfseDesfechoConcluido},
+		{"limite de lotes", NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoLimiteLotes}, true, nil, nfseDesfechoBacklog},
+		{"limite de tempo", NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoLimiteTempo}, true, nil, nfseDesfechoBacklog},
+		{"transitório esgotado", NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoTransitorio}, true, nil, nfseDesfechoRetentar},
+		{"cursor sem avanço", NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoCursorSemAvanco}, true, nil, nfseDesfechoRetentar},
+		{"erro", NFSeResultadoCiclo{}, true, ErrNFSeADNAutenticacaoFalhou, nfseDesfechoRetentar},
+		{"sem certificado", NFSeResultadoCiclo{}, true, ErrNFSeCertificadoNaoCadastrado, nfseDesfechoConcluido},
+		{"ocupado", NFSeResultadoCiclo{}, true, ErrNFSeCicloEmAndamento, nfseDesfechoPulado},
+		{"rate limit", NFSeResultadoCiclo{}, false, nil, nfseDesfechoPulado},
+	}
+	for _, c := range casos {
+		if got := nfseSchedulerDesfecho(c.res, c.executou, c.err); got != c.want {
+			t.Errorf("%s: desfecho %v, esperava %v", c.nome, got, c.want)
+		}
+	}
+}
+
+func TestNFSeSchedulerEstado_ParcialNaoMarcaODia(t *testing.T) {
+	e := novoNFSeSchedulerEstado()
+	const cid, hoje = "empresa-x", "2026-10-26"
+	agora := time.Date(2026, 10, 26, 6, 0, 0, 0, time.UTC)
+
+	if !e.reservar(cid, "06:00", "06:00", hoje, agora) {
+		t.Fatal("1ª reserva do dia deveria disparar")
+	}
+	if e.reservar(cid, "06:00", "06:00", hoje, agora) {
+		t.Fatal("não pode disparar de novo enquanto em execução")
+	}
+	// Backlog: dispara já no próximo tick.
+	e.registrar(cid, hoje, agora, NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoLimiteLotes}, true, nil)
+	if !e.reservar(cid, "06:01", "06:00", hoje, agora.Add(time.Minute)) {
+		t.Fatal("parcial por backlog deveria continuar no tick seguinte")
+	}
+	// Transitório esgotado: espera o intervalo de retentativa, mas o dia NÃO é dado como feito.
+	e.registrar(cid, hoje, agora.Add(time.Minute), NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoTransitorio}, true, nil)
+	if e.reservar(cid, "06:02", "06:00", hoje, agora.Add(2*time.Minute)) {
+		t.Fatal("transitório esgotado não deveria retentar antes do intervalo")
+	}
+	depois := agora.Add(time.Minute + nfseSchedulerIntervaloRetentativa)
+	if !e.reservar(cid, "06:16", "06:00", hoje, depois) {
+		t.Fatal("transitório esgotado deveria retentar depois do intervalo, no mesmo dia")
+	}
+	// Fila esgotada: dia feito.
+	e.registrar(cid, hoje, depois, NFSeResultadoCiclo{Encerramento: NFSeADNEncerramentoFimDaFila}, true, nil)
+	if e.reservar(cid, "07:00", "06:00", hoje, depois.Add(time.Hour)) {
+		t.Fatal("fila esgotada: não dispara de novo no mesmo dia")
+	}
+	if !e.reservar(cid, "06:00", "06:00", "2026-10-27", depois.Add(24*time.Hour)) {
+		t.Fatal("no dia seguinte deveria disparar")
 	}
 }

@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -34,8 +36,8 @@ import (
 // comportamento HTTP do handler (status code, rate limit, formato da resposta JSON e mapeamento
 // de erro). A cobertura de persistência/transação/autoemitido/CNPJ-inválido/dedup em si vive em
 // services/nfse_processor_test.go, que testa services.ExecutarCicloNFSe diretamente (a mesma
-// função que este handler chama) — formato-inesperado/limite-de-lotes são cobertos aqui mesmo,
-// via TestMapExecutarCicloNFSeErr_LimiteDeLotes_Retorna502 abaixo, porque são comportamento do
+// função que este handler chama) — rejeição/transitório são cobertos aqui mesmo,
+// via TestMapExecutarCicloNFSeErr_RejeicaoETransitorio_Retornam502 abaixo, porque são comportamento do
 // MAPEAMENTO HTTP (mapExecutarCicloNFSeErr), não da lógica de services.
 // ---------------------------------------------------------------------------
 
@@ -274,19 +276,32 @@ func TestBuscarNFSeHandler_ServidorAceita_Retorna200ComContagens(t *testing.T) {
 	clientCAPool := x509.NewCertPool()
 	clientCAPool.AddCert(ca)
 
+	// Formato real do ADN: 1 lote com 1 NFS-e tomada (XML gzip+base64), depois 404 fim da fila.
+	xmlNFSe := `<?xml version="1.0" encoding="UTF-8"?><NFSe xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">` +
+		`<infNFSe Id="NFS00000000000000000000000000000000000000000000000001"><nNFSe>1</nNFSe><emit><CNPJ>99999999000199</CNPJ></emit>` +
+		`<valores><vISSQN>5.00</vISSQN></valores><DPS><infDPS><dhEmi>2026-10-01T10:00:00-03:00</dhEmi><dCompet>2026-10-01</dCompet>` +
+		`<prest><CNPJ>99999999000199</CNPJ></prest><toma><CNPJ>` + cnpjEmpresa + `</CNPJ></toma>` +
+		`<valores><vServPrest><vServ>100.00</vServ></vServPrest></valores></infDPS></DPS></infNFSe></NFSe>`
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	zw.Write([]byte(xmlNFSe))
+	zw.Close()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/contribuintes/DFe/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if strings.TrimPrefix(r.URL.Path, "/contribuintes/DFe/") != "0" {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]interface{}{"StatusProcessamento": "NENHUM_DOCUMENTO_LOCALIZADO", "TipoAmbiente": "HOMOLOGACAO"})
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"loteVazio": true,
-			"ultimoNSU": "1",
-			"documentos": []map[string]interface{}{
-				{
-					"nsu": "1", "identificadorNfse": "NFSE-HTTP-001",
-					"cnpjPrestador": "99999999000199", "cnpjTomador": cnpjEmpresa,
-					"dataEmissao": "2026-10-01", "valorServicos": 100.0,
-				},
-			},
+			"StatusProcessamento": "DOCUMENTOS_LOCALIZADOS",
+			"TipoAmbiente":        "HOMOLOGACAO",
+			"LoteDFe": []map[string]interface{}{{
+				"NSU": 1, "ChaveAcesso": "00000000000000000000000000000000000000000000000001", "TipoDocumento": "NFSE",
+				"ArquivoXml": base64.StdEncoding.EncodeToString(gz.Bytes()), "DataHoraGeracao": "2026-10-01T10:05:00-03:00",
+			}},
 		})
 	})
 
@@ -371,19 +386,96 @@ func TestBuscarNFSeHandler_ServidorRejeitaCertificado_Retorna502SemGravarNada(t 
 	}
 }
 
-// TestMapExecutarCicloNFSeErr_LimiteDeLotes_Retorna502 cobre o item 2 do Spec Change Log
-// (loopback 1): services.ErrNFSeADNLimiteLotes (esgotamento de nfseADNMaxLotes sem o ADN jamais
-// sinalizar loteVazio=true) tem que mapear para 502 — antes desta correção caía no `default:` do
-// mapeamento e virava 500 genérico, inconsistente com os demais erros de comunicação com o ADN
-// (todos 502). Teste unitário puro: não precisa de banco nem de servidor mTLS, só exercita
-// mapExecutarCicloNFSeErr diretamente.
-func TestMapExecutarCicloNFSeErr_LimiteDeLotes_Retorna502(t *testing.T) {
-	rec := httptest.NewRecorder()
-	mapExecutarCicloNFSeErr(rec, "company-id-fake", services.ErrNFSeADNLimiteLotes)
-	if rec.Code != http.StatusBadGateway {
-		t.Fatalf("esperava 502 para ErrNFSeADNLimiteLotes, obteve %d: %s", rec.Code, rec.Body.String())
+// TestMapExecutarCicloNFSeErr_RejeicaoETransitorio_Retornam502: 400 REJEICAO do ADN e
+// transitório (429/5xx) que escape do ciclo mapeiam para 502 (I/O Matrix da
+// spec-nfse-adn-parser-real.md: "Rejeição → erro mapeado (502 manual)"). O antigo
+// ErrNFSeADNLimiteLotes deixou de existir: atingir o limite de lotes agora é sucesso parcial.
+func TestMapExecutarCicloNFSeErr_RejeicaoETransitorio_Retornam502(t *testing.T) {
+	for _, err := range []error{services.ErrNFSeADNRejeicao, &services.NFSeADNErroTransitorio{StatusHTTP: 429}} {
+		rec := httptest.NewRecorder()
+		mapExecutarCicloNFSeErr(rec, "company-id-fake", err, services.NFSeResultadoCiclo{})
+		if rec.Code != http.StatusBadGateway {
+			t.Errorf("esperava 502 para %v, obteve %d: %s", err, rec.Code, rec.Body.String())
+		}
 	}
-	if !strings.Contains(strings.ToLower(rec.Body.String()), "limite") {
-		t.Errorf("mensagem de erro deveria mencionar o limite de páginas, veio: %s", rec.Body.String())
+	rec := httptest.NewRecorder()
+	mapExecutarCicloNFSeErr(rec, "company-id-fake", services.ErrNFSeADNRejeicao, services.NFSeResultadoCiclo{})
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "rejeitou") {
+		t.Errorf("mensagem deveria indicar rejeição, veio: %s", rec.Body.String())
+	}
+}
+
+// Ciclo já em andamento para a empresa (ex.: agendado rodando) → 409, sem tocar no ADN.
+func TestBuscarNFSeHandler_CicloEmAndamento_Retorna409(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	t.Setenv("NFSE_ADN_BASE_URL", "http://127.0.0.1:1")
+	NFSeBuscaRL.Reset(companyID)
+	liberar, ok := services.TentarReservarCicloNFSe(companyID)
+	if !ok {
+		t.Fatal("reserva do ciclo deveria funcionar")
+	}
+	defer liberar()
+
+	rec := postBuscarNFSe(t, db, authed)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("esperava 409, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "em andamento") {
+		t.Errorf("mensagem deveria indicar captura em andamento: %s", rec.Body.String())
+	}
+}
+
+// Sucesso parcial: 200 com parcial=true e motivo_encerramento; transitório esgotado sem nenhum
+// lote: 502 com mensagem e contagens; fila esgotada: parcial=false sem motivo.
+func TestBuscarNFSeHandler_RespostaParcialE502(t *testing.T) {
+	type corpo struct {
+		Error               string  `json:"error"`
+		Parcial             *bool   `json:"parcial"`
+		MotivoEncerramento  *string `json:"motivo_encerramento"`
+		DocumentosRecebidos *int    `json:"documentos_recebidos"`
+		DocumentosFalhas    *int    `json:"documentos_falhas"`
+	}
+	responder := func(res services.NFSeResultadoCiclo) (int, corpo) {
+		rec := httptest.NewRecorder()
+		status, msg := statusRespostaCicloNFSe(res)
+		escreverRespostaBuscaNFSe(rec, status, res, msg)
+		var b corpo
+		if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+			t.Fatalf("corpo inválido: %v %s", err, rec.Body.String())
+		}
+		return rec.Code, b
+	}
+
+	code, b := responder(services.NFSeResultadoCiclo{Encerramento: services.NFSeADNEncerramentoLimiteLotes, Lotes: 200, Recebidos: 10000, Falhas: 2})
+	if code != http.StatusOK || b.Parcial == nil || !*b.Parcial || b.MotivoEncerramento == nil || *b.MotivoEncerramento != "limite_lotes" || *b.DocumentosFalhas != 2 {
+		t.Errorf("parcial por limite: code=%d corpo=%+v", code, b)
+	}
+
+	code, b = responder(services.NFSeResultadoCiclo{Encerramento: services.NFSeADNEncerramentoTransitorio, Lotes: 1, Recebidos: 50})
+	if code != http.StatusOK || !*b.Parcial || *b.MotivoEncerramento != "transitorio_esgotado" {
+		t.Errorf("transitório com progresso deveria ser 200 parcial: code=%d corpo=%+v", code, b)
+	}
+
+	code, b = responder(services.NFSeResultadoCiclo{Encerramento: services.NFSeADNEncerramentoTransitorio})
+	if code != http.StatusBadGateway || b.Error == "" || b.DocumentosRecebidos == nil || b.Parcial == nil {
+		t.Errorf("transitório sem nenhum lote deveria ser 502 com contagens: code=%d corpo=%+v", code, b)
+	}
+
+	code, b = responder(services.NFSeResultadoCiclo{Encerramento: services.NFSeADNEncerramentoFimDaFila, Lotes: 1})
+	if code != http.StatusOK || *b.Parcial || b.MotivoEncerramento != nil {
+		t.Errorf("fila esgotada: code=%d corpo=%+v", code, b)
+	}
+
+	// Erro também traz as contagens do que já foi gravado.
+	rec := httptest.NewRecorder()
+	mapExecutarCicloNFSeErr(rec, "company-id-fake", services.ErrNFSeADNRejeicao, services.NFSeResultadoCiclo{Recebidos: 100, Novos: 100, Lotes: 2})
+	var e corpo
+	json.Unmarshal(rec.Body.Bytes(), &e)
+	if rec.Code != http.StatusBadGateway || e.DocumentosRecebidos == nil || *e.DocumentosRecebidos != 100 {
+		t.Errorf("erro deveria trazer contagens: code=%d corpo=%s", rec.Code, rec.Body.String())
 	}
 }

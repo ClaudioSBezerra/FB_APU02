@@ -304,3 +304,43 @@ func TestNFSeEntradasCompetenciasHandler_SemDocumentos_ListaVazia(t *testing.T) 
 		t.Errorf("esperava lista de competências vazia, obteve %v", meses)
 	}
 }
+
+// AC4 (spec-nfse-adn-parser-real.md): nota cancelada aparece na listagem com cancelada=true (e
+// numero_nfse exposto), mas fica FORA dos totais.
+func TestNFSeEntradasListHandler_CanceladaListadaMasForaDosTotais(t *testing.T) {
+	db := openNFSeTestDB(t)
+	defer db.Close()
+	companyID, authed, cleanup := setupNFSeCertTest(t, db)
+	defer cleanup()
+
+	insertNFSeDoc(t, db, "nfse_entradas", companyID, "nfse-ativa", "11111111000191", "22222222000172", "10/2026", 1000, 50)
+	insertNFSeDoc(t, db, "nfse_entradas", companyID, "nfse-cancelada", "11111111000191", "22222222000172", "10/2026", 700, 35)
+	if _, err := db.Exec(`UPDATE nfse_entradas SET cancelada = true, data_cancelamento = '2026-10-10T15:30:00-03:00', numero_nfse = '42'
+		WHERE company_id = $1 AND identificador_nfse = 'nfse-cancelada'`, companyID); err != nil {
+		t.Fatalf("marcar cancelada: %v", err)
+	}
+
+	rec := getNFSeList(t, db, authed, "/api/nfse-entradas?mes_ano=10/2026", NFSeEntradasListHandler)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("esperava HTTP 200, obteve %d — corpo: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeNFSeList(t, rec)
+	if body.Total != 2 || len(body.Items) != 2 {
+		t.Fatalf("a cancelada continua listada: esperava 2 itens, veio total=%d items=%d", body.Total, len(body.Items))
+	}
+	if body.Totals["valor_servicos"] != 1000 || body.Totals["iss"] != 50 {
+		t.Errorf("totais deveriam excluir a cancelada (1000/50), veio %+v", body.Totals)
+	}
+	for _, it := range body.Items {
+		switch it.IdentificadorNFSe {
+		case "nfse-cancelada":
+			if !it.Cancelada || it.NumeroNFSe != "42" || it.DataCancelamento != "10/10/2026" {
+				t.Errorf("item cancelado: %+v", it)
+			}
+		case "nfse-ativa":
+			if it.Cancelada || it.DataCancelamento != "" {
+				t.Errorf("item ativo não deveria estar cancelado: %+v", it)
+			}
+		}
+	}
+}
