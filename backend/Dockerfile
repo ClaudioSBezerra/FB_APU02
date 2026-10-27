@@ -31,8 +31,10 @@ RUN apk --no-cache add tzdata ca-certificates openssl && \
     ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime
 # Usuário sem privilégio (21/10, migração de segurança) — o backend grava
 # em disco de verdade (uploads/, backend/handlers/admin.go). WORKDIR
-# continua /root/ de propósito — só o dono muda (chown).
-RUN adduser -D -u 1000 appuser && chown appuser:appuser /root
+# continua /root/ de propósito — só o dono muda (chown). /root/uploads é
+# criado aqui (e não deixado pro Docker) pra um volume novo herdar o dono
+# appuser em vez de nascer root e negar escrita.
+RUN adduser -D -u 1000 appuser && mkdir -p /root/uploads && chown -R appuser:appuser /root
 WORKDIR /root/
 COPY --from=builder --chown=appuser:appuser /app/server .
 COPY --from=builder --chown=appuser:appuser /app/migrations ./migrations
