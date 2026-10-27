@@ -11,6 +11,7 @@ services:
       - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?sslmode=disable
       - REDIS_ADDR=redis:6379
       - JWT_SECRET=${JWT_SECRET}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-false}
       - ENVIRONMENT=production
       - LOG_LEVEL=info
       - SMTP_HOST=${SMTP_HOST}
