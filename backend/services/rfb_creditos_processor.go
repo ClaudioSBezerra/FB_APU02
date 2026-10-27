@@ -300,6 +300,14 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 	log.Printf("[RFB Creditos] api_versao: %s | urlAssinada: %t | tiqueteDownload: %t",
 		apiVersao, dlInput.URLAssinada != "", dlInput.TiqueteDownload != "")
 
+	// Sem tiquete_download/url_assinada (v1: webhook não chegou) não há o que baixar: devolve
+	// NOT_READY SEM tocar na linha (o claim 'downloading' + updateRequestError sobrescreveriam o
+	// error_code verdadeiro, ex.: TIMEOUT).
+	if dlInput.SemFonteDeDownload() {
+		log.Printf("[RFB Creditos] request %s sem tiquete_download/url_assinada (api_versao=%s) — nada a baixar, linha preservada", requestID, apiVersao)
+		return ErrSemFonteDeDownload()
+	}
+
 	res, err := db.Exec(`
 		UPDATE rfb_requests SET status = 'downloading', updated_at = CURRENT_TIMESTAMP
 		WHERE id = $1 AND status NOT IN ('downloading', 'completed', 'reprocessing')

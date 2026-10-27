@@ -23,6 +23,14 @@ services:
       - RFB_API_URL=${RFB_API_URL}
       - RFB_TOKEN_URL=${RFB_TOKEN_URL}
       - RFB_WEBHOOK_URL=${RFB_WEBHOOK_URL}
+      # Versão da API CBS da RFB. Vazio = v1 (padrão, comportamento atual). 'v2' = polling de
+      # situação + download por URL assinada (não depende do webhook). RFB_API_VERSION vale para
+      # produção (rtc); RFB_API_VERSION_RESTRITA, só para produção restrita. Este arquivo é
+      # copiado pelo CI a cada deploy: variável só no .env NÃO chega ao container sem estar aqui.
+      - RFB_API_VERSION=${RFB_API_VERSION:-}
+      - RFB_API_VERSION_RESTRITA=${RFB_API_VERSION_RESTRITA:-}
+      # Segredo HMAC do webhook da RFB (vazio = sem verificação de assinatura, como hoje).
+      - RFB_WEBHOOK_SECRET=${RFB_WEBHOOK_SECRET:-}
       - IAM_BASE_URL=${IAM_BASE_URL}
       - IAM_ALLOWED_CLIENT_IDS=${IAM_ALLOWED_CLIENT_IDS}
       - IAM_CLIENT_ID=${IAM_CLIENT_ID}

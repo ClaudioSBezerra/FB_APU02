@@ -171,12 +171,14 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		// Verify request belongs to company and has a tiquete
-		var requestID, tiquete, status, dlTipo string
-		var tiqueteDownload *string
+		var requestID, tiquete, status, dlTipo, apiVersao string
+		var tiqueteDownload, urlAssinada *string
 		err = db.QueryRow(`
-			SELECT id, COALESCE(tiquete, ''), status, tiquete_download, COALESCE(tipo, 'debito') FROM rfb_requests
+			SELECT id, COALESCE(tiquete, ''), status, tiquete_download, COALESCE(tipo, 'debito'),
+			       COALESCE(api_versao, 'v1'), url_assinada
+			FROM rfb_requests
 			WHERE id = $1 AND company_id = $2
-		`, req.RequestID, companyID).Scan(&requestID, &tiquete, &status, &tiqueteDownload, &dlTipo)
+		`, req.RequestID, companyID).Scan(&requestID, &tiquete, &status, &tiqueteDownload, &dlTipo, &apiVersao, &urlAssinada)
 		if err == sql.ErrNoRows {
 			http.Error(w, "Solicitação não encontrada", http.StatusNotFound)
 			return
@@ -191,16 +193,6 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Sem tiqueteDownload (webhook nunca chegou): tenta mesmo assim com o
-		// tiqueteSolicitacao original — ProcessarDownloadRFB/BaixarArquivoRFB já sabem
-		// cair pra esse fallback (v1) ou consultar a situação/urlAssinada (v2). A RFB pode ter concluído o
-		// processamento e só falhado em avisar via webhook; se não tiver nada
-		// pronto, a RFB responde com erro claro e a linha volta pra 'error'.
-		usandoFallback := tiqueteDownload == nil || *tiqueteDownload == ""
-		if usandoFallback {
-			log.Printf("[DownloadManual] request %s sem tiqueteDownload — tentando recuperar com tiqueteSolicitacao", requestID)
-		}
-
 		if status == "completed" {
 			http.Error(w, "Download já realizado para esta solicitação", http.StatusConflict)
 			return
@@ -209,6 +201,35 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 		if status == "downloading" {
 			http.Error(w, "Download já está em andamento", http.StatusConflict)
 			return
+		}
+
+		// Sem tiqueteDownload (webhook nunca chegou): na v2 ainda dá para recuperar consultando a
+		// situação/urlAssinada. Na v1 NÃO há como: o tíquete da solicitação não é baixável (a RFB
+		// responde 401 "Tíquete inexistente") e a tentativa só sobrescrevia o erro verdadeiro da
+		// linha (ex.: TIMEOUT). Responde na hora, sem chamar a RFB e sem alterar a linha.
+		usandoFallback := tiqueteDownload == nil || *tiqueteDownload == ""
+		dlIn := services.RFBDownloadInput{APIVersao: apiVersao}
+		if !usandoFallback {
+			dlIn.TiqueteDownload = *tiqueteDownload
+		}
+		if urlAssinada != nil {
+			dlIn.URLAssinada = *urlAssinada
+		}
+		// Mesma regra única dos processadores (SemFonteDeDownload), para não divergirem.
+		if dlIn.SemFonteDeDownload() {
+			log.Printf("[DownloadManual] request %s (api %s) sem tiqueteDownload nem urlAssinada — recuperação impossível na v1", requestID, apiVersao)
+			// Texto simples (como os demais 409 deste handler): o frontend exibe o corpo cru.
+			msg := "A RFB não enviou o tíquete de download (webhook não chegou) e, na API v1, não há como recuperar o arquivo sem ele."
+			if status == "error" {
+				msg += " Esta solicitação já foi encerrada com erro: faça uma nova solicitação."
+			} else {
+				msg += " Aguarde a RFB ou faça uma nova solicitação."
+			}
+			http.Error(w, msg, http.StatusConflict)
+			return
+		}
+		if usandoFallback && apiVersao == services.RFBAPIVersaoV2 {
+			log.Printf("[DownloadManual] request %s sem tiqueteDownload — tentando recuperar pela situação (v2)", requestID)
 		}
 
 		// Trigger download in background, routing by tipo
@@ -227,8 +248,8 @@ func DownloadManualHandler(db *sql.DB) http.HandlerFunc {
 		}()
 
 		message := "Download iniciado. Acompanhe o status na lista de solicitações."
-		if usandoFallback {
-			message = "Tentativa de recuperação iniciada (sem confirmação prévia da RFB) — pode falhar se o processamento realmente não tiver concluído. Acompanhe o status na lista de solicitações."
+		if usandoFallback && apiVersao == services.RFBAPIVersaoV2 {
+			message = "Tentativa de recuperação iniciada pela consulta de situação da RFB (v2) — pode falhar se o processamento ainda não tiver concluído. Acompanhe o status na lista de solicitações."
 		}
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":  "downloading",

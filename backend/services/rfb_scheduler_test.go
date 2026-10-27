@@ -272,8 +272,8 @@ func TestRFBProcessarDownload_UsaAmbienteDaSolicitacao(t *testing.T) {
 	for _, tc := range cases {
 		var requestID string
 		if err := db.QueryRow(`
-			INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo, ambiente)
-			VALUES ($1, '00000000', $2, 'webhook_received', $3, 'producao_restrita') RETURNING id
+			INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, tiquete_download, status, tipo, ambiente)
+			VALUES ($1, '00000000', $2, $2, 'webhook_received', $3, 'producao_restrita') RETURNING id
 		`, companyID, tc.tiquete, tc.tipo).Scan(&requestID); err != nil {
 			t.Fatalf("%s: falha ao criar solicitação: %v", tc.tipo, err)
 		}

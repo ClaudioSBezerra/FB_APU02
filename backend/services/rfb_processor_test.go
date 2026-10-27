@@ -123,13 +123,15 @@ func newFakeRFBDownload(t *testing.T, body string) *RFBClient {
 // insertRFBRequest cria uma linha rfb_requests pronta para download (status
 // 'webhook_received', fora de downloading/completed/reprocessing) simulando uma
 // solicitação já respondida pela RFB, aguardando ProcessarDownloadRFB/
-// ProcessarDownloadCreditosRFB.
+// ProcessarDownloadCreditosRFB. 'webhook_received' implica que o webhook entregou o
+// tíquete de download — na v1 sem ele não há download (ver SemFonteDeDownload) —, então o
+// helper o preenche com o mesmo valor do tíquete (os mocks respondem por esse valor).
 func insertRFBRequest(t *testing.T, db *sql.DB, companyID, tiquete, tipo, ambiente string) string {
 	t.Helper()
 	var requestID string
 	if err := db.QueryRow(`
-		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo, ambiente)
-		VALUES ($1, '00000000', $2, 'webhook_received', $3, $4) RETURNING id
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, tiquete_download, status, tipo, ambiente)
+		VALUES ($1, '00000000', $2, $2, 'webhook_received', $3, $4) RETURNING id
 	`, companyID, tiquete, tipo, ambiente).Scan(&requestID); err != nil {
 		t.Fatalf("falha ao criar rfb_requests de teste (tipo=%s): %v", tipo, err)
 	}

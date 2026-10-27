@@ -874,7 +874,7 @@ func TestBaixar_LimiteDeTamanhoECorpoVazio(t *testing.T) {
 		t.Errorf("v1 corpo vazio: esperava erro claro, veio %v", err)
 	}
 	// o tipo sobrevive ao helper de fallback
-	_, err := BaixarArquivoRFB(c, "tok", RFBDownloadInput{Tiquete: "grande", APIVersao: "v1"})
+	_, err := BaixarArquivoRFB(c, "tok", RFBDownloadInput{Tiquete: "grande", TiqueteDownload: "grande", APIVersao: "v1"})
 	if code(err) != RFBErrTooLarge {
 		t.Errorf("BaixarArquivoRFB deve preservar FILE_TOO_LARGE, veio %v", err)
 	}
