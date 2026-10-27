@@ -513,6 +513,14 @@ func (c *RFBClient) DownloadArquivo(token, tiquete string) ([]byte, error) {
 		)
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
+			// O gateway usa 401 também para erro de TÍQUETE: "Tíquete inexistente ou download já
+			// realizado". Só é falha de token quando o corpo não fala em tíquete.
+			// Exige o texto específico (não qualquer menção a "tíquete": um 401 de auth poderia
+			// ecoar o id do tíquete e seria classificado errado, sem renovar o token).
+			if lb := strings.ToLower(body); (strings.Contains(lb, "tíquete") || strings.Contains(lb, "tiquete")) &&
+				(strings.Contains(lb, "inexistente") || strings.Contains(lb, "já realizado") || strings.Contains(lb, "ja realizado")) {
+				return nil, newDownloadErr(RFBErrTicketInvalido, "HTTP 401 — tíquete inexistente ou já utilizado (na v1 o tíquete é de uso único): %s", body)
+			}
 			return nil, fmt.Errorf("HTTP 401 (gateway auth) — token inválido ou expirado: %s", body)
 		case http.StatusForbidden:
 			return nil, fmt.Errorf("HTTP 403 — CNPJ do consumidor não corresponde ao CNPJ da solicitação: %s", body)

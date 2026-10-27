@@ -556,6 +556,14 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	log.Printf("[RFB Processor] Request %s — api_versao: %s | urlAssinada: %t | tiqueteDownload: %t",
 		requestID, apiVersao, dlInput.URLAssinada != "", dlInput.TiqueteDownload != "")
 
+	// Sem tiquete_download/url_assinada (v1: webhook não chegou) não há o que baixar: devolve
+	// NOT_READY SEM tocar na linha — o claim 'downloading' + updateRequestError abaixo
+	// sobrescreveriam o error_code verdadeiro (ex.: TIMEOUT) com um 401 do tíquete errado.
+	if dlInput.SemFonteDeDownload() {
+		log.Printf("[RFB Processor] Request %s sem tiquete_download/url_assinada (api_versao=%s) — nada a baixar, linha preservada", requestID, apiVersao)
+		return ErrSemFonteDeDownload()
+	}
+
 	// 2. Atomic status claim — prevents concurrent webhook + manual download races.
 	// Only proceeds if status is not already 'downloading', 'completed', or 'reprocessing'.
 	res, err := db.Exec(`

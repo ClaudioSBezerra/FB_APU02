@@ -23,6 +23,9 @@ const (
 	RFBErrURLInvalida = "URL_INVALIDA"   // urlAssinada rejeitada pela validação (SSRF) e sem outro meio de download
 	RFBErrTooLarge    = "FILE_TOO_LARGE" // arquivo acima de rfbMaxDownloadBytes
 	RFBErrDownload    = "DOWNLOAD_ERROR" // qualquer outra falha de download
+	// RFBErrTicketInvalido: 401 do gateway com "Tíquete inexistente ou download já realizado".
+	// Não é falha de token: o tíquete usado não existe ou (v1) já foi consumido — uso único.
+	RFBErrTicketInvalido = "TICKET_INVALIDO"
 )
 
 // Limites de leitura de corpo de resposta (proteção de memória).
@@ -364,6 +367,21 @@ type RFBDownloadInput struct {
 	OnURLRenovada func(url string, expiraEm *time.Time)
 }
 
+// SemFonteDeDownload: não há de onde baixar sem chamar a RFB com um tíquete que sabidamente
+// falha. Na v1 o único tíquete de download vem do webhook (tiqueteDownload); o tíquete da
+// SOLICITAÇÃO não serve (a RFB responde 401 "Tíquete inexistente"). Na v2 sempre há o que
+// tentar (situacao). Os processadores checam isto ANTES de marcar a linha como 'downloading',
+// senão o erro do download sobrescreve o error_code verdadeiro (ex.: TIMEOUT).
+func (in RFBDownloadInput) SemFonteDeDownload() bool {
+	return in.APIVersao != RFBAPIVersaoV2 && in.TiqueteDownload == "" && in.URLAssinada == ""
+}
+
+// ErrSemFonteDeDownload é o erro devolvido (sem tocar na linha) quando SemFonteDeDownload.
+func ErrSemFonteDeDownload() *RFBDownloadError {
+	return newDownloadErr(RFBErrNotReady,
+		"a RFB ainda não enviou o tíquete de download (webhook não chegou); na API v1 não é possível baixar com o tíquete da solicitação")
+}
+
 // BaixarArquivoRFB é o helper único (débitos e créditos) do passo de download, com
 // fallback em camadas — qualquer falha de um degrau cai para o próximo:
 //  1. url_assinada não expirada (com margem de 2 min) → GET sem Authorization;
@@ -443,9 +461,12 @@ func BaixarArquivoRFB(c *RFBClient, token string, in RFBDownloadInput) ([]byte, 
 	// 3. tíquete de download v1
 	tiqueteParaDownload := in.TiqueteDownload
 	if tiqueteParaDownload == "" && !v2 {
-		// comportamento v1 histórico: cai no tíquete da solicitação
-		tiqueteParaDownload = in.Tiquete
-		log.Printf("[RFB] AVISO: tiqueteDownload não definido, usando tiqueteSolicitacao '%s'", in.Tiquete)
+		// Antes caía no tíquete da solicitação — a RFB sempre respondia 401 "Tíquete inexistente
+		// ou download já realizado" e o erro mascarava a causa real (webhook que não chegou).
+		if urlErr != nil {
+			return nil, urlErr // havia urlAssinada e ela falhou: esse é o erro real
+		}
+		return nil, ErrSemFonteDeDownload()
 	}
 	if tiqueteParaDownload == "" {
 		switch {

@@ -748,3 +748,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
   summary: Teste de services TestParseCertificadosAIA_FormatosTolerados falhou 1 vez em 9 execuções (instável); pacote services não foi alterado.
   evidence: Falha única na suíte completa de 27/10, passou 8/8 depois, isolado e completo.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-18-rfb-download-sem-webhook.md`
+  summary: Recuperação manual de uma linha v1 que JÁ tem tiquete_download consumido (uso único) reenvia o download, recebe 401 TICKET_INVALIDO e sobrescreve o erro anterior da linha.
+  evidence: Edge Case Hunter 27/10; comportamento anterior à issue #18 (antes virava DOWNLOAD_ERROR), fora do escopo da spec que só trata ausência de tiquete_download.
