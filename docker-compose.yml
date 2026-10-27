@@ -13,6 +13,7 @@ services:
       - REDIS_ADDR=redis:6379
       - JWT_SECRET=${JWT_SECRET}
       - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - ALLOW_REGISTRATION=${ALLOW_REGISTRATION:-true}
       - APP_MODULE=${APP_MODULE:-apuracao}
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT}

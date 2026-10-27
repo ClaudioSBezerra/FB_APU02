@@ -722,3 +722,29 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-nfse-adn-parser-real.md`
   summary: linhas gravadas pelo parser antigo (formato chutado) não são limpas/rechaveadas; não há reprocessamento automático da tabela nfse_adn_falhas.
   evidence: revisão adversarial; parser antigo nunca gravou nada (0 recebidos), reprocessar falhas fica para quando houver volume.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: Restringir a admin a escrita nas tabelas globais forn_simples (create/delete/import) e cfop (import), hoje abertas a qualquer usuário autenticado.
+  evidence: Varredura de IDOR de 27/10 (itens 11-12); fora do escopo do hotfix de isolamento por exigir decisão sobre clientes Hostinger.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: managers.go UPDATE/DELETE final por id sem AND company_id (TOCTOU) e user_activity ignorando erro de GetEffectiveCompanyID.
+  evidence: Varredura de IDOR de 27/10 (itens 14-15), risco baixo.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: Decidir a política de hierarquia: hoje membro comum (user_environments.role='user') pode criar grupo/empresa e renomear ambiente/empresa; só exclusão exige admin do ambiente.
+  evidence: Revisão 27/10 (Blind+Edge): assimetria Create/Update x Delete; mudar para admin pode quebrar o cadastro de split payment feito por usuários comuns da FC.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: Evitar a consulta dupla de autorização por requisição (CompanyScope + GetEffectiveCompanyID) guardando a empresa validada no contexto.
+  evidence: Revisão 27/10: 2 EXISTS com 3 joins por chamada com X-Company-ID; custo aceitável hoje, medir antes de otimizar.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: Trilha de auditoria durável (tabela) para ações sensíveis do ERP Bridge e da hierarquia; hoje só log.Printf em stdout, e GetClientIP pode confiar em X-Forwarded-For forjável.
+  evidence: Revisão 27/10 (item 14); o pentest de 29/09 só foi reconstruído por updated_at.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: Papel dedicado para a conta do daemon do bridge em vez de reutilizar um usuário admin da plataforma (credencial vazada = acesso global).
+  evidence: Revisão 27/10 (item 11): o daemon faz login JWT como claudio.bezerra (users.role=admin).
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: Definir se admin da plataforma pode atuar (X-Company-ID) em empresa de outro tenant; hoje a listagem mostra tudo mas selecionar empresa alheia dá 403.
+  evidence: Edge Case Hunter 27/10; antes era fallback silencioso para a empresa padrão (nunca funcionou de verdade).
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-15-blindagem-amb-fcosta.md`
+  summary: Teste de services TestParseCertificadosAIA_FormatosTolerados falhou 1 vez em 9 execuções (instável); pacote services não foi alterado.
+  evidence: Falha única na suíte completa de 27/10, passou 8/8 depois, isolado e completo.

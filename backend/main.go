@@ -224,6 +224,7 @@ func main() {
 	PrintVersion()
 
 	handlers.ValidateJWTSecret()
+	handlers.LogRegistrationState()
 	initDBAsync()
 	go services.StartRFBScheduler(getDB)
 	go services.StartNFSeScheduler(getDB)
@@ -294,7 +295,8 @@ func main() {
 				return
 			}
 			h := handlerFactory(database)
-			handlers.AuthMiddleware(h, role)(w, r)
+			// CompanyScope: X-Company-ID de empresa que não é do usuário vira 403 (isolamento entre tenants)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, h), role)(w, r)
 		}
 	}
 
@@ -367,11 +369,11 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			handlers.AuthMiddleware(handlers.ListFornSimplesHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.ListFornSimplesHandler(database)), "")(w, r)
 		case http.MethodPost:
-			handlers.AuthMiddleware(handlers.CreateFornSimplesHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.CreateFornSimplesHandler(database)), "")(w, r)
 		case http.MethodDelete:
-			handlers.AuthMiddleware(handlers.DeleteFornSimplesHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.DeleteFornSimplesHandler(database)), "")(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -442,11 +444,11 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			handlers.AuthMiddleware(handlers.GetRFBCredentialHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.GetRFBCredentialHandler(database)), "")(w, r)
 		case http.MethodPost:
-			handlers.AuthMiddleware(handlers.SaveRFBCredentialHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.SaveRFBCredentialHandler(database)), "")(w, r)
 		case http.MethodDelete:
-			handlers.AuthMiddleware(handlers.DeleteRFBCredentialHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.DeleteRFBCredentialHandler(database)), "")(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -457,7 +459,7 @@ func main() {
 			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
 			return
 		}
-		handlers.AuthMiddleware(handlers.UpdateRFBScheduleHandler(database), "")(w, r)
+		handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.UpdateRFBScheduleHandler(database)), "")(w, r)
 	})
 
 	// SAP Credentials (admin-only — ver Story 1.1)
@@ -469,9 +471,9 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			handlers.AuthMiddleware(handlers.GetSAPCredentialHandler(database), "admin")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.GetSAPCredentialHandler(database)), "admin")(w, r)
 		case http.MethodPost:
-			handlers.AuthMiddleware(handlers.SaveSAPCredentialHandler(database), "admin")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.SaveSAPCredentialHandler(database)), "admin")(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -490,11 +492,11 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			handlers.AuthMiddleware(handlers.GetNFSeCertificadoHandler(database), "admin")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.GetNFSeCertificadoHandler(database)), "admin")(w, r)
 		case http.MethodPost:
-			handlers.AuthMiddleware(handlers.SaveNFSeCertificadoHandler(database), "admin")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.SaveNFSeCertificadoHandler(database)), "admin")(w, r)
 		case http.MethodDelete:
-			handlers.AuthMiddleware(handlers.DeleteNFSeCertificadoHandler(database), "admin")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.DeleteNFSeCertificadoHandler(database)), "admin")(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -559,11 +561,11 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			handlers.AuthMiddleware(handlers.GetCGIBSCredentialHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.GetCGIBSCredentialHandler(database)), "")(w, r)
 		case http.MethodPost:
-			handlers.AuthMiddleware(handlers.SaveCGIBSCredentialHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.SaveCGIBSCredentialHandler(database)), "")(w, r)
 		case http.MethodDelete:
-			handlers.AuthMiddleware(handlers.DeleteCGIBSCredentialHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.DeleteCGIBSCredentialHandler(database)), "")(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -574,7 +576,7 @@ func main() {
 			http.Error(w, "Database initializing...", http.StatusServiceUnavailable)
 			return
 		}
-		handlers.AuthMiddleware(handlers.UpdateCGIBSScheduleHandler(database), "")(w, r)
+		handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.UpdateCGIBSScheduleHandler(database)), "")(w, r)
 	})
 	http.HandleFunc("/api/cgibs/credentials/habilitar", withAuth(handlers.HabilitarCGIBSHandler, ""))
 
@@ -655,9 +657,9 @@ func main() {
 		}
 		switch r.Method {
 		case http.MethodPut, http.MethodPatch:
-			handlers.AuthMiddleware(handlers.UpdateManagerHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.UpdateManagerHandler(database)), "")(w, r)
 		case http.MethodDelete:
-			handlers.AuthMiddleware(handlers.DeleteManagerHandler(database), "")(w, r)
+			handlers.AuthMiddleware(handlers.CompanyScope(database, handlers.DeleteManagerHandler(database)), "")(w, r)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -675,11 +677,11 @@ func main() {
 	http.HandleFunc("/api/malha-fina/nfse-saidas/resumo", withAuth(handlers.MalhaFinaNFSeSaidasResumoHandler, ""))
 	http.HandleFunc("/api/malha-fina/nfse-entradas/resumo", withAuth(handlers.MalhaFinaNFSeEntradasResumoHandler, ""))
 
-	// ERP Bridge — agendamento e histórico de execuções
-	http.HandleFunc("/api/erp-bridge/config", withAuth(handlers.ERPBridgeConfigHandler, ""))
-	http.HandleFunc("/api/erp-bridge/servidores", withAuth(handlers.ERPBridgeServidoresHandler, ""))
-	http.HandleFunc("/api/erp-bridge/servidores/registrar", withAuth(handlers.ERPBridgeRegistrarServidoresHandler, ""))
-	http.HandleFunc("/api/erp-bridge/config/generate-api-key", withAuth(handlers.ERPBridgeGenerateAPIKeyHandler, ""))
+	// ERP Bridge — agendamento e histórico de execuções (somente admin; o daemon faz login com usuário admin)
+	http.HandleFunc("/api/erp-bridge/config", withAuth(handlers.ERPBridgeConfigHandler, "admin"))
+	http.HandleFunc("/api/erp-bridge/servidores", withAuth(handlers.ERPBridgeServidoresHandler, "admin"))
+	http.HandleFunc("/api/erp-bridge/servidores/registrar", withAuth(handlers.ERPBridgeRegistrarServidoresHandler, "admin"))
+	http.HandleFunc("/api/erp-bridge/config/generate-api-key", withAuth(handlers.ERPBridgeGenerateAPIKeyHandler, "admin"))
 	http.HandleFunc("/api/erp-bridge/credentials", func(w http.ResponseWriter, r *http.Request) {
 		database := getDB()
 		if database == nil {
@@ -688,10 +690,10 @@ func main() {
 		}
 		handlers.ERPBridgeCredentialsHandler(database).ServeHTTP(w, r)
 	})
-	http.HandleFunc("/api/erp-bridge/trigger", withAuth(handlers.ERPBridgeTriggerHandler, ""))
-	http.HandleFunc("/api/erp-bridge/pending", withAuth(handlers.ERPBridgePendingHandler, ""))
-	http.HandleFunc("/api/erp-bridge/runs", withAuth(handlers.ERPBridgeRunsHandler, ""))
-	http.HandleFunc("/api/erp-bridge/runs/", withAuth(handlers.ERPBridgeRunHandler, ""))
+	http.HandleFunc("/api/erp-bridge/trigger", withAuth(handlers.ERPBridgeTriggerHandler, "admin"))
+	http.HandleFunc("/api/erp-bridge/pending", withAuth(handlers.ERPBridgePendingHandler, "admin"))
+	http.HandleFunc("/api/erp-bridge/runs", withAuth(handlers.ERPBridgeRunsHandler, "admin"))
+	http.HandleFunc("/api/erp-bridge/runs/", withAuth(handlers.ERPBridgeRunHandler, "admin"))
 
 	// ERP Bridge — importação batch SAP S4/HANA, parceiros e heartbeat (auth via X-API-Key, sem JWT)
 	http.HandleFunc("/api/erp-bridge/import/batch", withDB(handlers.ERPBridgeBatchImportHandler))

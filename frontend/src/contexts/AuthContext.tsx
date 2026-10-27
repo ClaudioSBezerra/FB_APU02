@@ -102,6 +102,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const url = typeof input === 'string' ? input : (input as Request).url ?? '';
       const isApiCall  = url.includes('/api/');
       const isAuthCall = url.includes('/api/auth/');
+
+      // Empresa guardada que deixou de ser do usuário (403 do isolamento entre tenants).
+      // NÃO repete a requisição em outra empresa (uma escrita cairia no tenant errado e a tela
+      // continuaria mostrando o nome da empresa antiga): limpa todo o estado da empresa —
+      // inclusive a preferência persistida — e recarrega; sem X-Company-ID o backend usa a
+      // empresa padrão do usuário. 403 (e não 401) para não disparar o refresh/logout abaixo.
+      if (response.status === 403 && isApiCall && headers.has('X-Company-ID')) {
+        const body = await response.clone().json().catch(() => null);
+        if (body?.code === 'company_not_authorized') {
+          console.error('[Auth] Empresa não autorizada — restaurando a empresa padrão.');
+          try {
+            const storedUser = sessionStorage.getItem('user');
+            const uid = storedUser ? JSON.parse(storedUser)?.id : null;
+            if (uid) localStorage.removeItem(`pref_company_${uid}`);
+          } catch { /* storage indisponível: segue só com o reset de sessão */ }
+          ['company', 'companyId', 'cnpj'].forEach(k => sessionStorage.removeItem(k));
+          companyIdRef.current = null;
+          // trava anti-loop: no máximo um reload a cada 10s
+          const last = Number(sessionStorage.getItem('company_reset_at') || 0);
+          if (Date.now() - last > 10_000) {
+            sessionStorage.setItem('company_reset_at', String(Date.now()));
+            window.location.reload();
+          }
+        }
+      }
+
       if (response.status === 401 && isApiCall && !isAuthCall && tokenRef.current && !loggingOutRef.current) {
         const newToken = await refreshAccessToken();
         if (newToken && !loggingOutRef.current) {
