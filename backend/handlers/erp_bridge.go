@@ -584,6 +584,9 @@ func ERPBridgeGenerateAPIKeyHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Auditoria: regenerar invalida a chave do bridge na hora e o endpoint não tinha rastro
+		// de quem chamou (29/09/2026: duas chaves trocadas sem autoria identificável).
+		log.Printf("[ERPBridgeGenerateAPIKey] user=%s company=%s ip=%s", GetUserIDFromContext(r), companyID, GetClientIP(r))
 		// Gera 32 bytes aleatórios → chave hex de 64 caracteres
 		raw := make([]byte, 32)
 		if _, err := rand.Read(raw); err != nil {

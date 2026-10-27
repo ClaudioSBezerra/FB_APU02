@@ -318,6 +318,10 @@ GROUP BY CGCCPF
 
 # ─── Cliente FBTax ────────────────────────────────────────────────────────────
 
+class APIKeyInvalida(RuntimeError):
+    """401 do backend: a api_key do config.yaml não existe mais (foi regenerada na UI)."""
+
+
 class FBTaxClient:
     def __init__(self, cfg: dict):
         self.base_url   = cfg["url"].rstrip("/")
@@ -365,6 +369,8 @@ class FBTaxClient:
         if not resp.ok:
             detail = resp.text[:300]
             log.error("enviar_batch HTTP %d: %s", resp.status_code, detail)
+            if resp.status_code == 401:
+                raise APIKeyInvalida(f"HTTP 401: {detail}")
             raise RuntimeError(f"HTTP {resp.status_code}: {detail}")
         return resp.json()
 
@@ -1027,6 +1033,18 @@ def processar_sap(
                         f"{result.get('errors', 0)} documento(s) rejeitado(s) pelo backend: "
                         f"{result['error_details'][0]}"
                     )
+            except APIKeyInvalida as exc:
+                # Chave inválida vale pra todos os lotes — insistir só gasta memória/tempo
+                # e esconde o problema (28/09: 798 lotes com 401 numa única run).
+                log.error("API key rejeitada pelo backend (%s) — abortando envio (%d/%d docs não enviados). "
+                          "Copie a chave atual da tela ERP Bridge > Credenciais para o config.yaml e reinicie o serviço.",
+                          exc, len(documents) - i, len(documents))
+                total_errors += len(documents) - i
+                stats["sap_batch"]["erro_msg"] = (
+                    "API key inválida (HTTP 401): a chave do config.yaml não confere com a da tela "
+                    "ERP Bridge > Credenciais. Atualize o config.yaml e reinicie o erp-bridge."
+                )
+                break
             except Exception as exc:
                 log.error("Erro ao enviar lote %d: %s", i // BATCH_SIZE + 1, exc)
                 total_errors += len(lote)
