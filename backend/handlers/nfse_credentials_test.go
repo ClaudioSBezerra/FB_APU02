@@ -775,7 +775,8 @@ func TestNFSeCertificado_IsolamentoEntreTenants_EmpresaBNaoAcessaCertificadoDaEm
 
 	// Usuário B autenticado como ele mesmo, mas forjando o header X-Company-ID para o id da
 	// empresa A — GetEffectiveCompanyID deve recusar (usuário B não é dono nem membro do
-	// grupo/ambiente da empresa A) e cair de volta para a própria empresa B.
+	// grupo/ambiente da empresa A). Desde 27/10/2026 a recusa é explícita (falha fechada); antes
+	// caía em silêncio para a própria empresa B, o que mascarava tentativas de IDOR.
 	forjado := func(r *http.Request) *http.Request {
 		r = authedB(r)
 		r.Header.Set("X-Company-ID", companyA)
@@ -783,14 +784,10 @@ func TestNFSeCertificado_IsolamentoEntreTenants_EmpresaBNaoAcessaCertificadoDaEm
 	}
 
 	getRec := getNFSeCert(t, db, forjado)
-	if getRec.Code != http.StatusOK {
-		t.Fatalf("GET forjado: esperava 200 (cai para a própria empresa B), obteve %d: %s", getRec.Code, getRec.Body.String())
+	if getRec.Code < 400 {
+		t.Fatalf("GET forjado: esperava recusa (4xx/5xx, sem fallback), obteve %d: %s", getRec.Code, getRec.Body.String())
 	}
-	certB := decodeNFSeCertBody(t, getRec)
-	if certB.TemCertificado {
-		t.Fatal("GET com X-Company-ID forjado para empresa A devolveu um certificado — isolamento de tenant violado")
-	}
-	if certB.NomeArquivo == "empresa-a.pfx" {
+	if strings.Contains(getRec.Body.String(), "empresa-a.pfx") {
 		t.Fatal("GET forjado devolveu metadado do certificado da empresa A")
 	}
 
@@ -823,8 +820,8 @@ func TestNFSeCertificado_IsolamentoEntreTenants_EmpresaBNaoAcessaCertificadoDaEm
 // GET/DELETE acima: a empresa B (outro company_id, outro usuário, outro
 // environment/enterprise_group) não consegue afetar o certificado da empresa A mesmo forçando
 // X-Company-ID para o id da empresa A em um POST. GetEffectiveCompanyID recusa o header forjado
-// (usuário B não é dono/membro da empresa A) e cai de volta para a própria empresa B — então o
-// POST forjado deve criar/atualizar apenas o certificado da empresa B, nunca o da empresa A.
+// (usuário B não é dono/membro da empresa A) — o POST forjado é negado e não cria nem altera
+// certificado algum (nem o da A, nem o da B).
 func TestSaveNFSeCertificadoHandler_IsolamentoEntreTenants_SaveForjadoNaoAfetaCertificadoDaEmpresaA(t *testing.T) {
 	db := openNFSeTestDB(t)
 	defer db.Close()
@@ -856,10 +853,8 @@ func TestSaveNFSeCertificadoHandler_IsolamentoEntreTenants_SaveForjadoNaoAfetaCe
 		"nome_arquivo":      "forjado.pfx",
 		"validade":          "2030-01-01",
 	})
-	// Empresa B ainda não tinha certificado próprio, então este é um 1º cadastro (201) PARA A
-	// PRÓPRIA EMPRESA B — nunca uma atualização (200) do certificado da empresa A.
-	if recForjado.Code != http.StatusCreated {
-		t.Fatalf("save forjado: esperava 201 (cria para a própria empresa B, não para a A), obteve %d: %s", recForjado.Code, recForjado.Body.String())
+	if recForjado.Code < 400 {
+		t.Fatalf("save forjado: esperava recusa (4xx/5xx, sem fallback), obteve %d: %s", recForjado.Code, recForjado.Body.String())
 	}
 
 	certA := decodeNFSeCertBody(t, getNFSeCert(t, db, authedA))
@@ -884,8 +879,8 @@ func TestSaveNFSeCertificadoHandler_IsolamentoEntreTenants_SaveForjadoNaoAfetaCe
 	}
 
 	certB := decodeNFSeCertBody(t, getNFSeCert(t, db, authedB))
-	if !certB.TemCertificado || certB.NomeArquivo != "forjado.pfx" {
-		t.Fatalf("esperava que o POST forjado tivesse criado o certificado da própria empresa B, veio %+v", certB)
+	if certB.TemCertificado {
+		t.Fatalf("o POST forjado recusado não deveria ter criado certificado para a empresa B, veio %+v", certB)
 	}
 	_ = companyB
 }

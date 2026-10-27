@@ -148,6 +148,8 @@ func ERPBridgeConfigHandler(db *sql.DB) http.HandlerFunc {
 			json.NewEncoder(w).Encode(cfg)
 
 		case http.MethodPatch:
+			// Auditoria: PATCH grava credenciais Oracle/SAP/FBTax e agendamento do bridge
+			log.Printf("[ERPBridgeConfig] PATCH user=%s company=%s ip=%s", GetUserIDFromContext(r), companyID, GetClientIP(r))
 			var req struct {
 				Ativo                   *bool   `json:"ativo"`
 				Horario                 *string `json:"horario"`
@@ -584,6 +586,9 @@ func ERPBridgeGenerateAPIKeyHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// Auditoria: regenerar invalida a chave do bridge na hora e o endpoint não tinha rastro
+		// de quem chamou (29/09/2026: duas chaves trocadas sem autoria identificável).
+		log.Printf("[ERPBridgeGenerateAPIKey] user=%s company=%s ip=%s", GetUserIDFromContext(r), companyID, GetClientIP(r))
 		// Gera 32 bytes aleatórios → chave hex de 64 caracteres
 		raw := make([]byte, 32)
 		if _, err := rand.Read(raw); err != nil {
@@ -688,6 +693,7 @@ func ERPBridgeTriggerHandler(db *sql.DB) http.HandlerFunc {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		log.Printf("[ERPBridgeTrigger] user=%s company=%s ip=%s", GetUserIDFromContext(r), companyID, GetClientIP(r))
 		var req struct {
 			DataIni       string   `json:"data_ini"`
 			DataFim       string   `json:"data_fim"`

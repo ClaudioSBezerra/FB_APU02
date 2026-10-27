@@ -307,26 +307,26 @@ func UpdatePreferredCompanyHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
-		// Obtém o environment_id da empresa
-		var envID string
-		err := db.QueryRow(`
-			SELECT e.id FROM companies c
-			JOIN enterprise_groups eg ON c.group_id = eg.id
-			JOIN environments e ON eg.environment_id = e.id
-			WHERE c.id = $1
-		`, req.CompanyID).Scan(&envID)
-		if err != nil {
+		// Só quem já tem acesso à empresa (dono ou membro do ambiente) pode marcá-la como
+		// preferida. Antes, qualquer usuário se auto-inseria como admin do ambiente de
+		// qualquer empresa (pentest 29/09/2026).
+		if !userCanAccessCompany(db, userID, req.CompanyID) {
+			denyTenant(w, r, "preferred-company", req.CompanyID)
+			return
+		}
+
+		envID, ok := environmentOfCompany(db, req.CompanyID)
+		if !ok {
 			http.Error(w, "Company not found", http.StatusNotFound)
 			return
 		}
 
-		// UPSERT: cria ou atualiza preferred_company_id em user_environments
-		_, err = db.Exec(`
-			INSERT INTO user_environments (user_id, environment_id, role, preferred_company_id)
-			VALUES ($1, $2, 'admin', $3)
-			ON CONFLICT (user_id, environment_id) DO UPDATE SET preferred_company_id = $3
-		`, userID, envID, req.CompanyID)
-		if err != nil {
+		// Apenas atualiza o vínculo existente — nunca cria vínculo nem concede papel (dono sem
+		// vínculo no ambiente simplesmente não persiste preferência).
+		if _, err := db.Exec(`
+			UPDATE user_environments SET preferred_company_id = $1
+			WHERE user_id = $2 AND environment_id = $3
+		`, req.CompanyID, userID, envID); err != nil {
 			log.Printf("[PreferredCompany] Erro ao salvar preferência userID=%s companyID=%s: %v", userID, req.CompanyID, err)
 			http.Error(w, "Error saving preference", http.StatusInternalServerError)
 			return
@@ -345,24 +345,17 @@ func GetEffectiveCompanyID(db *sql.DB, userID, requestedCompanyID string) (strin
 
 	// 1. If a specific company is requested, verify access
 	if requestedCompanyID != "" {
-		var exists bool
-		// Check if Owner OR Member in the same Group/Environment
-		err := db.QueryRowContext(ctx, `
-			SELECT EXISTS(
-				SELECT 1 
-				FROM companies c
-				LEFT JOIN enterprise_groups eg ON c.group_id = eg.id
-				LEFT JOIN user_environments ue ON eg.environment_id = ue.environment_id
-				WHERE c.id = $1 
-				AND (c.owner_id = $2 OR ue.user_id = $2)
-			)
-		`, requestedCompanyID, userID).Scan(&exists)
-
-		if err == nil && exists {
+		// Dono OU membro do mesmo ambiente. Empresa pedida explicitamente e não autorizada
+		// NÃO cai mais no padrão (isso mascarava tentativas de IDOR): falha fechada.
+		ok, err := companyAccess(db, userID, requestedCompanyID)
+		if err != nil {
+			return "", err // falha de infraestrutura não é "não autorizado"
+		}
+		if ok {
 			return requestedCompanyID, nil
 		}
-		// If requested ID is invalid/unauthorized, fall through to default logic
-		log.Printf("User %s requested invalid/unauthorized company %s. Falling back to default.", userID, requestedCompanyID)
+		log.Printf("[TenantGuard] user=%s pediu empresa não autorizada %s", userID, requestedCompanyID)
+		return "", ErrCompanyNotAuthorized
 	}
 
 	// 2. Default Logic (Owner > Member)
@@ -474,6 +467,12 @@ func GetUserCompaniesHandler(db *sql.DB) http.HandlerFunc {
 
 func RegisterHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Cadastro público desligável: deploy dedicado (FC) não precisa dele (default: ligado).
+		if registrationDisabled() {
+			jsonErr(w, http.StatusForbidden, "Cadastro desabilitado neste ambiente")
+			return
+		}
+
 		var req RegisterRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)

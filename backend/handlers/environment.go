@@ -123,6 +123,11 @@ func UpdateEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		if !canUseEnvironment(db, r, e.ID) {
+			denyTenant(w, r, "update-environment", e.ID)
+			return
+		}
+
 		_, err := db.Exec(
 			"UPDATE environments SET name = $1, description = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3",
 			e.Name, e.Description, e.ID,
@@ -146,6 +151,11 @@ func DeleteEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		if !canAdminEnvironment(db, r, id) {
+			denyTenant(w, r, "delete-environment", id)
+			return
+		}
+
 		_, err := db.Exec("DELETE FROM environments WHERE id = $1", id)
 		if err != nil {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir ambiente", err, "[Environment]")
@@ -164,8 +174,21 @@ func GetGroupsHandler(db *sql.DB) http.HandlerFunc {
 		args := []interface{}{}
 
 		if envID != "" {
+			if !canUseEnvironment(db, r, envID) {
+				denyTenant(w, r, "list-groups", envID)
+				return
+			}
 			query += " WHERE environment_id = $1"
 			args = append(args, envID)
+		} else if !isPlatformAdmin(r) {
+			// Sem filtro: só os grupos dos ambientes do usuário (antes listava todos).
+			uid := GetUserIDFromContext(r)
+			if !isUUID(uid) {
+				jsonErr(w, http.StatusUnauthorized, "Unauthorized")
+				return
+			}
+			query += " WHERE environment_id IN (SELECT environment_id FROM user_environments WHERE user_id = $1::uuid)"
+			args = append(args, uid)
 		}
 		query += " ORDER BY name"
 
@@ -201,6 +224,11 @@ func CreateGroupHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		if !canUseEnvironment(db, r, g.EnvironmentID) {
+			denyTenant(w, r, "create-group", g.EnvironmentID)
+			return
+		}
+
 		err := db.QueryRow(
 			"INSERT INTO enterprise_groups (environment_id, name, description) VALUES ($1, $2, $3) RETURNING id, created_at",
 			g.EnvironmentID, g.Name, g.Description,
@@ -223,6 +251,11 @@ func DeleteGroupHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		envID, found := environmentOfGroup(db, id)
+		if !authorizeDelete(db, w, r, "delete-group", id, envID, found) {
+			return
+		}
+
 		_, err := db.Exec("DELETE FROM enterprise_groups WHERE id = $1", id)
 		if err != nil {
 			sanitizeDBErr(w, http.StatusInternalServerError, "Erro ao excluir grupo", err, "[Environment]")
@@ -241,8 +274,26 @@ func GetCompaniesHandler(db *sql.DB) http.HandlerFunc {
 		args := []interface{}{}
 
 		if groupID != "" {
+			envID, found := environmentOfGroup(db, groupID)
+			if !found || !canUseEnvironment(db, r, envID) {
+				denyTenant(w, r, "list-companies", groupID)
+				return
+			}
 			query += " WHERE group_id = $1"
 			args = append(args, groupID)
+		} else if !isPlatformAdmin(r) {
+			// Sem filtro: só empresas dos ambientes do usuário ou das quais é dono (antes listava
+			// todas da plataforma).
+			uid := GetUserIDFromContext(r)
+			if !isUUID(uid) {
+				jsonErr(w, http.StatusUnauthorized, "Unauthorized")
+				return
+			}
+			query += ` WHERE owner_id = $1::uuid OR group_id IN (
+				SELECT eg.id FROM enterprise_groups eg
+				JOIN user_environments ue ON ue.environment_id = eg.environment_id
+				WHERE ue.user_id = $1::uuid)`
+			args = append(args, uid)
 		}
 		query += " ORDER BY name"
 
@@ -286,6 +337,12 @@ func CreateCompanyHandler(db *sql.DB) http.HandlerFunc {
 		// Basic validation
 		if c.Name == "" || c.GroupID == "" {
 			http.Error(w, "Missing required fields (name, group_id)", http.StatusBadRequest)
+			return
+		}
+
+		envID, found := environmentOfGroup(db, c.GroupID)
+		if !found || !canUseEnvironment(db, r, envID) {
+			denyTenant(w, r, "create-company", c.GroupID)
 			return
 		}
 
@@ -338,6 +395,11 @@ func UpdateCompanyHandler(db *sql.DB) http.HandlerFunc {
 
 		if req.ID == "" || req.Name == "" {
 			http.Error(w, "Missing required fields (id, name)", http.StatusBadRequest)
+			return
+		}
+
+		if !isPlatformAdmin(r) && !userCanAccessCompany(db, GetUserIDFromContext(r), req.ID) {
+			denyTenant(w, r, "update-company", req.ID)
 			return
 		}
 
@@ -395,6 +457,11 @@ func DeleteCompanyHandler(db *sql.DB) http.HandlerFunc {
 		id := r.URL.Query().Get("id")
 		if id == "" {
 			http.Error(w, "Missing id parameter", http.StatusBadRequest)
+			return
+		}
+
+		envID, found := environmentOfCompany(db, id)
+		if !authorizeDelete(db, w, r, "delete-company", id, envID, found) {
 			return
 		}
 
