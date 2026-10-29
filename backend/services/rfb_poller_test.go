@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,7 +117,7 @@ func TestRFBPoller_BackoffEEstado(t *testing.T) {
 	if !p.devido("a", t0) {
 		t.Errorf("solicitação nova deve estar devida")
 	}
-	p.agendar("a", t0, 10*time.Minute)
+	p.agendar("a", t0, rfbPollIntervalo(10*time.Minute))
 	if p.devido("a", t0.Add(time.Minute)) || !p.devido("a", t0.Add(2*time.Minute)) {
 		t.Errorf("agendada para +2 min: não devida em +1, devida em +2")
 	}
@@ -131,19 +132,50 @@ func TestRFBPoller_BackoffEEstado(t *testing.T) {
 }
 
 func TestRFBPollSemAcesso(t *testing.T) {
-	it := rfbPollItem{id: "x", tipo: "debito", apiVersao: "v1", ambiente: "producao"}
+	v2 := rfbPollItem{id: "x", tipo: "debito", apiVersao: "v2", ambiente: "producao"}
+	v1 := rfbPollItem{id: "y", tipo: "debito", apiVersao: "v1", ambiente: "producao"}
 	for _, st := range []int{401, 403, 404} {
 		p := novoRFBPoller()
-		if !rfbPollSemAcesso(&RFBHTTPError{Op: "situacao", Status: st, Body: "b"}, it, p) || p.devido("x", time.Now()) {
-			t.Errorf("HTTP %d deveria ser diagnóstico e parar de consultar", st)
+		if !rfbPollSemAcesso(&RFBHTTPError{Op: "situacao", Status: st, Body: "b"}, v2, p) || p.devido("x", time.Now()) {
+			t.Errorf("v2 HTTP %d deveria ser diagnóstico e parar de consultar", st)
+		}
+		// v1: trata (true) mas NÃO desiste — segue tentando a cada 10 min.
+		if !rfbPollSemAcesso(&RFBHTTPError{Op: "situacao", Status: st, Body: "b"}, v1, p) || !p.devido("y", time.Now()) {
+			t.Errorf("v1 HTTP %d deveria ser tratado sem desistir", st)
 		}
 	}
 	p := novoRFBPoller()
-	if rfbPollSemAcesso(&RFBHTTPError{Op: "situacao", Status: 503}, it, p) || !p.devido("x", time.Now()) {
+	if rfbPollSemAcesso(&RFBHTTPError{Op: "situacao", Status: 503}, v2, p) || !p.devido("x", time.Now()) {
 		t.Errorf("5xx é transitório: não desiste")
 	}
-	if rfbPollSemAcesso(errors.New("timeout"), it, p) {
+	if rfbPollSemAcesso(errors.New("timeout"), v2, p) {
 		t.Errorf("erro de rede não é diagnóstico de acesso")
+	}
+}
+
+func TestRFBPoller_LogSoQuandoARespostaMuda(t *testing.T) {
+	p := novoRFBPoller()
+	if !p.mudou("a", "situacao", "403|x") {
+		t.Errorf("primeira resposta deve logar")
+	}
+	if p.mudou("a", "situacao", "403|x") {
+		t.Errorf("a mesma resposta não deve logar de novo")
+	}
+	if !p.mudou("a", "situacao", "200|ok") {
+		t.Errorf("resposta diferente deve logar")
+	}
+	if !p.mudou("a", "download", "403|x") {
+		t.Errorf("canais independentes: situação e download logam cada um a sua")
+	}
+}
+
+func TestRFBPollIntervaloPara(t *testing.T) {
+	if rfbPollIntervaloPara(rfbPollItem{apiVersao: "v1"}, time.Minute) != 10*time.Minute ||
+		rfbPollIntervaloPara(rfbPollItem{apiVersao: "v1"}, 3*time.Hour) != 10*time.Minute {
+		t.Errorf("v1: 10 min fixos")
+	}
+	if rfbPollIntervaloPara(rfbPollItem{apiVersao: "v2"}, time.Minute) != 2*time.Minute {
+		t.Errorf("v2: backoff por idade")
 	}
 }
 
@@ -209,7 +241,7 @@ func TestPoller_AcessoNegadoNaoMexeNaLinhaEDesiste(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 		fmt.Fprint(w, `{"message":"You cannot consume this service"}`)
 	})
-	id := insertRFBRequestRequested(t, db, companyID, "tiq-poll-2", "debito", "v1", 10*time.Minute)
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-poll-2", "debito", "v2", 10*time.Minute)
 	p := novoRFBPoller()
 
 	agora := time.Now()
@@ -234,7 +266,7 @@ func TestPoller_EmAndamentoRespeitaBackoff(t *testing.T) {
 	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"situacao":"EM_PROCESSAMENTO"}`)
 	})
-	id := insertRFBRequestRequested(t, db, companyID, "tiq-poll-3", "debito", "v1", 10*time.Minute)
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-poll-3", "debito", "v2", 10*time.Minute)
 	p := novoRFBPoller()
 
 	agora := time.Now()
@@ -286,7 +318,7 @@ func TestPoller_ConcluidaMasDownload404Reagenda(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprint(w, `{"codigoErro":"ARQUIVO_INDISPONIVEL"}`)
 	})
-	id := insertRFBRequestRequested(t, db, companyID, "tiq-poll-5", "debito", "v1", 10*time.Minute)
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-poll-5", "debito", "v2", 10*time.Minute)
 	p := novoRFBPoller()
 
 	agora := time.Now()
@@ -402,5 +434,173 @@ func TestPoller_WebhookConcluiDuranteAConsulta_NaoSobrescreve(t *testing.T) {
 			t.Errorf("%s: linha concluída pelo webhook deve ficar intacta, veio status=%s code=%q url=%v", tiq, status, ec, url.Valid)
 		}
 		db.Exec(`DELETE FROM rfb_requests WHERE id = $1`, id)
+	}
+}
+
+// v1 sem resposta: reconsulta a situação E sonda o download a cada 10 min, sem desistir nem tocar na linha.
+func TestPoller_V1SemResposta_Reconsulta10MinESondaDownload(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apuracao-cbs/v2/situacao/"):
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"message":"You cannot consume this service"}`)
+		case strings.HasPrefix(r.URL.Path, "/rtc/download/v1/"):
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprint(w, `{"mensagem":"Tíquete inexistente ou download já realizado"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-v1-sonda", "debito", "v1", 10*time.Minute)
+	p := novoRFBPoller()
+
+	t0 := time.Now()
+	pollarSituacaoRFB(db, p, relogio(t0))
+	pollarSituacaoRFB(db, p, relogio(t0.Add(9*time.Minute))) // ainda dentro dos 10 min
+	pollarSituacaoRFB(db, p, relogio(t0.Add(10*time.Minute)))
+	pollarSituacaoRFB(db, p, relogio(t0.Add(20*time.Minute)))
+
+	if got := fake.count("GET /apuracao-cbs/v2/situacao/"); got != 3 {
+		t.Errorf("esperava 3 consultas de situação (t0, +10, +20), houve %d: %v", got, fake.snapshot())
+	}
+	if got := fake.count("GET /rtc/download/v1/"); got != 3 {
+		t.Errorf("esperava 3 sondas de download v1, houve %d", got)
+	}
+	if status, ec, _, url := readRequest(t, db, id); status != "requested" || ec != "" || url.Valid {
+		t.Errorf("linha deve ficar intacta, veio %s/%s url=%v", status, ec, url.Valid)
+	}
+}
+
+// A sonda recebe o arquivo: processa sem baixar de novo (o tíquete v1 é de uso único).
+func TestPoller_V1SondaRecebeArquivo_ProcessaSemBaixarDeNovo(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	var downloads int
+	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apuracao-cbs/v2/situacao/"):
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"message":"You cannot consume this service"}`)
+		case r.URL.Path == "/rtc/download/v1/tiq-v1-arq":
+			downloads++
+			fmt.Fprint(w, v2DebitoBody)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-v1-arq", "debito", "v1", 10*time.Minute)
+
+	pollarSituacaoRFB(db, novoRFBPoller(), time.Now)
+	waitAsyncSAPSync()
+
+	if status, ec, em, _ := readRequest(t, db, id); status != "completed" {
+		t.Fatalf("esperava completed, veio %s (%s %s)", status, ec, em)
+	}
+	if downloads != 1 {
+		t.Errorf("o tíquete v1 é de uso único: esperava 1 download, houve %d (%v)", downloads, fake.snapshot())
+	}
+}
+
+// Linha v1 cai em PENDENTE (situação responde 200): segue a cadência de 10 min, sem sonda.
+func TestPoller_V1SituacaoRespondeNaoFinal_Cadencia10Min(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"situacao":"PENDENTE"}`)
+	})
+	insertRFBRequestRequested(t, db, companyID, "tiq-v1-pend", "debito", "v1", 10*time.Minute)
+	p := novoRFBPoller()
+
+	t0 := time.Now()
+	pollarSituacaoRFB(db, p, relogio(t0))
+	pollarSituacaoRFB(db, p, relogio(t0.Add(3*time.Minute)))
+	pollarSituacaoRFB(db, p, relogio(t0.Add(10*time.Minute)))
+	if got := fake.count("GET /apuracao-cbs/v2/situacao/"); got != 2 {
+		t.Errorf("v1: consulta em t0 e em +10 min (não em +3), houve %d", got)
+	}
+	if got := fake.count("GET /rtc/download/v1/"); got != 0 {
+		t.Errorf("situação respondeu 200: não precisa sondar o download, houve %d", got)
+	}
+}
+
+// 200 que não é o arquivo (HTML/"processando"): não vira PARSE_ERROR, a linha segue 'requested' e o
+// que veio fica em raw_json (o tíquete de uso único já foi gasto pelo GET).
+func TestPoller_V1SondaCorpoNaoJSON_GuardaEMantemRequested(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apuracao-cbs/v2/situacao/"):
+			w.WriteHeader(http.StatusForbidden)
+			fmt.Fprint(w, `{"message":"You cannot consume this service"}`)
+		case r.URL.Path == "/rtc/download/v1/tiq-v1-html":
+			fmt.Fprint(w, "<html>processando</html>")
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-v1-html", "debito", "v1", 10*time.Minute)
+
+	pollarSituacaoRFB(db, novoRFBPoller(), time.Now)
+
+	status, ec, _, _ := readRequest(t, db, id)
+	var raw sql.NullString
+	db.QueryRow(`SELECT raw_json FROM rfb_requests WHERE id = $1`, id).Scan(&raw)
+	if status != "requested" || ec != "" || raw.String != "<html>processando</html>" {
+		t.Errorf("esperava requested sem erro e raw_json guardado, veio %s/%s raw=%q", status, ec, raw.String)
+	}
+}
+
+// A sonda não gasta o tíquete se o webhook/download manual já assumiu a linha.
+func TestSondarDownloadV1_LinhaJaAssumidaNaoBaixa(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+
+	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, v2DebitoBody) })
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-v1-assumida", "debito", "v1", 10*time.Minute)
+	db.Exec(`UPDATE rfb_requests SET status = 'webhook_received', tiquete_download = 'tdl' WHERE id = $1`, id)
+
+	it := rfbPollItem{id: id, companyID: companyID, tiquete: "tiq-v1-assumida", tipo: "debito", ambiente: "producao", apiVersao: "v1"}
+	sondarDownloadV1(db, novoRFBPoller(), it, NewRFBClient(), "tok")
+
+	if got := fake.count("GET /rtc/download/v1/"); got != 0 {
+		t.Errorf("linha já assumida: não pode baixar (gastaria o tíquete), houve %d GET", got)
+	}
+}
+
+// Com o arquivo já em mãos o processador não exige credencial nem token: não perde o dado.
+func TestProcessarDownloadComArquivo_SemCredencialNemToken(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup() // sem insertRFBCredential de propósito
+	id := insertRFBRequestRequested(t, db, companyID, "tiq-v1-sem-cred", "debito", "v1", 10*time.Minute)
+
+	if err := ProcessarDownloadRFBComArquivo(db, NewRFBClient(), id, []byte(v2DebitoBody)); err != nil {
+		t.Fatalf("com arquivo em mãos não deveria falhar por credencial: %v", err)
+	}
+	waitAsyncSAPSync()
+	if status, ec, em, _ := readRequest(t, db, id); status != "completed" {
+		t.Errorf("esperava completed, veio %s (%s %s)", status, ec, em)
 	}
 }

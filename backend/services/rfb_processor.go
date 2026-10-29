@@ -518,6 +518,16 @@ func aggregateRfbCreditosSQL(tx *sql.Tx, companyID, dataApuracao string) (corren
 // All DB writes (debits + summary) are wrapped in a single transaction to prevent partial imports.
 // An atomic status update prevents two goroutines from processing the same request concurrently.
 func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) error {
+	return processarDownloadRFB(db, rfbClient, requestID, nil)
+}
+
+// ProcessarDownloadRFBComArquivo é ProcessarDownloadRFB para um arquivo que o chamador JÁ baixou (sonda de download v1 do poller):
+// o tíquete de download v1 é de uso único, então o processador não pode baixá-lo de novo.
+func ProcessarDownloadRFBComArquivo(db *sql.DB, rfbClient *RFBClient, requestID string, dados []byte) error {
+	return processarDownloadRFB(db, rfbClient, requestID, dados)
+}
+
+func processarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string, preBaixado []byte) error {
 	log.Printf("[RFB Processor] Starting download processing for request %s", requestID)
 
 	// 1. Fetch request details and company credentials
@@ -540,7 +550,9 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 		SELECT client_id, client_secret FROM rfb_credentials
 		WHERE company_id = $1 AND ativo = true
 	`, companyID).Scan(&clientID, &clientSecret)
-	if err != nil {
+	// Com arquivo já baixado (sonda v1, tíquete de uso único) a credencial só serviria para pedir
+	// token, que não é necessário: não pode ser motivo para descartar o arquivo.
+	if err != nil && len(preBaixado) == 0 {
 		updateRequestError(db, requestID, "CRED_NOT_FOUND", "Credenciais RFB não encontradas ou inativas")
 		return fmt.Errorf("failed to fetch credentials: %w", err)
 	}
@@ -553,6 +565,7 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	rfbClient.SetAPIVersao(apiVersao)
 	dlInput := newRFBDownloadInput(tiquete, apiVersao, tiqueteDownload, urlAssinada, urlExpiraEm)
 	dlInput.OnURLRenovada = persistURLRenovada(db, requestID)
+	dlInput.PreBaixado = preBaixado
 	log.Printf("[RFB Processor] Request %s — api_versao: %s | urlAssinada: %t | tiqueteDownload: %t",
 		requestID, apiVersao, dlInput.URLAssinada != "", dlInput.TiqueteDownload != "")
 
@@ -579,10 +592,13 @@ func ProcessarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string) er
 	}
 
 	// 3. Get fresh OAuth2 token
-	token, err := rfbClient.GetToken(clientID, clientSecret)
-	if err != nil {
-		updateRequestError(db, requestID, "TOKEN_ERROR", err.Error())
-		return fmt.Errorf("failed to get token: %w", err)
+	var token string
+	if len(preBaixado) == 0 {
+		token, err = rfbClient.GetToken(clientID, clientSecret)
+		if err != nil {
+			updateRequestError(db, requestID, "TOKEN_ERROR", err.Error())
+			return fmt.Errorf("failed to get token: %w", err)
+		}
 	}
 
 	// 4. Download the JSON file (single-use ticket!) — helper compartilhado com fallback em camadas

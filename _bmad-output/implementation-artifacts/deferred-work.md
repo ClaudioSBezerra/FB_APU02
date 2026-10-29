@@ -769,3 +769,10 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-gh-21-rfb-webhook-payload-allowlist.md`
   summary: `GetClientIP` (middleware.go) devolve a última entrada do X-Forwarded-For, que atrás do nginx é o IP do proxy interno — rate limit por IP do login provavelmente agrega todos os clientes sob um IP.
   evidence: Inferido de frontend/nginx.conf ($proxy_add_x_forwarded_for) e do log do nginx (origem 10.0.9.6); não confirmado em runtime. Não alterado aqui por afetar o rate limit.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-22-rfb-v1-sonda-10min.md`
+  summary: A sonda do download v1 roda inline no ciclo sequencial do poller e `DownloadArquivo` tem timeout de 15 min: uma chamada pendurada atrasa as consultas de todas as demais solicitações (inclusive v2) no mesmo ciclo.
+  evidence: Edge Case Hunter 29/10; mesmo problema estrutural já adiado em spec-gh-20 (poller sequencial). Resolver junto: sondas em goroutines com guarda por id e timeout curto.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-22-rfb-v1-sonda-10min.md`
+  summary: Falha após o tíquete v1 consumido (arquivo acima do limite, erro de leitura do corpo) é indistinguível de "ainda não pronto": fica só em log, a linha segue `requested` até o TIMEOUT e o arquivo se perde.
+  evidence: Blind/Edge Hunter 29/10; limite inerente do tíquete de uso único da v1. Mitigação possível: tratar RFBErrTooLarge como erro terminal visível na linha.

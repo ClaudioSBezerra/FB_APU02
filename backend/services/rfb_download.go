@@ -365,6 +365,11 @@ type RFBDownloadInput struct {
 	// OnURLRenovada (opcional) é chamada com a URL obtida via situacao ANTES de baixá-la,
 	// para persisti-la (uma nova falha no download não perde a URL ainda válida).
 	OnURLRenovada func(url string, expiraEm *time.Time)
+
+	// PreBaixado é o arquivo que o chamador já baixou (ex.: a sonda de download v1 do poller). O
+	// tíquete de download v1 é de uso único: baixar de novo falharia, então o arquivo é entregue
+	// ao processador e BaixarArquivoRFB o devolve sem chamar a RFB.
+	PreBaixado []byte
 }
 
 // SemFonteDeDownload: não há de onde baixar sem chamar a RFB com um tíquete que sabidamente
@@ -373,7 +378,7 @@ type RFBDownloadInput struct {
 // tentar (situacao). Os processadores checam isto ANTES de marcar a linha como 'downloading',
 // senão o erro do download sobrescreve o error_code verdadeiro (ex.: TIMEOUT).
 func (in RFBDownloadInput) SemFonteDeDownload() bool {
-	return in.APIVersao != RFBAPIVersaoV2 && in.TiqueteDownload == "" && in.URLAssinada == ""
+	return in.APIVersao != RFBAPIVersaoV2 && in.TiqueteDownload == "" && in.URLAssinada == "" && len(in.PreBaixado) == 0
 }
 
 // ErrSemFonteDeDownload é o erro devolvido (sem tocar na linha) quando SemFonteDeDownload.
@@ -391,6 +396,9 @@ func ErrSemFonteDeDownload() *RFBDownloadError {
 //
 // Devolve sempre *RFBDownloadError em caso de falha (Code → error_code).
 func BaixarArquivoRFB(c *RFBClient, token string, in RFBDownloadInput) ([]byte, error) {
+	if len(in.PreBaixado) > 0 {
+		return in.PreBaixado, nil
+	}
 	v2 := in.APIVersao == RFBAPIVersaoV2
 
 	// 1. urlAssinada persistida

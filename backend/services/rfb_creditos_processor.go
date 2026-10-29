@@ -262,6 +262,16 @@ func processV2Creditos(tx *sql.Tx, requestID, companyID string, apuracao RFBCred
 // Espelha ProcessarDownloadRFB: mesma estrutura de grupos, mesma lógica transacional, mesmos logs.
 // Suporta shape v1 (blocos fixos) e v2 (lista plana por período, multi-período) — ver detectRFBShape.
 func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID string) error {
+	return processarDownloadCreditosRFB(db, rfbClient, requestID, nil)
+}
+
+// ProcessarDownloadCreditosRFBComArquivo é ProcessarDownloadCreditosRFB para um arquivo que o chamador JÁ baixou (sonda de download v1 do poller):
+// o tíquete de download v1 é de uso único, então o processador não pode baixá-lo de novo.
+func ProcessarDownloadCreditosRFBComArquivo(db *sql.DB, rfbClient *RFBClient, requestID string, dados []byte) error {
+	return processarDownloadCreditosRFB(db, rfbClient, requestID, dados)
+}
+
+func processarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID string, preBaixado []byte) error {
 	log.Printf("[RFB Creditos] ============================================================")
 	log.Printf("[RFB Creditos] Iniciando download | request: %s", requestID)
 	log.Printf("[RFB Creditos] ============================================================")
@@ -285,7 +295,9 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 		SELECT client_id, client_secret FROM rfb_credentials
 		WHERE company_id = $1 AND ativo = true
 	`, companyID).Scan(&clientID, &clientSecret)
-	if err != nil {
+	// Com arquivo já baixado (sonda v1, tíquete de uso único) a credencial só serviria para pedir
+	// token, que não é necessário: não pode ser motivo para descartar o arquivo.
+	if err != nil && len(preBaixado) == 0 {
 		updateRequestError(db, requestID, "CRED_NOT_FOUND", "Credenciais RFB não encontradas ou inativas")
 		return fmt.Errorf("failed to fetch credentials: %w", err)
 	}
@@ -297,6 +309,7 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 	rfbClient.SetAPIVersao(apiVersao)
 	dlInput := newRFBDownloadInput(tiquete, apiVersao, tiqueteDownload, urlAssinada, urlExpiraEm)
 	dlInput.OnURLRenovada = persistURLRenovada(db, requestID)
+	dlInput.PreBaixado = preBaixado
 	log.Printf("[RFB Creditos] api_versao: %s | urlAssinada: %t | tiqueteDownload: %t",
 		apiVersao, dlInput.URLAssinada != "", dlInput.TiqueteDownload != "")
 
@@ -322,11 +335,14 @@ func ProcessarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 	log.Printf("[RFB Creditos] Status → downloading | cnpjBase: %s | company: %s", cnpjBase, companyID)
 
 	log.Printf("[RFB Creditos] Etapa 1/4: Obtendo token OAuth2...")
-	token, err := rfbClient.GetToken(clientID, clientSecret)
-	if err != nil {
-		log.Printf("[RFB Creditos] ERRO ao obter token: %v", err)
-		updateRequestError(db, requestID, "TOKEN_ERROR", err.Error())
-		return fmt.Errorf("failed to get token: %w", err)
+	var token string
+	if len(preBaixado) == 0 {
+		token, err = rfbClient.GetToken(clientID, clientSecret)
+		if err != nil {
+			log.Printf("[RFB Creditos] ERRO ao obter token: %v", err)
+			updateRequestError(db, requestID, "TOKEN_ERROR", err.Error())
+			return fmt.Errorf("failed to get token: %w", err)
+		}
 	}
 
 	log.Printf("[RFB Creditos] Etapa 2/4: Baixando arquivo JSON (tiquete: %s)...", tiquete)

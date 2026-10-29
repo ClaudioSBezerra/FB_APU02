@@ -111,6 +111,10 @@ type RFBClient struct {
 	// situacao devolve 401 (token invalidado no gateway antes do fim do cache).
 	lastClientID     string
 	lastClientSecret string
+
+	// silencioso suprime os logs por chamada de DownloadArquivo: a sonda de download v1 roda a cada
+	// 10 min por solicitação e já loga por mudança de resposta (rfb_poller.go).
+	silencioso bool
 }
 
 // RFB API response types
@@ -507,7 +511,9 @@ func (c *RFBClient) SolicitarCredito(token, cnpjBase string) (string, error) {
 // O corpo é limitado a rfbMaxDownloadBytes (RFBErrTooLarge se exceder); 200 sem bytes é erro.
 func (c *RFBClient) DownloadArquivo(token, tiquete string) ([]byte, error) {
 	endpoint := c.buildURL(rfbOpDownload, tiquete)
-	log.Printf("[RFB] Downloading assessment file: GET %s (prefix: %s)", endpoint, c.pathPrefix)
+	if !c.silencioso {
+		log.Printf("[RFB] Downloading assessment file: GET %s (prefix: %s)", endpoint, c.pathPrefix)
+	}
 
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
@@ -529,15 +535,17 @@ func (c *RFBClient) DownloadArquivo(token, tiquete string) ([]byte, error) {
 		// Log the response to diagnose gateway vs application errors.
 		// Note: documented responses are 200/400/403/404 — HTTP 401 indicates
 		// gateway-level authentication failure, NOT an application error.
-		log.Printf("[RFB] Download FAILED — HTTP %d | URL: %s | Body: %s | Token (last 8): ...%s",
-			resp.StatusCode, endpoint, body,
-			func() string {
-				if len(token) >= 8 {
-					return token[len(token)-8:]
-				}
-				return token
-			}(),
-		)
+		if !c.silencioso {
+			log.Printf("[RFB] Download FAILED — HTTP %d | URL: %s | Body: %s | Token (last 8): ...%s",
+				resp.StatusCode, endpoint, body,
+				func() string {
+					if len(token) >= 8 {
+						return token[len(token)-8:]
+					}
+					return token
+				}(),
+			)
+		}
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
 			// O gateway usa 401 também para erro de TÍQUETE: "Tíquete inexistente ou download já

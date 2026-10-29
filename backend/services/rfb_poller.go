@@ -2,7 +2,9 @@ package services
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
@@ -37,6 +39,7 @@ func rfbPollIntervalo(idade time.Duration) time.Duration {
 type rfbPollEstado struct {
 	proxima  time.Time
 	desistiu bool
+	ultimo   map[string]string // canal ("situacao"/"download") → última resposta logada
 }
 
 // rfbPoller guarda o backoff em memória (reinicia com o processo — aceitável: a janela é de
@@ -63,7 +66,7 @@ func (p *rfbPoller) devido(id string, agora time.Time) bool {
 	return !e.desistiu && !agora.Before(e.proxima)
 }
 
-func (p *rfbPoller) agendar(id string, agora time.Time, idade time.Duration) {
+func (p *rfbPoller) agendar(id string, agora time.Time, intervalo time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	e := p.estados[id]
@@ -71,7 +74,37 @@ func (p *rfbPoller) agendar(id string, agora time.Time, idade time.Duration) {
 		e = &rfbPollEstado{}
 		p.estados[id] = e
 	}
-	e.proxima = agora.Add(rfbPollIntervalo(idade))
+	e.proxima = agora.Add(intervalo)
+}
+
+// mudou registra a resposta mais recente de um canal da solicitação e informa se ela difere da
+// anterior. Só uma resposta nova (ou a primeira) merece log: repetir a mesma a cada 10 min encheria
+// o log sem informação.
+func (p *rfbPoller) mudou(id, canal, resposta string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.estados[id]
+	if e == nil {
+		e = &rfbPollEstado{}
+		p.estados[id] = e
+	}
+	if e.ultimo == nil {
+		e.ultimo = make(map[string]string)
+	}
+	if anterior, ok := e.ultimo[canal]; ok && anterior == resposta {
+		return false
+	}
+	e.ultimo[canal] = resposta
+	return true
+}
+
+// rfbPollIntervaloPara: v1 (rota legada, sem webhook nem situação confiáveis) consulta a cada 10 min
+// fixos; v2 segue o backoff por idade.
+func rfbPollIntervaloPara(it rfbPollItem, idade time.Duration) time.Duration {
+	if it.apiVersao != RFBAPIVersaoV2 {
+		return 10 * time.Minute
+	}
+	return rfbPollIntervalo(idade)
 }
 
 func (p *rfbPoller) desistir(id string) {
@@ -158,7 +191,8 @@ func pollarSituacaoRFB(db *sql.DB, p *rfbPoller, agora func() time.Time) {
 
 func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 	idade := agora.Sub(it.criadoEm)
-	p.agendar(it.id, agora, idade)
+	intervalo := rfbPollIntervaloPara(it, idade)
+	p.agendar(it.id, agora, intervalo)
 
 	var clientID, clientSecret string
 	if err := db.QueryRow(`
@@ -180,10 +214,14 @@ func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 
 	sit, tok, err := c.consultarSituacao(token, it.tiquete)
 	if err != nil {
-		if rfbPollSemAcesso(err, it, p) {
+		if !rfbPollSemAcesso(err, it, p) {
+			log.Printf("[RFB Poller] request=%s: consulta de situação falhou (nova tentativa em %s): %v", it.id, intervalo, err)
 			return
 		}
-		log.Printf("[RFB Poller] request=%s: consulta de situação falhou (nova tentativa em %s): %v", it.id, rfbPollIntervalo(idade), err)
+		// v2 desistiu (rfbPollSemAcesso); v1 segue tentando: sonda o download legado.
+		if it.apiVersao != RFBAPIVersaoV2 {
+			sondarDownloadV1(db, p, it, c, tok)
+		}
 		return
 	}
 
@@ -195,7 +233,7 @@ func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 			if uerr != nil {
 				var he *RFBHTTPError
 				if errors.As(uerr, &he) && he.Status == http.StatusNotFound {
-					log.Printf("[RFB Poller] request=%s: CONCLUIDA, mas o arquivo ainda não está disponível (404) — nova tentativa em %s", it.id, rfbPollIntervalo(idade))
+					log.Printf("[RFB Poller] request=%s: CONCLUIDA, mas o arquivo ainda não está disponível (404) — nova tentativa em %s", it.id, intervalo)
 					return
 				}
 				if rfbPollSemAcesso(uerr, it, p) {
@@ -214,7 +252,7 @@ func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 		}
 		gravou, werr := gravarURLSeRequested(db, it.id, urlAss, ParseURLExpiraEm(expiraEm))
 		if werr != nil {
-			log.Printf("[RFB Poller] request=%s: falha ao gravar a urlAssinada — nova tentativa em %s: %v", it.id, rfbPollIntervalo(idade), werr)
+			log.Printf("[RFB Poller] request=%s: falha ao gravar a urlAssinada — nova tentativa em %s: %v", it.id, intervalo, werr)
 			return
 		}
 		if !gravou {
@@ -244,14 +282,15 @@ func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 		log.Printf("[RFB Poller] request=%s: situação %s (%s)", it.id, estado, code)
 	default:
 		log.Printf("[RFB Poller] request=%s (%s, api %s): situação %q após %s — nova consulta em %s",
-			it.id, it.tipo, it.apiVersao, estado, idade.Round(time.Second), rfbPollIntervalo(idade))
+			it.id, it.tipo, it.apiVersao, estado, idade.Round(time.Second), intervalo)
 	}
 }
 
 // rfbPollSemAcesso trata 401/403/404 como resultado de diagnóstico (não como falha): o gateway
 // não reconhece o tíquete/rota para esta credencial — p.ex. tíquete da rota legada rtc/v1 na
-// situação v2, ou credencial sem a rota habilitada. Loga UMA vez e para de consultar a linha;
-// a linha em rfb_requests não é alterada. Devolve true quando tratou o erro.
+// situação v2, ou credencial sem a rota habilitada. A linha em rfb_requests não é alterada.
+// v2: loga UMA vez e para de consultar a linha. v1: continua tentando a cada 10 min e loga só
+// quando a resposta muda. Devolve true quando tratou o erro.
 func rfbPollSemAcesso(err error, it rfbPollItem, p *rfbPoller) bool {
 	var he *RFBHTTPError
 	if !errors.As(err, &he) {
@@ -259,13 +298,71 @@ func rfbPollSemAcesso(err error, it rfbPollItem, p *rfbPoller) bool {
 	}
 	switch he.Status {
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-		log.Printf("[RFB Poller] DIAGNÓSTICO request=%s tipo=%s api=%s ambiente=%s: %s devolveu HTTP %d (%s) — "+
-			"o gateway não reconhece este tíquete/rota para esta credencial; deixando de consultar esta solicitação (o webhook segue como atalho)",
-			it.id, it.tipo, it.apiVersao, it.ambiente, he.Op, he.Status, he.Body)
-		p.desistir(it.id)
+		if it.apiVersao == RFBAPIVersaoV2 {
+			log.Printf("[RFB Poller] DIAGNÓSTICO request=%s tipo=%s api=%s ambiente=%s: %s devolveu HTTP %d (%s) — "+
+				"o gateway não reconhece este tíquete/rota para esta credencial; deixando de consultar esta solicitação (o webhook segue como atalho)",
+				it.id, it.tipo, it.apiVersao, it.ambiente, he.Op, he.Status, he.Body)
+			p.desistir(it.id)
+			return true
+		}
+		if p.mudou(it.id, he.Op, fmt.Sprintf("%d|%s", he.Status, TruncateRunes(he.Body, 80))) {
+			log.Printf("[RFB Poller] DIAGNÓSTICO request=%s tipo=%s api=%s ambiente=%s: %s devolveu HTTP %d (%s) — "+
+				"sem acesso por este caminho; segue tentando a cada 10 min e só volta a logar se a resposta mudar",
+				it.id, it.tipo, it.apiVersao, it.ambiente, he.Op, he.Status, he.Body)
+		}
 		return true
 	}
 	return false
+}
+
+// sondarDownloadV1 tenta o download legado GET /{rtc|prr-rtc}/download/v1/{tíquete da solicitação}.
+// É só uma sonda: 401/403/404 e demais erros NUNCA alteram a linha (o fallback antigo foi removido
+// em 174243e porque o erro do download sobrescrevia o TIMEOUT real); só logam quando a resposta
+// muda. O GET consome o tíquete (uso único), então: (1) reconfere a linha imediatamente antes;
+// (2) se vier arquivo, grava o raw_json NA HORA, antes de qualquer outra coisa que possa falhar;
+// (3) só entrega ao processador se for JSON (um 200 que não seja o arquivo não pode virar
+// PARSE_ERROR); (4) o processador usa os bytes recebidos em vez de baixar de novo.
+func sondarDownloadV1(db *sql.DB, p *rfbPoller, it rfbPollItem, c *RFBClient, token string) {
+	var status string
+	var temFonte bool
+	if err := db.QueryRow(`
+		SELECT status, (tiquete_download IS NOT NULL OR url_assinada IS NOT NULL) FROM rfb_requests WHERE id = $1
+	`, it.id).Scan(&status, &temFonte); err != nil || status != "requested" || temFonte {
+		return // o webhook/download manual assumiu: não gastar o tíquete de que eles dependem
+	}
+
+	c.silencioso = true
+	defer func() { c.silencioso = false }()
+	dados, err := c.DownloadArquivo(token, it.tiquete)
+	if err != nil {
+		if p.mudou(it.id, "download", TruncateRunes(err.Error(), 120)) {
+			log.Printf("[RFB Poller] request=%s (%s, api %s): sonda do download v1 sem arquivo: %s — segue tentando a cada 10 min; só loga se a resposta mudar",
+				it.id, it.tipo, it.apiVersao, TruncateRunes(err.Error(), 300))
+		}
+		return
+	}
+
+	// O tíquete já foi consumido: guarda o que veio antes de tudo (reprocessável por "Reprocessar").
+	if _, serr := db.Exec(`UPDATE rfb_requests SET raw_json = COALESCE(raw_json, $1), updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+		string(dados), it.id); serr != nil {
+		log.Printf("[RFB Poller] request=%s: ALERTA: falha ao gravar o raw_json do download v1 (%d bytes): %v", it.id, len(dados), serr)
+	}
+	if !json.Valid(dados) {
+		if p.mudou(it.id, "download", "200-nao-json") {
+			log.Printf("[RFB Poller] request=%s: sonda do download v1 respondeu 200 com corpo que não é JSON (%d bytes) — guardado em raw_json, linha mantida em 'requested'", it.id, len(dados))
+		}
+		return
+	}
+	log.Printf("[RFB Poller] request=%s (%s, api %s): sonda do download v1 devolveu o arquivo (%d bytes) — processando", it.id, it.tipo, it.apiVersao, len(dados))
+	var perr error
+	if it.tipo == "credito" {
+		perr = ProcessarDownloadCreditosRFBComArquivo(db, c, it.id, dados)
+	} else {
+		perr = ProcessarDownloadRFBComArquivo(db, c, it.id, dados)
+	}
+	if perr != nil {
+		log.Printf("[RFB Poller] request=%s: processamento do arquivo da sonda falhou: %v", it.id, perr)
+	}
 }
 
 // gravarURLSeRequested persiste a urlAssinada só se a linha ainda está 'requested': o webhook ou o
