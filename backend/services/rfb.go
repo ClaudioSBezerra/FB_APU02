@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -138,13 +139,36 @@ func (r RFBApuracaoResponse) TiqueteEfetivo() string {
 	return r.Tiquete
 }
 
-// RFBSituacao é a resposta de GET .../v2/situacao/{tiquete}.
+// RFBSituacao é a resposta de GET .../v2/situacao/{tiquete}. O contrato publicado usa o campo
+// "situacao" (PENDENTE | EM_PROCESSAMENTO | CONCLUIDA | ERRO | EXPIRADA) e não traz urlAssinada
+// (ela vem de ObterURLDownload); "estado" e urlAssinada na situação são o formato legado, ainda aceito.
 type RFBSituacao struct {
-	Estado              string `json:"estado"` // PENDENTE | EM_PROCESSAMENTO | CONCLUIDA | ERRO
+	Situacao            string `json:"situacao"`
+	Estado              string `json:"estado"`
 	UrlAssinada         string `json:"urlAssinada"`
 	UrlAssinadaExpiraEm string `json:"urlAssinadaExpiraEm"`
 	CodigoErro          string `json:"codigoErro"`
 	MensagemErro        string `json:"mensagemErro"`
+}
+
+// Efetivo devolve a situação normalizada (maiúscula, sem espaços), preferindo "situacao" a "estado".
+func (s RFBSituacao) Efetivo() string {
+	if v := strings.TrimSpace(s.Situacao); v != "" {
+		return strings.ToUpper(v)
+	}
+	return strings.ToUpper(strings.TrimSpace(s.Estado))
+}
+
+// RFBHTTPError é a resposta não-200 do gateway à situação/download v2. Mantém o status para o
+// poller separar "sem acesso" (401/403/404) de falha transitória (5xx, rede).
+type RFBHTTPError struct {
+	Op     string // "situacao" | "download"
+	Status int
+	Body   string // já truncado; nunca contém urlAssinada
+}
+
+func (e *RFBHTTPError) Error() string {
+	return fmt.Sprintf("%s HTTP %d — %s", e.Op, e.Status, e.Body)
 }
 
 // NewRFBClient creates a new RFB API client from environment variables.
@@ -204,6 +228,7 @@ const (
 	rfbOpSolicitarCredito
 	rfbOpSituacao
 	rfbOpDownload
+	rfbOpDownloadURL // v2: GET .../v2/download/{tiqueteSolicitacao} → urlAssinada
 )
 
 // buildURL é a função única de montagem de URL da API RFB.
@@ -218,7 +243,7 @@ func (c *RFBClient) buildURL(op rfbOp, id string) string {
 	if op == rfbOpDownload {
 		return fmt.Sprintf("%s/%s/download/%s/%s", c.baseURL, c.pathPrefix, rfbAPIVersion, id)
 	}
-	if c.apiVersao == RFBAPIVersaoV2 || op == rfbOpSituacao {
+	if c.apiVersao == RFBAPIVersaoV2 || op == rfbOpSituacao || op == rfbOpDownloadURL {
 		seg := "apuracao-cbs"
 		if c.ambiente == "producao_restrita" {
 			seg = "apuracao-cbs-prr"
@@ -228,6 +253,8 @@ func (c *RFBClient) buildURL(op rfbOp, id string) string {
 			return fmt.Sprintf("%s/%s/v2/creditos/%s", c.baseURL, seg, id)
 		case rfbOpSituacao:
 			return fmt.Sprintf("%s/%s/v2/situacao/%s", c.baseURL, seg, id)
+		case rfbOpDownloadURL:
+			return fmt.Sprintf("%s/%s/v2/download/%s", c.baseURL, seg, id)
 		default:
 			return fmt.Sprintf("%s/%s/v2/debitos/%s", c.baseURL, seg, id)
 		}
@@ -597,15 +624,68 @@ func (c *RFBClient) consultarSituacaoOnce(token, tiquete string) (*RFBSituacao, 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, rfbMaxJSONBodyBytes))
 	if resp.StatusCode != http.StatusOK {
 		// Corpo de erro do gateway RFB (não da URL assinada): truncado, sem urlAssinada.
-		return nil, resp.StatusCode, fmt.Errorf("situacao HTTP %d — %s", resp.StatusCode, rfbTruncBody(string(body)))
+		return nil, resp.StatusCode, &RFBHTTPError{Op: "situacao", Status: resp.StatusCode, Body: rfbTruncBody(string(body))}
 	}
 	var sit RFBSituacao
 	if err := json.Unmarshal(body, &sit); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("failed to parse situacao response: %w", err)
 	}
-	// Não loga o corpo (contém urlAssinada) — só o estado.
-	log.Printf("[RFB] Situação do tíquete %s: %s", tiquete, sit.Estado)
+	// Não loga o corpo (pode conter urlAssinada no formato legado) — só a situação.
+	log.Printf("[RFB] Situação do tíquete %s: %s", tiquete, sit.Efetivo())
 	return &sit, resp.StatusCode, nil
+}
+
+// ObterURLDownload consulta GET .../v2/download/{tiqueteSolicitacao} (com Bearer) e devolve a
+// urlAssinada (e urlAssinadaExpiraEm, quando vier). Só retorna 200 depois de situacao=CONCLUIDA;
+// antes disso o gateway responde 404 ARQUIVO_INDISPONIVEL. Erros não-200 vêm como *RFBHTTPError.
+// Nunca loga a urlAssinada. Em 401 invalida o token em cache e repete UMA vez com token novo
+// (se o client conhece as credenciais), como consultarSituacao.
+func (c *RFBClient) ObterURLDownload(token, tiquete string) (urlAssinada, expiraEm string, err error) {
+	urlAssinada, expiraEm, err = c.obterURLDownloadOnce(token, tiquete)
+	var he *RFBHTTPError
+	if err == nil || !errors.As(err, &he) || he.Status != http.StatusUnauthorized || c.lastClientID == "" {
+		return urlAssinada, expiraEm, err
+	}
+	invalidateCachedToken(token)
+	log.Printf("[RFB] download devolveu 401 — token invalidado, renovando e repetindo 1x")
+	newToken, terr := c.GetToken(c.lastClientID, c.lastClientSecret)
+	if terr != nil {
+		return "", "", fmt.Errorf("%w (renovação do token falhou: %v)", err, terr)
+	}
+	return c.obterURLDownloadOnce(newToken, tiquete)
+}
+
+func (c *RFBClient) obterURLDownloadOnce(token, tiquete string) (urlAssinada, expiraEm string, err error) {
+	endpoint := c.buildURL(rfbOpDownloadURL, tiquete)
+	log.Printf("[RFB] Obtendo urlAssinada: GET %s", endpoint)
+
+	req, rerr := http.NewRequest("GET", endpoint, nil)
+	if rerr != nil {
+		return "", "", fmt.Errorf("failed to create download-url request: %w", rerr)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, derr := c.httpClient.Do(req)
+	if derr != nil {
+		return "", "", fmt.Errorf("download-url request failed: %w", derr)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, rfbMaxJSONBodyBytes))
+	if resp.StatusCode != http.StatusOK {
+		return "", "", &RFBHTTPError{Op: "download", Status: resp.StatusCode, Body: rfbTruncBody(string(body))}
+	}
+	var out struct {
+		UrlAssinada         string `json:"urlAssinada"`
+		UrlAssinadaExpiraEm string `json:"urlAssinadaExpiraEm"`
+	}
+	if jerr := json.Unmarshal(body, &out); jerr != nil {
+		return "", "", fmt.Errorf("failed to parse download-url response: %w", jerr)
+	}
+	if out.UrlAssinada == "" {
+		return "", "", fmt.Errorf("download-url sem urlAssinada na resposta")
+	}
+	return out.UrlAssinada, out.UrlAssinadaExpiraEm, nil
 }
 
 // rfbTruncBody limita um corpo de resposta a 300 runes (UTF-8-safe) para log/erro.

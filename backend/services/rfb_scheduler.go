@@ -324,6 +324,15 @@ func StartRFBScheduler(dbFn func() *sql.DB) {
 		}
 	}()
 
+	// Goroutine separada: consulta a situação das solicitações sem webhook (ver rfb_poller.go)
+	pollTicker := time.NewTicker(rfbPollTick)
+	go func() {
+		defer pollTicker.Stop()
+		for range pollTicker.C {
+			PollarSituacaoRFB(db)
+		}
+	}()
+
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 

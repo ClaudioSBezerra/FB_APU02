@@ -752,3 +752,10 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-gh-18-rfb-download-sem-webhook.md`
   summary: Recuperação manual de uma linha v1 que JÁ tem tiquete_download consumido (uso único) reenvia o download, recebe 401 TICKET_INVALIDO e sobrescreve o erro anterior da linha.
   evidence: Edge Case Hunter 27/10; comportamento anterior à issue #18 (antes virava DOWNLOAD_ERROR), fora do escopo da spec que só trata ausência de tiquete_download.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-20-rfb-polling-situacao.md`
+  summary: Qualquer falha de download (timeout/5xx no S3) em ProcessarDownloadRFB/Creditos vira status 'error' com url_assinada zerada, e o poller só olha 'requested' — falha transitória exige nova solicitação ou recuperação manual.
+  evidence: Blind Hunter 29/10; comportamento pré-existente dos processadores (vale igualmente para o webhook), só ficou mais visível com o poller.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-20-rfb-polling-situacao.md`
+  summary: O poller roda sequencial e processa o download inline: um arquivo grande atrasa as consultas das demais solicitações no mesmo ciclo.
+  evidence: Blind Hunter 29/10; com poucas solicitações simultâneas o efeito é pequeno, e concorrência exigiria controle de limite por empresa.

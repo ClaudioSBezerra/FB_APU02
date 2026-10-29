@@ -419,22 +419,35 @@ func BaixarArquivoRFB(c *RFBClient, token string, in RFBDownloadInput) ([]byte, 
 		sit, tok, err := c.consultarSituacao(token, in.Tiquete)
 		if err == nil {
 			token = tok // pode ter sido renovado por 401
-			estado := strings.ToUpper(strings.TrimSpace(sit.Estado))
+			estado := sit.Efetivo()
 			switch estado {
 			case "CONCLUIDA":
-				if sit.UrlAssinada == "" {
-					situacaoErr = newDownloadErr(RFBErrDownload, "situação CONCLUIDA sem urlAssinada")
+				// Contrato publicado: a urlAssinada vem do endpoint de download; o formato legado
+				// a devolvia na própria situação (ainda aceito).
+				urlSit, expSit := sit.UrlAssinada, sit.UrlAssinadaExpiraEm
+				if urlSit == "" {
+					u, e, uerr := c.ObterURLDownload(token, in.Tiquete)
+					if uerr != nil {
+						var he *RFBHTTPError
+						if errors.As(uerr, &he) && he.Status == http.StatusNotFound {
+							// Não retorna já: segue para o degrau do tíquete de download (v1/webhook).
+							situacaoErr = newDownloadErr(RFBErrNotReady, "situação CONCLUIDA mas o arquivo ainda não está disponível no download: %s", he.Body)
+							break
+						}
+						situacaoErr = newDownloadErr(RFBErrDownload, "obter urlAssinada falhou: %v", uerr)
+						break
+					}
+					urlSit, expSit = u, e
+				}
+				if verr := ValidarURLAssinada(urlSit); verr != nil && !rfbSSRFTestBypass.Load() {
+					situacaoErr = newDownloadErr(RFBErrURLInvalida, "urlAssinada da situação rejeitada: %v (host %s)", verr, hostOfURL(urlSit))
 					break
 				}
-				if verr := ValidarURLAssinada(sit.UrlAssinada); verr != nil && !rfbSSRFTestBypass.Load() {
-					situacaoErr = newDownloadErr(RFBErrURLInvalida, "urlAssinada da situação rejeitada: %v (host %s)", verr, hostOfURL(sit.UrlAssinada))
-					break
-				}
-				exp := ParseURLExpiraEm(sit.UrlAssinadaExpiraEm)
+				exp := ParseURLExpiraEm(expSit)
 				if in.OnURLRenovada != nil {
-					in.OnURLRenovada(sit.UrlAssinada, exp)
+					in.OnURLRenovada(urlSit, exp)
 				}
-				data, derr := DownloadURLAssinada(sit.UrlAssinada)
+				data, derr := DownloadURLAssinada(urlSit)
 				if derr == nil {
 					return data, nil
 				}
@@ -443,10 +456,13 @@ func BaixarArquivoRFB(c *RFBClient, token string, in RFBDownloadInput) ([]byte, 
 					return nil, derr
 				}
 				situacaoErr = derr
-			case "ERRO":
+			case "ERRO", "EXPIRADA":
 				code := TruncateRunes(sit.CodigoErro, 50)
 				if code == "" {
 					code = "RFB_ERRO"
+					if estado == "EXPIRADA" {
+						code = "EXPIRADA"
+					}
 				}
 				return nil, newDownloadErr(code, "%s", TruncateRunes(firstNonEmpty(sit.MensagemErro, "RFB reportou erro no processamento"), 1000))
 			default:
