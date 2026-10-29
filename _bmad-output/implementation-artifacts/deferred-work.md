@@ -759,3 +759,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-gh-20-rfb-polling-situacao.md`
   summary: O poller roda sequencial e processa o download inline: um arquivo grande atrasa as consultas das demais solicitações no mesmo ciclo.
   evidence: Blind Hunter 29/10; com poucas solicitações simultâneas o efeito é pequeno, e concorrência exigiria controle de limite por empresa.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-21-rfb-webhook-payload-allowlist.md`
+  summary: Webhook `CONCLUIDA` (sem dados de download) em linha v2 cujo download ainda devolve 404 vira `error` terminal (NOT_READY → updateRequestError) e o poller, que só olha `requested`, não retenta.
+  evidence: Edge Case Hunter 29/10; mesma semântica pré-existente dos processadores já adiada em spec-gh-20. Resolver junto: tratar NOT_READY como recuperável (voltar a `requested`).
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-21-rfb-webhook-payload-allowlist.md`
+  summary: A allowlist de IP não suporta hops de proxy confiáveis (ex.: Traefik público atrás do Cloudflare); a cadeia da AWS/FC não foi verificada.
+  evidence: Blind Hunter 29/10; só há risco se a variável for preenchida — conferir o log "IP de origem calculado" antes.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-21-rfb-webhook-payload-allowlist.md`
+  summary: `GetClientIP` (middleware.go) devolve a última entrada do X-Forwarded-For, que atrás do nginx é o IP do proxy interno — rate limit por IP do login provavelmente agrega todos os clientes sob um IP.
+  evidence: Inferido de frontend/nginx.conf ($proxy_add_x_forwarded_for) e do log do nginx (origem 10.0.9.6); não confirmado em runtime. Não alterado aqui por afetar o rate limit.

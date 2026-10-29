@@ -635,6 +635,15 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Allowlist de origem (RFB_WEBHOOK_ALLOWED_IPS, opcional): só o POST; o HEAD acima segue
+		// aberto. Antes de ler o corpo: origem não permitida não gasta nem parse.
+		if ok, ip := rfbWebhookOrigemPermitida(r); !ok {
+			log.Printf("[RFB Webhook] POST de origem fora da allowlist recusado: ip=%v (X-Forwarded-For=%q)",
+				ip, services.TruncateRunes(r.Header.Get("X-Forwarded-For"), 200))
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+
 		body, err := io.ReadAll(io.LimitReader(r.Body, webhookMaxBodyBytes))
 		if err != nil {
 			log.Printf("[RFB Webhook] Error reading body: %v", err)
@@ -651,7 +660,7 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 		}
 
 		log.Printf("[RFB Webhook] ===== CALLBACK RECEIVED =====")
-		log.Printf("[RFB Webhook] Method: %s | RemoteAddr: %s", r.Method, r.RemoteAddr)
+		log.Printf("[RFB Webhook] Method: %s | RemoteAddr: %s | IP de origem calculado: %v", r.Method, r.RemoteAddr, webhookClientIP(r))
 		// Headers e corpo NÃO são logados crus: headers carregam Authorization/assinatura/cookie
 		// e o corpo v2 traz a urlAssinada (credencial temporária). Abaixo loga-se o payload
 		// redigido (qualquer valor http(s):// reduzido ao host).
@@ -676,11 +685,23 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 		urlExpiraStr := webhookStringField(payload, "urlAssinadaExpiraEm")
 		codigoErro := webhookStringField(payload, "codigoErro")
 		mensagemErro := webhookStringField(payload, "mensagemErro")
+		// Contrato publicado (guia da RFB): o aviso de sucesso traz só tiqueteSolicitacao +
+		// situacao=CONCLUIDA; o download é obtido depois pelo endpoint de download.
+		situacao := strings.ToUpper(strings.TrimSpace(webhookStringField(payload, "situacao")))
 
 		// Precedência explícita: SUCESSO vence erro. Se o payload trouxer codigoErro/mensagemErro
 		// junto de urlAssinada/tiqueteDownload, trata-se como sucesso (há o que baixar) e loga aviso.
 		temErro := codigoErro != "" || mensagemErro != ""
 		temDownload := urlAssinada != "" || tiqueteDownload != ""
+		// situacao ERRO/EXPIRADA sem codigoErro/mensagemErro continua sendo erro.
+		if !temErro && !temDownload && (situacao == "ERRO" || situacao == "EXPIRADA") {
+			temErro = true
+			if situacao == "EXPIRADA" {
+				codigoErro = "EXPIRADA"
+			}
+		}
+		// Sucesso documentado: CONCLUIDA sem nenhum dado de download no payload.
+		concluidaSemDownload := !temDownload && !temErro && situacao == "CONCLUIDA"
 		if temErro && temDownload {
 			log.Printf("[RFB Webhook] AVISO: payload com codigoErro/mensagemErro E urlAssinada/tiqueteDownload (tiquete %s, codigoErro=%q) — tratado como SUCESSO",
 				tiqueteSolicitacao, services.TruncateRunes(codigoErro, 50))
@@ -741,10 +762,20 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 		log.Printf("[RFB Webhook] tiqueteSolicitacao: %s | tiqueteDownload: %s | urlAssinada: %t",
 			tiqueteSolicitacao, tiqueteDownload, urlAssinada != "")
 
-		if tiqueteSolicitacao == "" || (tiqueteDownload == "" && urlAssinada == "") {
+		if tiqueteSolicitacao == "" || (tiqueteDownload == "" && urlAssinada == "" && situacao == "") {
 			log.Printf("[RFB Webhook] Missing required fields in payload: %s", redactedWebhookBody(payload))
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "missing tiqueteSolicitacao and (tiqueteDownload or urlAssinada)"})
+			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "missing tiqueteSolicitacao and (tiqueteDownload or urlAssinada or situacao)"})
+			return
+		}
+		if !temDownload && !concluidaSemDownload {
+			// situacao presente mas não final (PENDENTE/EM_PROCESSAMENTO/desconhecida): nada a baixar.
+			if situacao != "PENDENTE" && situacao != "EM_PROCESSAMENTO" {
+				log.Printf("[RFB Webhook] AVISO: situacao desconhecida %q (tiqueteSolicitacao %s) — tratada como não final", services.TruncateRunes(situacao, 40), tiqueteSolicitacao)
+			}
+			log.Printf("[RFB Webhook] tiqueteSolicitacao %s com situacao %q sem dados de download — nada a fazer", tiqueteSolicitacao, services.TruncateRunes(situacao, 40))
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "situacao not final"})
 			return
 		}
 
@@ -763,6 +794,16 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("[RFB Webhook] Request not found for tiqueteSolicitacao %s: %v", tiqueteSolicitacao, err)
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "request not found"})
+			return
+		}
+
+		// CONCLUIDA sem dados de download só é útil em linha v2 (BaixarArquivoRFB consulta a situação e o
+		// download). Em linha v1 não há de onde baixar: o processador devolveria NOT_READY e a linha
+		// ficaria presa em 'webhook_received', fora do alcance do poller (que olha 'requested').
+		if concluidaSemDownload && reqApiVersao != services.RFBAPIVersaoV2 {
+			log.Printf("[RFB Webhook] situacao CONCLUIDA sem dados de download em solicitação %s (api_versao=%s) — linha preservada", requestID, reqApiVersao)
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"status": "received", "warning": "CONCLUIDA without download data on a v1 request"})
 			return
 		}
 
@@ -790,7 +831,7 @@ func RFBWebhookHandler(db *sql.DB) http.HandlerFunc {
 			log.Printf("[RFB Webhook] ALERTA DE SEGURANÇA: urlAssinada aceita com RFB_WEBHOOK_SECRET VAZIO — webhook sem HMAC + URL externa permite envenenamento de dados (qualquer um pode apontar o download para um arquivo próprio). Configure RFB_WEBHOOK_SECRET.")
 		}
 
-		if tiqueteDownload == "" && urlAssinada == "" {
+		if tiqueteDownload == "" && urlAssinada == "" && !concluidaSemDownload {
 			// Nada utilizável: só urlAssinada e ela foi descartada.
 			if reqStatus == "requested" || reqStatus == "error" {
 				res, uerr := db.Exec(`

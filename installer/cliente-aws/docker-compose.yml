@@ -31,6 +31,7 @@ services:
       - RFB_API_VERSION_RESTRITA=${RFB_API_VERSION_RESTRITA:-}
       # Segredo HMAC do webhook da RFB (vazio = sem verificação de assinatura, como hoje).
       - RFB_WEBHOOK_SECRET=${RFB_WEBHOOK_SECRET:-}
+      - RFB_WEBHOOK_ALLOWED_IPS=${RFB_WEBHOOK_ALLOWED_IPS:-}
       - IAM_BASE_URL=${IAM_BASE_URL}
       - IAM_ALLOWED_CLIENT_IDS=${IAM_ALLOWED_CLIENT_IDS}
       - IAM_CLIENT_ID=${IAM_CLIENT_ID}
