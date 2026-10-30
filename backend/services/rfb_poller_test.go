@@ -437,8 +437,10 @@ func TestPoller_WebhookConcluiDuranteAConsulta_NaoSobrescreve(t *testing.T) {
 	}
 }
 
-// v1 sem resposta: reconsulta a situação E sonda o download a cada 10 min, sem desistir nem tocar na linha.
-func TestPoller_V1SemResposta_Reconsulta10MinESondaDownload(t *testing.T) {
+// v1 sem resposta: reconsulta a situação a cada 10 min. O 401 "tíquete inexistente" é resposta estável,
+// então a sonda do download espaça para 1 hora (a rota de download é a de um download legítimo e o
+// gateway já devolveu 429 por excesso de sondas). A linha segue intacta o tempo todo.
+func TestPoller_V1SemResposta_SituacaoA10MinESondaDownloadEspacadaApos401(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
 	companyID, cleanup := setupTestCompany(t, db)
@@ -465,15 +467,85 @@ func TestPoller_V1SemResposta_Reconsulta10MinESondaDownload(t *testing.T) {
 	pollarSituacaoRFB(db, p, relogio(t0.Add(9*time.Minute))) // ainda dentro dos 10 min
 	pollarSituacaoRFB(db, p, relogio(t0.Add(10*time.Minute)))
 	pollarSituacaoRFB(db, p, relogio(t0.Add(20*time.Minute)))
-
 	if got := fake.count("GET /apuracao-cbs/v2/situacao/"); got != 3 {
-		t.Errorf("esperava 3 consultas de situação (t0, +10, +20), houve %d: %v", got, fake.snapshot())
+		t.Errorf("situação a cada 10 min: esperava 3 (t0, +10, +20), houve %d: %v", got, fake.snapshot())
 	}
-	if got := fake.count("GET /rtc/download/v1/"); got != 3 {
-		t.Errorf("esperava 3 sondas de download v1, houve %d", got)
+	if got := fake.count("GET /rtc/download/v1/"); got != 1 {
+		t.Errorf("após o 401 de tíquete a sonda espera 1h: esperava 1 em 20 min, houve %d", got)
+	}
+
+	pollarSituacaoRFB(db, p, relogio(t0.Add(61*time.Minute)))
+	if got := fake.count("GET /rtc/download/v1/"); got != 2 {
+		t.Errorf("passada 1h a sonda volta: esperava 2, houve %d", got)
 	}
 	if status, ec, _, url := readRequest(t, db, id); status != "requested" || ec != "" || url.Valid {
 		t.Errorf("linha deve ficar intacta, veio %s/%s url=%v", status, ec, url.Valid)
+	}
+}
+
+// 429 na rota de download: pausa de 1h sem nenhuma chamada nova; depois volta a tentar.
+func TestPoller_V1Sonda429_Pausa1Hora(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apuracao-cbs/v2/situacao/"):
+			w.WriteHeader(http.StatusForbidden)
+		case strings.HasPrefix(r.URL.Path, "/rtc/download/v1/"):
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"message":"API rate limit exceeded"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	insertRFBRequestRequested(t, db, companyID, "tiq-v1-429", "debito", "v1", 10*time.Minute)
+	p := novoRFBPoller()
+
+	t0 := time.Now()
+	for _, m := range []int{0, 10, 20, 30, 50} {
+		pollarSituacaoRFB(db, p, relogio(t0.Add(time.Duration(m)*time.Minute)))
+	}
+	if got := fake.count("GET /rtc/download/v1/"); got != 1 {
+		t.Errorf("429: pausa de 1h, esperava 1 chamada em 50 min, houve %d", got)
+	}
+	pollarSituacaoRFB(db, p, relogio(t0.Add(61*time.Minute)))
+	if got := fake.count("GET /rtc/download/v1/"); got != 2 {
+		t.Errorf("após 1h tenta de novo: esperava 2, houve %d", got)
+	}
+}
+
+// 401 genérico (sem texto de tíquete) e outros erros mantêm a cadência de 10 min.
+func TestPoller_V1SondaErroGenerico_Mantem10Min(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	companyID, cleanup := setupTestCompany(t, db)
+	defer cleanup()
+	insertRFBCredential(t, db, companyID, "producao")
+
+	fake := newV2Fake(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/apuracao-cbs/v2/situacao/"):
+			w.WriteHeader(http.StatusForbidden)
+		case strings.HasPrefix(r.URL.Path, "/rtc/download/v1/"):
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"erro":"indisponível"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	insertRFBRequestRequested(t, db, companyID, "tiq-v1-500", "debito", "v1", 10*time.Minute)
+	p := novoRFBPoller()
+
+	t0 := time.Now()
+	for _, m := range []int{0, 10, 20} {
+		pollarSituacaoRFB(db, p, relogio(t0.Add(time.Duration(m)*time.Minute)))
+	}
+	if got := fake.count("GET /rtc/download/v1/"); got != 3 {
+		t.Errorf("erro genérico: cadência de 10 min, esperava 3 sondas, houve %d", got)
 	}
 }
 
@@ -581,7 +653,7 @@ func TestSondarDownloadV1_LinhaJaAssumidaNaoBaixa(t *testing.T) {
 	db.Exec(`UPDATE rfb_requests SET status = 'webhook_received', tiquete_download = 'tdl' WHERE id = $1`, id)
 
 	it := rfbPollItem{id: id, companyID: companyID, tiquete: "tiq-v1-assumida", tipo: "debito", ambiente: "producao", apiVersao: "v1"}
-	sondarDownloadV1(db, novoRFBPoller(), it, NewRFBClient(), "tok")
+	sondarDownloadV1(db, novoRFBPoller(), it, NewRFBClient(), "tok", time.Now())
 
 	if got := fake.count("GET /rtc/download/v1/"); got != 0 {
 		t.Errorf("linha já assumida: não pode baixar (gastaria o tíquete), houve %d GET", got)

@@ -175,6 +175,15 @@ func (e *RFBHTTPError) Error() string {
 	return fmt.Sprintf("%s HTTP %d — %s", e.Op, e.Status, e.Body)
 }
 
+// rfbStatusError é um erro HTTP não-200 do download com o status preservado (o poller precisa
+// reconhecer o 429). A mensagem é exatamente a de antes: logs e testes dependem dela.
+type rfbStatusError struct {
+	Status int
+	msg    string
+}
+
+func (e *rfbStatusError) Error() string { return e.msg }
+
 // NewRFBClient creates a new RFB API client from environment variables.
 func NewRFBClient() *RFBClient {
 	baseURL := os.Getenv("RFB_API_URL")
@@ -556,13 +565,13 @@ func (c *RFBClient) DownloadArquivo(token, tiquete string) ([]byte, error) {
 				(strings.Contains(lb, "inexistente") || strings.Contains(lb, "já realizado") || strings.Contains(lb, "ja realizado")) {
 				return nil, newDownloadErr(RFBErrTicketInvalido, "HTTP 401 — tíquete inexistente ou já utilizado (na v1 o tíquete é de uso único): %s", body)
 			}
-			return nil, fmt.Errorf("HTTP 401 (gateway auth) — token inválido ou expirado: %s", body)
+			return nil, &rfbStatusError{Status: resp.StatusCode, msg: fmt.Sprintf("HTTP 401 (gateway auth) — token inválido ou expirado: %s", body)}
 		case http.StatusForbidden:
-			return nil, fmt.Errorf("HTTP 403 — CNPJ do consumidor não corresponde ao CNPJ da solicitação: %s", body)
+			return nil, &rfbStatusError{Status: resp.StatusCode, msg: fmt.Sprintf("HTTP 403 — CNPJ do consumidor não corresponde ao CNPJ da solicitação: %s", body)}
 		case http.StatusNotFound:
-			return nil, fmt.Errorf("HTTP 404 — arquivo não encontrado ou tíquete inválido: %s", body)
+			return nil, &rfbStatusError{Status: resp.StatusCode, msg: fmt.Sprintf("HTTP 404 — arquivo não encontrado ou tíquete inválido: %s", body)}
 		default:
-			return nil, fmt.Errorf("HTTP %d — %s", resp.StatusCode, body)
+			return nil, &rfbStatusError{Status: resp.StatusCode, msg: fmt.Sprintf("HTTP %d — %s", resp.StatusCode, body)}
 		}
 	}
 

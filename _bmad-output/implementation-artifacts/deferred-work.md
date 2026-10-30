@@ -776,3 +776,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-gh-22-rfb-v1-sonda-10min.md`
   summary: Falha após o tíquete v1 consumido (arquivo acima do limite, erro de leitura do corpo) é indistinguível de "ainda não pronto": fica só em log, a linha segue `requested` até o TIMEOUT e o arquivo se perde.
   evidence: Blind/Edge Hunter 29/10; limite inerente do tíquete de uso único da v1. Mitigação possível: tratar RFBErrTooLarge como erro terminal visível na linha.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-23-sonda-v1-backoff-429.md`
+  summary: A pausa de 1h da sonda de download v1 após 429 é por solicitação, não por credencial/empresa, e o `Retry-After` é ignorado (`DownloadArquivo` não expõe cabeçalhos); com várias solicitações v1 pendentes cada uma ainda toma o seu 429 e todas acordam juntas.
+  evidence: Blind e Edge Case Hunter 30/10; a spec congelada define "por solicitação" e hoje há ~1 solicitação v1 pendente por empresa/dia. Revisitar se aparecerem 429 repetidos: chavear a pausa por company_id e honrar Retry-After.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-23-sonda-v1-backoff-429.md`
+  summary: Um 401 "tíquete inexistente" pode ser transitório (relatório ainda em geração) e a pausa fixa de 1h atrasaria uma captura que ficou pronta minutos depois; a janela de 240 min dá só ~4 sondas por solicitação.
+  evidence: Blind e Edge Case Hunter 30/10 (inferência, não testado no gateway real); a evidência observada foi de 9 respostas idênticas em 90 min. Alternativa: rampa 10/20/30 min.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-23-sonda-v1-backoff-429.md`
+  summary: Teste TestParseCertificadosAIA_FormatosTolerados é instável (reproduz com -count=30 também no baseline f9de69e, sem as mudanças desta spec).
+  evidence: Reproduzido em 30/10 antes de qualquer alteração em services/nfse_*; já havia uma ocorrência registrada em 27/10.

@@ -40,6 +40,9 @@ type rfbPollEstado struct {
 	proxima  time.Time
 	desistiu bool
 	ultimo   map[string]string // canal ("situacao"/"download") → última resposta logada
+	// proximaSonda: antes deste instante a sonda do download v1 não bate na RFB (401 definitivo
+	// ou 429 espaçam a sonda em 1h; qualquer outra resposta zera e volta aos 10 min).
+	proximaSonda time.Time
 }
 
 // rfbPoller guarda o backoff em memória (reinicia com o processo — aceitável: a janela é de
@@ -96,6 +99,30 @@ func (p *rfbPoller) mudou(id, canal, resposta string) bool {
 	}
 	e.ultimo[canal] = resposta
 	return true
+}
+
+// rfbSondaEspacamento: intervalo da sonda do download v1 depois de uma resposta que não muda
+// (401 de tíquete inexistente) ou de um 429 — a rota de download é a mesma de um download legítimo.
+const rfbSondaEspacamento = time.Hour
+
+// sondaLiberada informa se a sonda do download pode bater na RFB agora.
+func (p *rfbPoller) sondaLiberada(id string, agora time.Time) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.estados[id]
+	return e == nil || !agora.Before(e.proximaSonda)
+}
+
+// definirProximaSonda agenda a próxima sonda; zero = cadência normal (a de 10 min do poller).
+func (p *rfbPoller) definirProximaSonda(id string, ate time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.estados[id]
+	if e == nil {
+		e = &rfbPollEstado{}
+		p.estados[id] = e
+	}
+	e.proximaSonda = ate
 }
 
 // rfbPollIntervaloPara: v1 (rota legada, sem webhook nem situação confiáveis) consulta a cada 10 min
@@ -220,7 +247,7 @@ func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 		}
 		// v2 desistiu (rfbPollSemAcesso); v1 segue tentando: sonda o download legado.
 		if it.apiVersao != RFBAPIVersaoV2 {
-			sondarDownloadV1(db, p, it, c, tok)
+			sondarDownloadV1(db, p, it, c, tok, agora)
 		}
 		return
 	}
@@ -322,7 +349,10 @@ func rfbPollSemAcesso(err error, it rfbPollItem, p *rfbPoller) bool {
 // (2) se vier arquivo, grava o raw_json NA HORA, antes de qualquer outra coisa que possa falhar;
 // (3) só entrega ao processador se for JSON (um 200 que não seja o arquivo não pode virar
 // PARSE_ERROR); (4) o processador usa os bytes recebidos em vez de baixar de novo.
-func sondarDownloadV1(db *sql.DB, p *rfbPoller, it rfbPollItem, c *RFBClient, token string) {
+func sondarDownloadV1(db *sql.DB, p *rfbPoller, it rfbPollItem, c *RFBClient, token string, agora time.Time) {
+	if !p.sondaLiberada(it.id, agora) {
+		return // 401 definitivo ou 429 recentes: espaçando para não gastar a quota da rota de download
+	}
 	var status string
 	var temFonte bool
 	if err := db.QueryRow(`
@@ -335,12 +365,27 @@ func sondarDownloadV1(db *sql.DB, p *rfbPoller, it rfbPollItem, c *RFBClient, to
 	defer func() { c.silencioso = false }()
 	dados, err := c.DownloadArquivo(token, it.tiquete)
 	if err != nil {
+		var de *RFBDownloadError
+		var se *rfbStatusError
+		proxima := "em 10 min"
+		switch {
+		case errors.As(err, &de) && de.Code == RFBErrTicketInvalido:
+			// Resposta estável: repetir a cada 10 min só gasta a quota da rota de download.
+			p.definirProximaSonda(it.id, agora.Add(rfbSondaEspacamento))
+			proxima = "em 1 hora (tíquete inexistente é resposta estável)"
+		case errors.As(err, &se) && se.Status == http.StatusTooManyRequests:
+			p.definirProximaSonda(it.id, agora.Add(rfbSondaEspacamento))
+			proxima = "em 1 hora (429: a rota de download está limitada)"
+		default:
+			p.definirProximaSonda(it.id, time.Time{})
+		}
 		if p.mudou(it.id, "download", TruncateRunes(err.Error(), 120)) {
-			log.Printf("[RFB Poller] request=%s (%s, api %s): sonda do download v1 sem arquivo: %s — segue tentando a cada 10 min; só loga se a resposta mudar",
-				it.id, it.tipo, it.apiVersao, TruncateRunes(err.Error(), 300))
+			log.Printf("[RFB Poller] request=%s (%s, api %s): sonda do download v1 sem arquivo: %s — próxima sonda %s; só loga se a resposta mudar",
+				it.id, it.tipo, it.apiVersao, TruncateRunes(err.Error(), 300), proxima)
 		}
 		return
 	}
+	p.definirProximaSonda(it.id, time.Time{})
 
 	// O tíquete já foi consumido: guarda o que veio antes de tudo (reprocessável por "Reprocessar").
 	if _, serr := db.Exec(`UPDATE rfb_requests SET raw_json = COALESCE(raw_json, $1), updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
