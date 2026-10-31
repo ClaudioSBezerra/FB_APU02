@@ -69,7 +69,11 @@ type RFBCredito struct {
 // apropriação/utilização em vez de apurado/extinto/nãoExtinto simples.
 
 type RFBCreditosV2JSON struct {
-	Apuracao []RFBGrupoApuracaoCreditosV2 `json:"apuracao"`
+	TiqueteSolicitacao FlexString                   `json:"tiqueteSolicitacao"`
+	NI                 FlexString                   `json:"ni"`
+	NIConsumidor       FlexString                   `json:"niConsumidor"`
+	GeradoEm           FlexString                   `json:"geradoEm"`
+	Apuracao           []RFBGrupoApuracaoCreditosV2 `json:"apuracao"`
 }
 
 type RFBGrupoApuracaoCreditosV2 struct {
@@ -372,6 +376,9 @@ func processarDownloadCreditosRFB(db *sql.DB, rfbClient *RFBClient, requestID st
 			log.Printf("[RFB Creditos] ERRO no parse v2: %v", err)
 			updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao interpretar JSON v2 de créditos: "+err.Error())
 			return fmt.Errorf("failed to parse v2 JSON: %w", err)
+		}
+		if !validarArquivoV2(db, "RFB Creditos", requestID, cnpjBase, tiquete, string(creditosV2.NI), string(creditosV2.TiqueteSolicitacao), true) {
+			return fmt.Errorf("NI_DIVERGENTE: arquivo v2 de créditos de outro contribuinte (request %s)", requestID)
 		}
 		log.Printf("[RFB Creditos] JSON v2 interpretado | períodos: %d", len(creditosV2.Apuracao))
 
@@ -709,10 +716,10 @@ func ReprocessarRawJSONCreditosRFB(db *sql.DB, requestID string) error {
 	log.Printf("[RFB Creditos Reprocess] ============================================================")
 	log.Printf("[RFB Creditos Reprocess] Iniciando reprocessamento | request: %s", requestID)
 
-	var companyID string
+	var companyID, cnpjBase, tiquete string
 	var rawJSON *string
-	if err := db.QueryRow(`SELECT company_id, raw_json FROM rfb_requests WHERE id = $1`,
-		requestID).Scan(&companyID, &rawJSON); err != nil {
+	if err := db.QueryRow(`SELECT company_id, cnpj_base, COALESCE(tiquete, ''), raw_json FROM rfb_requests WHERE id = $1`,
+		requestID).Scan(&companyID, &cnpjBase, &tiquete, &rawJSON); err != nil {
 		return fmt.Errorf("failed to fetch request: %w", err)
 	}
 	if rawJSON == nil || *rawJSON == "" {
@@ -743,6 +750,9 @@ func ReprocessarRawJSONCreditosRFB(db *sql.DB, requestID string) error {
 		if err := json.Unmarshal([]byte(*rawJSON), &creditosV2); err != nil {
 			updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao reprocessar JSON v2 de créditos: "+err.Error())
 			return fmt.Errorf("failed to parse v2 JSON: %w", err)
+		}
+		if !validarArquivoV2(db, "RFB Creditos Reprocess", requestID, cnpjBase, tiquete, string(creditosV2.NI), string(creditosV2.TiqueteSolicitacao), false) {
+			return fmt.Errorf("NI_DIVERGENTE: arquivo v2 de créditos de outro contribuinte (request %s)", requestID)
 		}
 	} else {
 		if err := json.Unmarshal([]byte(*rawJSON), &creditos); err != nil {

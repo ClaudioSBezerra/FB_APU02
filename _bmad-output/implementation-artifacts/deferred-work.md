@@ -786,3 +786,10 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-gh-23-sonda-v1-backoff-429.md`
   summary: Teste TestParseCertificadosAIA_FormatosTolerados é instável (reproduz com -count=30 também no baseline f9de69e, sem as mudanças desta spec).
   evidence: Reproduzido em 30/10 antes de qualquer alteração em services/nfse_*; já havia uma ocorrência registrada em 27/10.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-24-rfb-v2-conformidade-doc.md`
+  summary: Reprocessar uma solicitação já importada antes da validação de NI, com arquivo de outro contribuinte, marca NI_DIVERGENTE mas não remove as linhas de rfb_debitos/rfb_creditos nem recalcula rfb_resumo dela.
+  evidence: Blind e Edge Case Hunter 30/10; caso hipotético (nenhum indício de arquivo de outro contribuinte importado). O raw_json fica como evidência e o log alerta; limpeza exigiria apagar linhas e reagregar o resumo por período na mesma transação.
+- source_spec: `_bmad-output/implementation-artifacts/spec-gh-24-rfb-v2-conformidade-doc.md`
+  summary: Arquivos no formato v1 (rota legada) não passam pela validação de NI.
+  evidence: Edge Case Hunter 30/10; a spec não altera o fluxo v1, que está sendo abandonado com a migração para a v2.

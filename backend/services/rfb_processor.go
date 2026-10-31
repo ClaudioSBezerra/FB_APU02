@@ -249,7 +249,12 @@ func bucketTipoApuracaoV2(pa string, registro *time.Time) string {
 // plana agrupada por período (pa), podendo conter MÚLTIPLOS períodos numa única
 // resposta — diferente do v1, que assume 1 dataApuracao por chamada.
 type RFBApuracaoV2JSON struct {
-	Apuracao []RFBGrupoApuracaoV2 `json:"apuracao"`
+	// Raiz em FlexString: um ni/tíquete vindo como número não pode derrubar o parse do arquivo todo.
+	TiqueteSolicitacao FlexString           `json:"tiqueteSolicitacao"`
+	NI                 FlexString           `json:"ni"`           // a doc diz 8 posições; o real vem com 14 (CNPJ completo)
+	NIConsumidor       FlexString           `json:"niConsumidor"` // CPF/CNPJ do detentor da credencial
+	GeradoEm           FlexString           `json:"geradoEm"`
+	Apuracao           []RFBGrupoApuracaoV2 `json:"apuracao"`
 }
 
 type RFBGrupoApuracaoV2 struct {
@@ -272,12 +277,27 @@ type RFBDebitoV2 struct {
 }
 
 type RFBCBSV2Debito struct {
-	Apurado      float64 `json:"apurado"`
-	Excedente    float64 `json:"excedente"`
-	Inexigivel   float64 `json:"inexigivel"`
-	Suspenso     float64 `json:"suspenso"`
-	Extinto      float64 `json:"extinto"`
-	SaldoDevedor float64 `json:"saldoDevedor"`
+	Apurado    float64 `json:"apurado"`
+	Excedente  float64 `json:"excedente"`
+	Inexigivel float64 `json:"inexigivel"`
+	Suspenso   float64 `json:"suspenso"`
+	Extinto    float64 `json:"extinto"`
+	// PgtoAntecipado: parte extinta por pagamento antecipado em nota de débito vinculada (doc v1.2,
+	// 14/10). É extinção: soma ao extinto em adaptDebitoV2.
+	PgtoAntecipado float64 `json:"pgtoAntecipado"`
+	SaldoDevedor   float64 `json:"saldoDevedor"`
+}
+
+// extintoDebitoV2 soma pgtoAntecipado ao extinto (são categorias distintas de extinção na doc v1.2).
+// Guarda: se a soma com o saldo devedor passar do apurado, o extinto da RFB provavelmente já inclui o
+// pagamento antecipado — usa só o extinto e loga, para não contar duas vezes.
+func extintoDebitoV2(item RFBDebitoV2) float64 {
+	c := item.CBS
+	if c.PgtoAntecipado > 0 && c.Extinto+c.PgtoAntecipado+c.SaldoDevedor > c.Apurado+0.01 {
+		log.Printf("[RFB Processor v2] AVISO: chave %s: extinto (%.2f) parece já incluir pgtoAntecipado (%.2f) — usando só o extinto", item.Chave, c.Extinto, c.PgtoAntecipado)
+		return c.Extinto
+	}
+	return c.Extinto + c.PgtoAntecipado
 }
 
 // adaptDebitoV2 converte um item v2 para a struct canônica RFBDebito, para
@@ -288,7 +308,7 @@ type RFBCBSV2Debito struct {
 // Mapeamento monetário (aproximação documentada na spec — Design Notes — a
 // validar com volume real de produção v2):
 //   - valor_cbs_total       = cbs.apurado
-//   - valor_cbs_extinto     = cbs.extinto
+//   - valor_cbs_extinto     = cbs.extinto + cbs.pgtoAntecipado (ambos são extinção)
 //   - valor_cbs_nao_extinto = cbs.saldoDevedor
 func adaptDebitoV2(pa string, item RFBDebitoV2) RFBDebito {
 	origem := item.Origem
@@ -310,7 +330,7 @@ func adaptDebitoV2(pa string, item RFBDebitoV2) RFBDebito {
 		DataDfeEmissao:       item.Emissao,
 		DataApuracao:         pa,
 		ValorCBSTotal:        item.CBS.Apurado,
-		ValorCBSExtinto:      item.CBS.Extinto,
+		ValorCBSExtinto:      extintoDebitoV2(item),
 		ValorCBSNaoExtinto:   saldoDevedor,
 		Origem:               &origem,
 		Documento:            &documento,
@@ -321,6 +341,75 @@ func adaptDebitoV2(pa string, item RFBDebitoV2) RFBDebito {
 		ValorCBSSuspenso:     &suspenso,
 		ValorCBSSaldoDevedor: &saldoDevedor,
 	}
+}
+
+// normalizarRaizCNPJ remove separadores (. / - espaços) e põe em maiúsculas. Não basta manter só
+// dígitos: o CNPJ alfanumérico (a partir de julho/2026) tem letras na raiz de 8 posições.
+func normalizarRaizCNPJ(v string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(v) {
+		if (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// niConfereComCNPJBase compara as 8 primeiras posições do `ni` do arquivo v2 com o CNPJ base da
+// solicitação. A doc diz que `ni` tem 8 posições, mas o arquivo real (30/10) traz o CNPJ completo
+// de 14: aceita os dois. ni ausente = aceito (devolve aviso); menos de 8 posições = divergente.
+func niConfereComCNPJBase(ni, cnpjBase string) (ok bool, aviso string) {
+	if strings.TrimSpace(ni) == "" {
+		return true, "arquivo v2 sem ni na raiz — aceito sem validação de contribuinte"
+	}
+	n, base := normalizarRaizCNPJ(ni), normalizarRaizCNPJ(cnpjBase)
+	if len(n) < 8 || len(base) < 8 {
+		return false, ""
+	}
+	return n[:8] == base[:8], ""
+}
+
+// validarArquivoV2 confere a raiz do arquivo v2 contra a solicitação ANTES de gravar qualquer linha
+// (proteção multi-tenant). Rejeita quando o ni é de outro contribuinte, ou quando o arquivo não tem
+// ni E o tiqueteSolicitacao é de outra solicitação (os dois sinais juntos). Rejeitado: a linha vira
+// error/NI_DIVERGENTE. limparRaw=true (download: nada foi gravado ainda) apaga o raw_json para não
+// guardar dado de outro contribuinte; no reprocessamento (false) o raw_json é a evidência de linhas
+// importadas antes desta validação existir, então fica e o log alerta para revisão.
+func validarArquivoV2(db *sql.DB, contexto, requestID, cnpjBase, tiquete, niArquivo, tiqueteArquivo string, limparRaw bool) bool {
+	tiqueteDiverge := tiqueteArquivo != "" && tiquete != "" && tiqueteArquivo != tiquete
+	if tiqueteDiverge {
+		log.Printf("[%s] AVISO: tiqueteSolicitacao do arquivo (%s) difere do da solicitação %s (%s)", contexto, tiqueteArquivo, requestID, tiquete)
+	}
+	ok, aviso := niConfereComCNPJBase(niArquivo, cnpjBase)
+	motivo := ""
+	switch {
+	case !ok:
+		motivo = fmt.Sprintf("ni do arquivo %q não pertence ao CNPJ base da solicitação %s", TruncateRunes(niArquivo, 20), cnpjBase)
+	case strings.TrimSpace(niArquivo) == "" && tiqueteDiverge:
+		motivo = fmt.Sprintf("arquivo sem ni e com tiqueteSolicitacao %q de outra solicitação", TruncateRunes(tiqueteArquivo, 80))
+	}
+	if motivo == "" {
+		if aviso != "" {
+			log.Printf("[%s] AVISO: request %s: %s", contexto, requestID, aviso)
+		}
+		return true
+	}
+	msg := "Arquivo da RFB não pertence a esta solicitação: " + motivo + " — nada foi gravado"
+	query := `UPDATE rfb_requests SET status = 'error', error_code = 'NI_DIVERGENTE', error_message = $1,
+			raw_json = NULL, url_assinada = NULL, url_assinada_expira_em = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2`
+	if !limparRaw {
+		msg += " neste reprocessamento; linhas importadas antes por esta solicitação devem ser revisadas (raw_json mantido como evidência)"
+		query = `UPDATE rfb_requests SET status = 'error', error_code = 'NI_DIVERGENTE', error_message = $1,
+			updated_at = CURRENT_TIMESTAMP
+		WHERE id = $2`
+		log.Printf("[%s] ALERTA: request %s reprocessada com arquivo de outro contribuinte — revisar rfb_debitos/rfb_creditos já gravados por ela", contexto, requestID)
+	}
+	log.Printf("[%s] NI_DIVERGENTE request %s: %s", contexto, requestID, msg)
+	if _, err := db.Exec(query, msg, requestID); err != nil {
+		log.Printf("[%s] Erro ao gravar NI_DIVERGENTE da solicitação %s: %v", contexto, requestID, err)
+	}
+	return false
 }
 
 // processV2Debitos insere os itens de débito do shape v2 (já parseado) e roda a
@@ -632,6 +721,9 @@ func processarDownloadRFB(db *sql.DB, rfbClient *RFBClient, requestID string, pr
 		if err := json.Unmarshal(rawJSON, &apuracaoV2); err != nil {
 			updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao interpretar JSON v2 da RFB: "+err.Error())
 			return fmt.Errorf("failed to parse v2 JSON: %w", err)
+		}
+		if !validarArquivoV2(db, "RFB Processor", requestID, cnpjBase, tiquete, string(apuracaoV2.NI), string(apuracaoV2.TiqueteSolicitacao), true) {
+			return fmt.Errorf("NI_DIVERGENTE: arquivo v2 de outro contribuinte (request %s)", requestID)
 		}
 
 		tx, err := db.Begin()
@@ -1038,11 +1130,11 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 	log.Printf("[RFB Reprocess] Iniciando reprocessamento | request: %s", requestID)
 	log.Printf("[RFB Reprocess] ============================================================")
 
-	var companyID string
+	var companyID, cnpjBase, tiquete string
 	var rawJSON *string
 	err := db.QueryRow(`
-		SELECT company_id, raw_json FROM rfb_requests WHERE id = $1
-	`, requestID).Scan(&companyID, &rawJSON)
+		SELECT company_id, cnpj_base, COALESCE(tiquete, ''), raw_json FROM rfb_requests WHERE id = $1
+	`, requestID).Scan(&companyID, &cnpjBase, &tiquete, &rawJSON)
 	if err != nil {
 		log.Printf("[RFB Reprocess] ERRO ao buscar request: %v", err)
 		return fmt.Errorf("failed to fetch request: %w", err)
@@ -1081,6 +1173,9 @@ func ReprocessarRawJSON(db *sql.DB, requestID string) error {
 			log.Printf("[RFB Reprocess] ERRO no parse do JSON v2: %v", err)
 			updateRequestError(db, requestID, "PARSE_ERROR", "Falha ao reprocessar JSON v2: "+err.Error())
 			return fmt.Errorf("failed to parse v2 JSON: %w", err)
+		}
+		if !validarArquivoV2(db, "RFB Reprocess", requestID, cnpjBase, tiquete, string(apuracaoV2.NI), string(apuracaoV2.TiqueteSolicitacao), false) {
+			return fmt.Errorf("NI_DIVERGENTE: arquivo v2 de outro contribuinte (request %s)", requestID)
 		}
 		log.Printf("[RFB Reprocess] JSON v2 interpretado | períodos encontrados: %d", len(apuracaoV2.Apuracao))
 	} else {

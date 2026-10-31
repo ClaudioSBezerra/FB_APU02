@@ -112,6 +112,11 @@ type RFBClient struct {
 	lastClientID     string
 	lastClientSecret string
 
+	// UltimoTEASegundos é o tempo estimado de atendimento (tEASegundos) da última abertura aceita
+	// (201) por SolicitarApuracao/SolicitarCredito; nil = sem estimativa (a RFB devolve -1) ou v1.
+	// Campo em vez de retorno para não mudar a assinatura das chamadas de abertura.
+	UltimoTEASegundos *int
+
 	// silencioso suprime os logs por chamada de DownloadArquivo: a sonda de download v1 roda a cada
 	// 10 min por solicitação e já loga por mudança de resposta (rfb_poller.go).
 	silencioso bool
@@ -133,6 +138,22 @@ type RFBApuracaoResponse struct {
 	TEASegundos        json.RawMessage `json:"tEASegundos"`
 	CodigoErro         string          `json:"codigoErro"`
 	MensagemErro       string          `json:"mensagemErro"`
+}
+
+// parseTEASegundos lê o tEASegundos da resposta 201 (número ou string numérica). -1, negativo,
+// acima de 1 dia, ausente ou ilegível = sem estimativa (nil).
+func parseTEASegundos(raw json.RawMessage) *int {
+	t := strings.Trim(strings.TrimSpace(string(raw)), `"`)
+	if t == "" || t == "null" {
+		return nil
+	}
+	n, err := strconv.Atoi(t)
+	// Acima de 1 dia não é estimativa útil (a janela do poller é de 4 h) e não pode estourar a
+	// coluna INTEGER depois do 201 — o tíquete já emitido se perderia.
+	if err != nil || n < 0 || n > 86400 {
+		return nil
+	}
+	return &n
 }
 
 // TiqueteEfetivo devolve o tíquete da solicitação, seja no formato v1 ou v2.
@@ -378,6 +399,7 @@ func (c *RFBClient) GetToken(clientID, clientSecret string) (string, error) {
 // cnpjBase must be 8 digits (company root CNPJ).
 // Returns the tiquete (ticket) for later download.
 func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
+	c.UltimoTEASegundos = nil
 	endpoint := c.buildURL(rfbOpSolicitarDebito, cnpjBase)
 	log.Printf("[RFB] Requesting CBS assessment: POST %s (webhook: %s, api: %s, ambiente: %s)", endpoint, c.webhookURL, c.apiVersao, c.ambiente)
 
@@ -446,6 +468,7 @@ func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
 	}
 
 	tiquete := apuracaoResp.TiqueteEfetivo()
+	c.UltimoTEASegundos = parseTEASegundos(apuracaoResp.TEASegundos)
 	if tiquete == "" {
 		return "", fmt.Errorf("empty tiquete in response")
 	}
@@ -457,6 +480,7 @@ func (c *RFBClient) SolicitarApuracao(token, cnpjBase string) (string, error) {
 // SolicitarCredito sends a CBS credits request to the RFB API (/creditos-cbs/v1/ or /v2/creditos/).
 // cnpjBase must be 8 digits. Returns the tiquete for later download.
 func (c *RFBClient) SolicitarCredito(token, cnpjBase string) (string, error) {
+	c.UltimoTEASegundos = nil
 	endpoint := c.buildURL(rfbOpSolicitarCredito, cnpjBase)
 	log.Printf("[RFB] Requesting CBS credits: POST %s (webhook: %s, api: %s, ambiente: %s)", endpoint, c.webhookURL, c.apiVersao, c.ambiente)
 
@@ -507,6 +531,7 @@ func (c *RFBClient) SolicitarCredito(token, cnpjBase string) (string, error) {
 	}
 
 	tiquete := apuracaoResp.TiqueteEfetivo()
+	c.UltimoTEASegundos = parseTEASegundos(apuracaoResp.TEASegundos)
 	if tiquete == "" {
 		return "", fmt.Errorf("empty tiquete in credits response")
 	}
@@ -632,6 +657,7 @@ func (c *RFBClient) consultarSituacaoOnce(token, tiquete string) (*RFBSituacao, 
 		return nil, 0, fmt.Errorf("failed to create situacao request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

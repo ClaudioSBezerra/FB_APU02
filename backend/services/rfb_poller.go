@@ -24,22 +24,30 @@ const (
 	rfbPollMaxAge = 240 * time.Minute // limite de processamento da RFB (depois vira EXPIRADA)
 )
 
-// rfbPollIntervalo é o backoff por idade da solicitação: consulta mais cedo, espaça depois.
-func rfbPollIntervalo(idade time.Duration) time.Duration {
-	switch {
-	case idade < 30*time.Minute:
-		return 2 * time.Minute
-	case idade < 2*time.Hour:
-		return 5 * time.Minute
-	default:
-		return 10 * time.Minute
+// rfbPrimeiraConsultaV2 é quando a 1ª consulta de situação de uma solicitação v2 pode ocorrer:
+// pela estimativa tEASegundos da RFB (no mínimo rfbPollMinAge, para o webhook chegar antes) ou,
+// sem estimativa (a RFB devolve -1), 5 min após a abertura.
+func rfbPrimeiraConsultaV2(it rfbPollItem) time.Time {
+	espera := 5 * time.Minute
+	if it.teaSegundos != nil {
+		espera = time.Duration(*it.teaSegundos) * time.Second
+		if espera < rfbPollMinAge {
+			espera = rfbPollMinAge
+		}
 	}
+	// Nunca depois da janela do poller (240 min): uma estimativa longa sem webhook deixaria a
+	// solicitação sem nenhuma consulta até o TIMEOUT.
+	if limite := rfbPollMaxAge - 30*time.Minute; espera > limite {
+		espera = limite
+	}
+	return it.criadoEm.Add(espera)
 }
 
 type rfbPollEstado struct {
-	proxima  time.Time
-	desistiu bool
-	ultimo   map[string]string // canal ("situacao"/"download") → última resposta logada
+	proxima   time.Time
+	desistiu  bool
+	consultas int               // consultas de situação já feitas (define o próximo intervalo na v2)
+	ultimo    map[string]string // canal ("situacao"/"download") → última resposta logada
 	// proximaSonda: antes deste instante a sonda do download v1 não bate na RFB (401 definitivo
 	// ou 429 espaçam a sonda em 1h; qualquer outra resposta zera e volta aos 10 min).
 	proximaSonda time.Time
@@ -126,12 +134,43 @@ func (p *rfbPoller) definirProximaSonda(id string, ate time.Time) {
 }
 
 // rfbPollIntervaloPara: v1 (rota legada, sem webhook nem situação confiáveis) consulta a cada 10 min
-// fixos; v2 segue o backoff por idade.
-func rfbPollIntervaloPara(it rfbPollItem, idade time.Duration) time.Duration {
+// fixos; v2 espaça pelo número de consultas já feitas (10, 20 e depois 30 min) — o webhook é o
+// caminho principal e há relatos de 429 na consulta de situação.
+func rfbPollIntervaloPara(it rfbPollItem, consultas int) time.Duration {
 	if it.apiVersao != RFBAPIVersaoV2 {
 		return 10 * time.Minute
 	}
-	return rfbPollIntervalo(idade)
+	switch {
+	case consultas <= 1:
+		return 10 * time.Minute
+	case consultas == 2:
+		return 20 * time.Minute
+	default:
+		return 30 * time.Minute
+	}
+}
+
+// consultasFeitas devolve quantas consultas de situação a RFB já respondeu para a solicitação.
+func (p *rfbPoller) consultasFeitas(id string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e := p.estados[id]; e != nil {
+		return e.consultas
+	}
+	return 0
+}
+
+// registrarConsulta conta mais uma consulta de situação da solicitação e devolve o total.
+func (p *rfbPoller) registrarConsulta(id string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e := p.estados[id]
+	if e == nil {
+		e = &rfbPollEstado{}
+		p.estados[id] = e
+	}
+	e.consultas++
+	return e.consultas
 }
 
 func (p *rfbPoller) desistir(id string) {
@@ -154,6 +193,7 @@ func (p *rfbPoller) podar(ativos map[string]bool) {
 type rfbPollItem struct {
 	id, companyID, tiquete, tipo, ambiente, apiVersao string
 	criadoEm                                          time.Time
+	teaSegundos                                       *int // estimativa da RFB na abertura (v2); nil = sem
 }
 
 // PollarSituacaoRFB roda um ciclo do poller. Chamado pelo scheduler a cada rfbPollTick. Um panic
@@ -172,7 +212,7 @@ func PollarSituacaoRFB(db *sql.DB) {
 func pollarSituacaoRFB(db *sql.DB, p *rfbPoller, agora func() time.Time) {
 	inicio := agora()
 	rows, err := db.Query(`
-		SELECT id, company_id, tiquete, tipo, COALESCE(ambiente, 'producao'), COALESCE(api_versao, 'v1'), created_at
+		SELECT id, company_id, tiquete, tipo, COALESCE(ambiente, 'producao'), COALESCE(api_versao, 'v1'), created_at, tea_segundos
 		FROM rfb_requests
 		WHERE status = 'requested'
 		  AND tiquete IS NOT NULL AND tiquete <> ''
@@ -187,9 +227,14 @@ func pollarSituacaoRFB(db *sql.DB, p *rfbPoller, agora func() time.Time) {
 	var itens []rfbPollItem
 	for rows.Next() {
 		var it rfbPollItem
-		if err := rows.Scan(&it.id, &it.companyID, &it.tiquete, &it.tipo, &it.ambiente, &it.apiVersao, &it.criadoEm); err != nil {
+		var tea sql.NullInt64
+		if err := rows.Scan(&it.id, &it.companyID, &it.tiquete, &it.tipo, &it.ambiente, &it.apiVersao, &it.criadoEm, &tea); err != nil {
 			log.Printf("[RFB Poller] Erro ao ler solicitação pendente: %v", err)
 			continue
+		}
+		if tea.Valid && tea.Int64 >= 0 {
+			v := int(tea.Int64)
+			it.teaSegundos = &v
 		}
 		itens = append(itens, it)
 	}
@@ -209,6 +254,9 @@ func pollarSituacaoRFB(db *sql.DB, p *rfbPoller, agora func() time.Time) {
 
 	for _, it := range itens {
 		agoraItem := agora()
+		if it.apiVersao == RFBAPIVersaoV2 && agoraItem.Before(rfbPrimeiraConsultaV2(it)) {
+			continue // ainda dentro do tempo estimado pela RFB: o webhook deve chegar antes
+		}
 		if !p.devido(it.id, agoraItem) {
 			continue
 		}
@@ -218,7 +266,9 @@ func pollarSituacaoRFB(db *sql.DB, p *rfbPoller, agora func() time.Time) {
 
 func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 	idade := agora.Sub(it.criadoEm)
-	intervalo := rfbPollIntervaloPara(it, idade)
+	// O intervalo considera a consulta que está para ser feita; ela só é CONTADA quando a RFB
+	// responde (falha de token ou de rede não pode espaçar as próximas tentativas).
+	intervalo := rfbPollIntervaloPara(it, p.consultasFeitas(it.id)+1)
 	p.agendar(it.id, agora, intervalo)
 
 	var clientID, clientSecret string
@@ -240,6 +290,10 @@ func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 	}
 
 	sit, tok, err := c.consultarSituacao(token, it.tiquete)
+	var heSit *RFBHTTPError
+	if err == nil || errors.As(err, &heSit) {
+		p.registrarConsulta(it.id) // a RFB respondeu (200 ou status HTTP)
+	}
 	if err != nil {
 		if !rfbPollSemAcesso(err, it, p) {
 			log.Printf("[RFB Poller] request=%s: consulta de situação falhou (nova tentativa em %s): %v", it.id, intervalo, err)
@@ -260,7 +314,9 @@ func pollarUma(db *sql.DB, p *rfbPoller, it rfbPollItem, agora time.Time) {
 			if uerr != nil {
 				var he *RFBHTTPError
 				if errors.As(uerr, &he) && he.Status == http.StatusNotFound {
-					log.Printf("[RFB Poller] request=%s: CONCLUIDA, mas o arquivo ainda não está disponível (404) — nova tentativa em %s", it.id, intervalo)
+					// Concluída: o arquivo deve sair logo — retentativa curta, sem o espaçamento da situação.
+					p.agendar(it.id, agora, rfbPollTick)
+					log.Printf("[RFB Poller] request=%s: CONCLUIDA, mas o arquivo ainda não está disponível (404) — nova tentativa em %s", it.id, rfbPollTick)
 					return
 				}
 				if rfbPollSemAcesso(uerr, it, p) {

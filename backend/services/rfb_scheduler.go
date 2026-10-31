@@ -182,10 +182,10 @@ func SolicitarApuracaoParaEmpresa(db *sql.DB, companyID string, limiteDiario int
 	// 7. Persistir registro da solicitação
 	var requestID string
 	err = db.QueryRow(`
-		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, ambiente, api_versao)
-		VALUES ($1, $2, $3, 'requested', $4, $5)
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, ambiente, api_versao, tea_segundos)
+		VALUES ($1, $2, $3, 'requested', $4, $5, $6)
 		RETURNING id
-	`, companyID, cnpjBase, tiquete, ambiente, apiVersao).Scan(&requestID)
+	`, companyID, cnpjBase, tiquete, ambiente, apiVersao, rfbClient.UltimoTEASegundos).Scan(&requestID)
 	if err != nil {
 		return fmt.Errorf("erro ao salvar solicitação: %w", err)
 	}
@@ -280,10 +280,10 @@ func SolicitarCreditoParaEmpresa(db *sql.DB, companyID string) error {
 
 	var requestID string
 	err = db.QueryRow(`
-		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo, ambiente, api_versao)
-		VALUES ($1, $2, $3, 'requested', 'credito', $4, $5)
+		INSERT INTO rfb_requests (company_id, cnpj_base, tiquete, status, tipo, ambiente, api_versao, tea_segundos)
+		VALUES ($1, $2, $3, 'requested', 'credito', $4, $5, $6)
 		RETURNING id
-	`, companyID, cnpjBase, tiquete, ambiente, apiVersao).Scan(&requestID)
+	`, companyID, cnpjBase, tiquete, ambiente, apiVersao, rfbClient.UltimoTEASegundos).Scan(&requestID)
 	if err != nil {
 		return fmt.Errorf("erro ao salvar solicitação de créditos: %w", err)
 	}

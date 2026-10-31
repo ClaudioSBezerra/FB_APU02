@@ -107,17 +107,12 @@ func TestBaixar_ContratoPublicado(t *testing.T) {
 }
 
 func TestRFBPoller_BackoffEEstado(t *testing.T) {
-	if rfbPollIntervalo(10*time.Minute) != 2*time.Minute ||
-		rfbPollIntervalo(time.Hour) != 5*time.Minute ||
-		rfbPollIntervalo(3*time.Hour) != 10*time.Minute {
-		t.Errorf("backoff por idade inesperado")
-	}
 	p := novoRFBPoller()
 	t0 := time.Now()
 	if !p.devido("a", t0) {
 		t.Errorf("solicitação nova deve estar devida")
 	}
-	p.agendar("a", t0, rfbPollIntervalo(10*time.Minute))
+	p.agendar("a", t0, 2*time.Minute)
 	if p.devido("a", t0.Add(time.Minute)) || !p.devido("a", t0.Add(2*time.Minute)) {
 		t.Errorf("agendada para +2 min: não devida em +1, devida em +2")
 	}
@@ -170,12 +165,73 @@ func TestRFBPoller_LogSoQuandoARespostaMuda(t *testing.T) {
 }
 
 func TestRFBPollIntervaloPara(t *testing.T) {
-	if rfbPollIntervaloPara(rfbPollItem{apiVersao: "v1"}, time.Minute) != 10*time.Minute ||
-		rfbPollIntervaloPara(rfbPollItem{apiVersao: "v1"}, 3*time.Hour) != 10*time.Minute {
-		t.Errorf("v1: 10 min fixos")
+	v1, v2 := rfbPollItem{apiVersao: "v1"}, rfbPollItem{apiVersao: "v2"}
+	for _, n := range []int{1, 2, 5} {
+		if rfbPollIntervaloPara(v1, n) != 10*time.Minute {
+			t.Errorf("v1: 10 min fixos (consulta %d)", n)
+		}
 	}
-	if rfbPollIntervaloPara(rfbPollItem{apiVersao: "v2"}, time.Minute) != 2*time.Minute {
-		t.Errorf("v2: backoff por idade")
+	casos := map[int]time.Duration{1: 10 * time.Minute, 2: 20 * time.Minute, 3: 30 * time.Minute, 7: 30 * time.Minute}
+	for n, want := range casos {
+		if got := rfbPollIntervaloPara(v2, n); got != want {
+			t.Errorf("v2 após %d consulta(s): esperava %s, veio %s", n, want, got)
+		}
+	}
+}
+
+func TestRFBPrimeiraConsultaV2(t *testing.T) {
+	t0 := time.Date(2026, 10, 30, 20, 45, 0, 0, time.UTC)
+	seg := func(n int) *int { return &n }
+	casos := []struct {
+		nome string
+		tea  *int
+		want time.Duration
+	}{
+		{"sem estimativa (-1 vira nil)", nil, 5 * time.Minute},
+		{"estimativa curta respeita o mínimo", seg(30), rfbPollMinAge},
+		{"estimativa longa", seg(600), 10 * time.Minute},
+		{"estimativa além da janela fica em 210 min", seg(20000), rfbPollMaxAge - 30*time.Minute},
+	}
+	for _, c := range casos {
+		if got := rfbPrimeiraConsultaV2(rfbPollItem{criadoEm: t0, teaSegundos: c.tea}); !got.Equal(t0.Add(c.want)) {
+			t.Errorf("%s: esperava +%s, veio %s", c.nome, c.want, got.Sub(t0))
+		}
+	}
+}
+
+func TestParseTEASegundos(t *testing.T) {
+	casos := map[string]int{`120`: 120, `"90"`: 90, `0`: 0}
+	for raw, want := range casos {
+		if got := parseTEASegundos([]byte(raw)); got == nil || *got != want {
+			t.Errorf("%s: esperava %d, veio %v", raw, want, got)
+		}
+	}
+	for _, raw := range []string{`-1`, ``, `null`, `"abc"`, `-30`, `86401`, `99999999999`} {
+		if got := parseTEASegundos([]byte(raw)); got != nil {
+			t.Errorf("%q: sem estimativa deveria ser nil, veio %d", raw, *got)
+		}
+	}
+}
+
+func TestNIConfereComCNPJBase(t *testing.T) {
+	casos := []struct {
+		ni, base string
+		ok       bool
+	}{
+		{"38149716000128", "38149716", true}, // real (30/10): CNPJ completo
+		{"38149716", "38149716", true},       // como a doc descreve
+		{"38.149.716/0001-28", "38149716", true},
+		{"11111111000199", "38149716", false},
+		{"3814", "38149716", false},
+		{"", "38149716", true},                   // ausente: aceito com aviso
+		{"AB12CD34000155", "AB12CD34", true},     // CNPJ alfanumérico (jul/2026)
+		{"ab.12c.d34/0001-55", "AB12CD34", true}, // formatado e minúsculo
+		{"AB12CD35000155", "AB12CD34", false},
+	}
+	for _, c := range casos {
+		if ok, _ := niConfereComCNPJBase(c.ni, c.base); ok != c.ok {
+			t.Errorf("ni %q x base %q: esperava %v, veio %v", c.ni, c.base, c.ok, ok)
+		}
 	}
 }
 
@@ -271,11 +327,11 @@ func TestPoller_EmAndamentoRespeitaBackoff(t *testing.T) {
 
 	agora := time.Now()
 	pollarSituacaoRFB(db, p, relogio(agora))
-	pollarSituacaoRFB(db, p, relogio(agora.Add(time.Minute))) // ainda dentro do backoff de 2 min
+	pollarSituacaoRFB(db, p, relogio(agora.Add(3*time.Minute))) // ainda dentro dos 10 min após a 1ª consulta v2
 	if got := fake.count("GET /apuracao-cbs/v2/situacao/"); got != 1 {
-		t.Errorf("dentro do backoff não consulta de novo, consultou %d", got)
+		t.Errorf("v2: dentro dos 10 min após a 1ª consulta não consulta de novo, consultou %d", got)
 	}
-	pollarSituacaoRFB(db, p, relogio(agora.Add(3*time.Minute)))
+	pollarSituacaoRFB(db, p, relogio(agora.Add(10*time.Minute)))
 	if got := fake.count("GET /apuracao-cbs/v2/situacao/"); got != 2 {
 		t.Errorf("após o backoff deve consultar de novo, consultou %d", got)
 	}
@@ -323,7 +379,7 @@ func TestPoller_ConcluidaMasDownload404Reagenda(t *testing.T) {
 
 	agora := time.Now()
 	pollarSituacaoRFB(db, p, relogio(agora))
-	pollarSituacaoRFB(db, p, relogio(agora.Add(3*time.Minute)))
+	pollarSituacaoRFB(db, p, relogio(agora.Add(10*time.Minute)))
 
 	if got := fake.count("GET /apuracao-cbs/v2/situacao/"); got != 2 {
 		t.Errorf("download 404 não é definitivo: deve reconsultar, consultou %d", got)
